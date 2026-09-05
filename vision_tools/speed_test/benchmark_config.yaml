@@ -1,0 +1,182 @@
+# 通用 PyTorch 视觉模型测速配置
+#
+# 日常只需要修改本文件；代码入口可以直接在 PyCharm 中运行。
+# 所有相对路径都相对于 project.root 解析。
+
+project:
+  # 你的 PyCharm 项目根目录。
+  root: /home/xyzkioo/PycharmProjects/lichiflower
+
+  # 本地 Ultralytics 源码目录。相对路径会按 project.root 解析。
+  # 如果只使用 pip 安装的 ultralytics，也可以删除这一项。
+  ultralytics_repo: ultralytics
+
+  # 其他自定义模型、模块或 adapter 所在目录，可填写多个路径。
+  python_paths: []
+
+run:
+  # 每次入口调用自动创建一个新的 runs-profile/runN 目录，避免覆盖旧结果。
+  # run_all.py 的 PyTorch、TensorRT、一致性三个阶段会共用同一个 runN。
+  enabled: true
+
+  # 运行目录的父目录；相对路径按 project.root 解析。
+  root: runs-profile
+
+  # auto 自动选择下一个空闲目录：run1、run2、run3……
+  # 也可以写 run20260905 这类自定义名称，但已存在时会拒绝覆盖。
+  name: auto
+
+models:
+  # 可以配置多个模型；enabled: false 表示暂时跳过该模型。
+  - name: yolo26s                    # 输出 CSV 中显示的模型名称
+    weights: GoodModel/lycheeflo.pt  # 权重文件，相对 project.root
+    adapter: ultralytics              # ultralytics / checkpoint / 自定义 adapter.py
+    task: detect                      # detect / segment / pose / classify 等
+    enabled: true
+
+  # 自定义 PyTorch 模型示例：复制 adapters/vision_adapter_template.py 后修改 adapter。
+  # - name: my_classifier
+  #   weights: weights/classifier.pth
+  #   adapter: adapters/classifier_adapter.py
+  #   task: classify
+  #   enabled: false
+
+benchmark:
+  # 可选的真实图片；用于 adapter_pipeline 测试。只测纯模型调用时可留空。
+  image: test.jpg
+
+  # auto 自动选择 CUDA；也可写 cpu、cuda:0 或 0。
+  device: auto
+
+  # 模型输入尺寸，格式为 [height, width]。
+  input_size: [832, 832]
+
+  # 每次模型调用的样本数。
+  batch_size: 1
+
+  # 正式计时前的预热次数；用于排除首次加载、缓存和算法选择开销。
+  warmup: 30
+
+  # 正式计时次数；次数越多，统计越稳定，但运行时间越长。
+  repeats: 100
+
+  # 检测类 pipeline 使用的置信度、NMS IoU 和最大检测数量。
+  conf: 0.25
+  iou: 0.70
+  max_det: 300
+
+  # 如果模型提供 fuse()，是否在测速前融合 Conv/BN 等层。
+  fuse_model: false
+
+  # 启动测速前检查权重外层结构：完整模型、model/ema checkpoint 或 state_dict。
+  inspect_checkpoint: true
+
+  # 是否用上面 models.adapter 在 CPU 上实际加载一次；这是更严格的可恢复性检查。
+  verify_model_load: true
+
+  # 检查失败时是否立即终止。false 会先打印诊断，再进入正式测速。
+  fail_on_checkpoint_inspection: false
+
+pytorch:
+  # 是否启用 PyTorch 后端。
+  enabled: true
+
+  # CUDA 可选 fp32、fp16、bf16；CPU 会自动跳过 fp16。
+  precisions: [fp32, fp16]
+
+  # 是否执行纯模型调用；输入已在设备上，不含预处理和后处理。
+  test_model_call: true
+
+  # 是否执行 adapter pipeline；具体是否包含预处理/后处理由 adapter 决定。
+  test_pipeline: true
+
+  # PyTorch 明细 CSV 输出路径。启用 run 后会归档到 runN；保留旧写法
+  # runs-profile/... 也可以，程序会自动去掉这层前缀。
+  output: runs-profile/vision_speed_v2.csv
+
+tensorrt:
+  # 是否启用 TensorRT 后端。
+  enabled: true
+
+  # TensorRT 精度：fp16、fp32 或 bf16（取决于硬件和 TensorRT 支持）。
+  precision: fp16
+
+  # run_all 已测试 PyTorch，默认不重复；单独运行 TensorRT 入口要对比时再开启。
+  test_pytorch: false
+  # 这里仅指额外的 PyTorch pipeline，不是 TensorRT 图片 pipeline。
+  # test_pytorch: false 时此项也不执行。
+  test_pipeline: false
+
+  # true 强制重新导出 ONNX 并构建 engine；false 时尽量复用已有 engine。
+  rebuild_engine: false
+
+  # ONNX 导出算子集版本。
+  onnx_opset: 17
+
+  # trtexec 构建 engine 时允许使用的工作空间大小，单位 MB。
+  workspace_mb: 2048
+
+  # trtexec 可执行文件；写文件名表示从 PATH 查找，也可写绝对路径。
+  trtexec: trtexec
+
+  # ONNX 和 TensorRT engine 公共缓存目录；不随 runN 搬迁，便于
+  # rebuild_engine: false 时复用已有文件。需要时可手动指定绝对路径。
+  engine_dir: runs-profile/engines
+  onnx_dir: runs-profile/onnx
+
+  # TensorRT 明细 CSV 输出路径；启用 run 后会归档到 runN。
+  output: runs-profile/vision_tensorrt_v2.csv
+
+consistency:
+  # run_all 中是否执行一致性检查；独立运行 check_consistency.py 则始终执行。
+  enabled: true
+
+  # image：真实图片；内置支持 Ultralytics detect，其他模型需要 adapter 预处理。
+  # adapter：使用 make_validation_inputs / make_inputs 的示例输入，可能为随机张量。
+  input_mode: image
+  # 图片或图片目录；null 沿用 benchmark.image，相对路径按 project.root 解析。
+  source: null
+  max_images: 10                 # 目录模式最多读取多少张不同图片；单图不会重复假装多图
+  seed: 0                       # adapter 示例输入的随机种子（adapter 自带种子时以其为准）
+
+  # same：参考 PyTorch 与 TensorRT 的配置精度相同，侧重转换差异。
+  # fp32：以 PyTorch FP32 为参考，同时观察低精度模型相对 FP32 的差异。
+  # 两边共用已准备的输入值；fp32 参考不会重新做一次图片预处理。
+  reference_precision: same
+
+  # 逐元素检查：abs(TRT-PyTorch) <= atol + rtol * abs(PyTorch)。
+  # 这是初始诊断容差，不是所有模型的准确率保证；不要只为通过而放宽。
+  # 整数/布尔输出严格相等，NaN/Inf 或形状不一致直接失败。
+  atol: 0.001
+  rtol: 0.01
+
+  # auto：仅对 Ultralytics 端到端 detect 额外匹配框；其他模型只比较张量。
+  # none：不做框匹配；xyxy6：明确指定输出是 [B,N,6] 的 xyxy/conf/class。
+  detection_mode: auto
+  detection_output: null        # null 表示 ONNX 第一个输出；自定义导出可填写输出名称
+  detection_conf: 0.25          # 仅匹配超过此阈值的框；两边都无框时标记证据不足
+  detection_iou: 0.95           # 同类别框匹配所需的最低 IoU，不是 NMS 阈值
+  score_atol: 0.01              # 匹配框的最大置信度绝对差
+
+  # 默认按 ONNX 图输入顺序对应 adapter 的扁平 Tensor 顺序；
+  # 自定义多输入若顺序不同，在这里按 adapter 顺序写全所有 ONNX 输入名。
+  input_names: []
+
+  # 与速度 CSV 分开：记录每个案例、每个输出误差、框匹配和失败原因；
+  # 启用 run 后会归档到当前 runN。
+  output: runs-profile/consistency.csv
+  json_output: runs-profile/consistency.json
+
+run_all:
+  # run_all.py 一键运行时，是否执行 PyTorch 后端。
+  run_pytorch: true
+
+  # run_all.py 一键运行时，是否执行 TensorRT 后端。
+  run_tensorrt: true
+
+  # 在测速之后做正确性检查，只各执行必要的推理，不重复测速。
+  # 本次 TensorRT 阶段失败时会跳过，避免把遗留旧 engine 当作新结果。
+  run_consistency: true
+
+  # 两个后端的结果汇总 CSV；启用 run 后会归档到当前 runN。
+  summary_output: runs-profile/vision_benchmark_summary.csv
