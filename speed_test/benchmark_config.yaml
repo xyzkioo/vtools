@@ -5,7 +5,7 @@
 
 project:
   # 你的 PyCharm 项目根目录。
-  root: /home/xyzkioo/PycharmProjects/lichiflower
+  root: ../..
 
   # 本地 Ultralytics 源码目录。相对路径会按 project.root 解析。
   # 如果只使用 pip 安装的 ultralytics，也可以删除这一项。
@@ -20,7 +20,7 @@ run:
   enabled: true
 
   # 运行目录的父目录；相对路径按 project.root 解析。
-  root: runs-profile
+  root: ./vtools/speed_test/runs
 
   # auto 自动选择下一个空闲目录：run1、run2、run3……
   # 也可以写 run20260905 这类自定义名称，但已存在时会拒绝覆盖。
