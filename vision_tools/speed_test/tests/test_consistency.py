@@ -3,6 +3,7 @@
 import csv
 import importlib.util
 import json
+import os
 import sys
 import subprocess
 import tempfile
@@ -20,6 +21,7 @@ from checks.vision_consistency import _sources, save_reports
 from core.vision_benchmark_config import load_config
 from run_all import _invoke, _merge_results, main as run_all_main
 from core.vision_run_manager import prepare_run_directory
+from core.vision_runtime import _with_library_dir
 
 
 class TensorTests(unittest.TestCase):
@@ -91,6 +93,27 @@ class DetectionTests(unittest.TestCase):
         raw = compare_array(self.a, b, atol=.001, rtol=.01)
         self.assertEqual(combine_status([raw], r), "warning")
 
+    def test_detection_only_uses_task_output_for_acceptance(self):
+        b = self.a[:, ::-1, :].copy()
+        detection = self.compare(self.a, b)
+        raw = compare_array(self.a, b, atol=.001, rtol=.01)
+        self.assertEqual(raw["status"], "failed")
+        self.assertEqual(
+            combine_status([raw], detection, acceptance_mode="detection_only"),
+            "passed",
+        )
+
+    def test_detection_only_does_not_hide_hard_tensor_error(self):
+        detection = self.compare(self.a, self.a)
+        self.assertEqual(
+            combine_status(
+                [{"status": "failed", "reason": "shape_mismatch"}],
+                detection,
+                acceptance_mode="detection_only",
+            ),
+            "failed",
+        )
+
     def test_class_error_and_score_error_fail(self):
         for column, value in ((5, 2.), (4, .4), (0, 4.)):
             b = self.a.copy()
@@ -136,6 +159,21 @@ class DetectionTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_conda_library_path_is_prepended_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            conda_lib = root / "conda" / "lib"
+            other = root / "other"
+            conda_lib.mkdir(parents=True)
+            other.mkdir()
+            environment = _with_library_dir(
+                {"LD_LIBRARY_PATH": os.pathsep.join([str(other), str(conda_lib), str(other)])},
+                conda_lib,
+            )
+            parts = environment["LD_LIBRARY_PATH"].split(os.pathsep)
+            self.assertEqual(parts[0], str(conda_lib.resolve()))
+            self.assertEqual(sum(Path(item).resolve() == conda_lib.resolve() for item in parts), 1)
+
     def test_cli_dependency_failure_returns_error_report(self):
         if importlib.util.find_spec("torch") is not None:
             self.skipTest("本测试针对无 torch 的环境；CUDA 实测另行执行")

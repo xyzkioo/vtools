@@ -331,6 +331,9 @@ class BaseAdapter:
             raise TypeError("当前 adapter 没有提供可导出的 nn.Module")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         wrapper = _TupleOutputWrapper(export_model)
+        # wrapper 本身默认处于 train 模式；显式 eval，避免 exporter 误报并保证
+        # BatchNorm/Dropout 等层与测速时的推理状态一致。
+        wrapper.eval()
         input_names = [f"input_{index}" for index in range(len(inputs.args))]
         try:
             torch.onnx.export(

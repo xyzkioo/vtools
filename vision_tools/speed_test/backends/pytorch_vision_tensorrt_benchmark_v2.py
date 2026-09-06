@@ -10,7 +10,7 @@
 需要：
     pip install onnx onnxruntime-gpu   # 仅用于验证/可选
     TensorRT Python bindings
-    trtexec                         # 仅在需要自动构建 engine 时
+    trtexec                         # 可选；builder: python 不需要
 
 示例：
 
@@ -29,8 +29,6 @@ import argparse
 import csv
 import gc
 import platform
-import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -63,6 +61,7 @@ from core.vision_benchmark_common import (
 from core.vision_benchmark_config import apply_python_paths, get_model_entries, load_config
 from core.vision_checkpoint_inspector import inspect_entries
 from core.vision_run_manager import prepare_run_directory, resolve_cli_path
+from backends.tensorrt_engine_builder import build_engine_from_onnx
 
 
 def parse_input_size(value: str) -> tuple[int, int]:
@@ -110,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--engine-dir", type=Path, default=None)
     parser.add_argument("--onnx-dir", type=Path, default=None)
     parser.add_argument("--rebuild-engine", action="store_true")
+    parser.add_argument(
+        "--builder",
+        choices=["python", "trtexec", "auto"],
+        default=None,
+        help="engine 构建方式；python 使用 TensorRT Python API，默认 python",
+    )
     parser.add_argument("--trtexec", default=None, help="trtexec 可执行文件路径")
     parser.add_argument("--workspace-mb", type=int, default=None)
     parser.add_argument("--opset", type=int, default=None)
@@ -292,44 +297,6 @@ class TensorRTRunner:
         return tuple(outputs)
 
 
-def build_engine_with_trtexec(
-    onnx_path: Path,
-    engine_path: Path,
-    trtexec: str,
-    precision: str,
-    workspace_mb: int,
-) -> None:
-    executable = shutil.which(trtexec) or (trtexec if Path(trtexec).is_file() else None)
-    if executable is None:
-        raise FileNotFoundError(
-            f"找不到 trtexec：{trtexec}。请手工构建 engine，或通过 --trtexec 指定路径。"
-        )
-    engine_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [
-        executable,
-        f"--onnx={onnx_path}",
-        f"--saveEngine={engine_path}",
-        f"--memPoolSize=workspace:{workspace_mb}",
-        "--skipInference",
-    ]
-    if precision == "fp16":
-        command.append("--fp16")
-    elif precision == "bf16":
-        command.append("--bf16")
-    print("[TensorRT] 构建 engine：" + " ".join(str(item) for item in command), flush=True)
-    completed = subprocess.run(command, check=False, text=True)
-    # TensorRT 8.x 使用旧的 --workspace 参数；对旧版 trtexec 自动回退。
-    if completed.returncode != 0 and not engine_path.is_file():
-        legacy_command = [
-            (f"--workspace={workspace_mb}" if item.startswith("--memPoolSize=workspace:") else item)
-            for item in command
-        ]
-        print("[TensorRT] 回退旧版 workspace 参数", flush=True)
-        completed = subprocess.run(legacy_command, check=False, text=True)
-    if completed.returncode != 0 or not engine_path.is_file():
-        raise RuntimeError(f"trtexec 构建失败，退出码={completed.returncode}：{engine_path}")
-
-
 @torch.inference_mode()
 def benchmark_trt(runner: TensorRTRunner, inputs: InputBundle, warmup: int, repeats: int) -> dict[str, Any]:
     for _ in range(warmup):
@@ -458,13 +425,14 @@ def main() -> list[dict[str, Any]]:
     if args.engine_dir is None or args.onnx_dir is None:
         raise ValueError("无法确定 TensorRT engine/ONNX 输出目录")
     args.rebuild_engine = bool(args.rebuild_engine or tensorrt_values.get("rebuild_engine", False))
+    args.builder = args.builder or tensorrt_values.get("builder", "python")
     args.trtexec = args.trtexec or tensorrt_values.get("trtexec", "trtexec")
     args.workspace_mb = (
         args.workspace_mb
         if args.workspace_mb is not None
         else int(tensorrt_values.get("workspace_mb", 2048))
     )
-    args.opset = args.opset if args.opset is not None else int(tensorrt_values.get("onnx_opset", 17))
+    args.opset = args.opset if args.opset is not None else int(tensorrt_values.get("onnx_opset", 18))
     args.output = resolve_cli_path(
         args.output or tensorrt_values.get("output") or "runs-profile/vision_tensorrt_v2.csv",
         run_dir,
@@ -507,8 +475,8 @@ def main() -> list[dict[str, Any]]:
     height, width = parse_input_size(args.input_size)
     precision = normalize_precision(args.precision)
     if precision == "bf16":
-        # TensorRT 不同版本的 BF16 支持差异较大，但仍保留命令行入口。
-        print("[提示] BF16 engine 需要当前 TensorRT、GPU 和 trtexec 同时支持。")
+        # TensorRT 不同版本的 BF16 支持差异较大，但仍保留统一入口。
+        print("[提示] BF16 engine 需要当前 TensorRT Python API 和 GPU 同时支持。")
     source = load_image_or_source(args.source) if args.source else None
     args.engine_dir.mkdir(parents=True, exist_ok=True)
     args.onnx_dir.mkdir(parents=True, exist_ok=True)
@@ -533,7 +501,7 @@ def main() -> list[dict[str, Any]]:
     print(f"Python：{platform.python_version()} | PyTorch：{torch.__version__}")
     print(f"GPU：{torch.cuda.get_device_name(device)} | 输入：{height}x{width} | batch={args.batch}")
     adapters = ", ".join(sorted({str(item["adapter"]) for item in model_entries}))
-    print(f"adapters：{adapters} | precision：{precision}")
+    print(f"adapters：{adapters} | precision：{precision} | builder：{args.builder}")
     print("=" * 92)
 
     rows: list[dict[str, Any]] = []
@@ -590,12 +558,13 @@ def main() -> list[dict[str, Any]]:
             if args.rebuild_engine or not engine_path.is_file():
                 if not onnx_path.is_file() or args.rebuild_engine:
                     onnx_path = adapter.export_onnx(model, onnx_path, inputs, args.opset, dynamic=False)
-                build_engine_with_trtexec(
+                build_engine_from_onnx(
                     onnx_path,
                     engine_path,
-                    args.trtexec,
-                    precision,
-                    args.workspace_mb,
+                    builder=args.builder,
+                    trtexec=args.trtexec,
+                    precision=precision,
+                    workspace_mb=args.workspace_mb,
                 )
             elif not onnx_path.is_file():
                 print(f"[TensorRT] 复用已有 engine，不重新导出 ONNX：{engine_path}")

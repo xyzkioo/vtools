@@ -1,7 +1,9 @@
 # 通用 PyTorch 视觉模型测速
-Ver:1.0
+
+
 
 by:小尛ovo
+
 
 最常用的流程：
 
@@ -54,6 +56,7 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 | `core/vision_benchmark_config.py` | 读取 YAML、解析项目根目录和相对路径 |
 | `core/vision_run_manager.py` | 为每次入口调用创建 `run1`、`run2` 等独立目录 |
 | `core/vision_benchmark_common.py` | 计时、统计、设备、精度和 adapter 核心 |
+| `core/vision_runtime.py` | PyCharm/conda 动态库路径兼容处理 |
 | `core/vision_checkpoint_inspector.py` | 检查 checkpoint 是否包含可恢复的模型架构 |
 | `benchmark_pytorch.py` | PyCharm 直接运行的 PyTorch 入口 |
 | `benchmark_tensorrt.py` | PyCharm 直接运行的 TensorRT 入口 |
@@ -63,18 +66,12 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 | `checks/vision_consistency.py` | 共用输入、I/O 对齐和 CSV/JSON 报告 |
 | `checks/vision_consistency_metrics.py` | 张量误差与端到端检测框匹配 |
 | `adapters/vision_adapter_template.py` | 非内置模型的 adapter 模板 |
+| `backends/tensorrt_engine_builder.py` | 使用 TensorRT Python API 或 trtexec 构建 engine |
 | `backends/pytorch_vision_speed_benchmark_v2.py` | PyTorch 后端实现 |
 | `backends/pytorch_vision_tensorrt_benchmark_v2.py` | TensorRT 后端实现 |
 | `tests/test_consistency.py` | 不依赖 GPU 的一致性与运行目录回归测试 |
-
-## 测试指标
-- `model_call`：仅测试模型前向推理时间，输入数据已提前完成预处理并放置在 GPU 上，不包含图像读取、预处理和后处理。
-- `adapter_pipeline`：测试适配器完整流程，是否包含图像预处理和后处理取决于具体 adapter 实现。
-- `median_ms`：多次测试耗时的中位数，代表典型推理延迟。
-- `p90_ms`：90% 测试样本低于该延迟，用于反映较高负载下的推理稳定性。
-- `fps_per_sample`：按照单张图像计算的理论处理速度，计算公式为 `1000 / median_ms`。
-- `peak_memory_mb`：模型推理期间显存峰值增量。
-- `parameters`：模型参数量。
+| `legacy/yolo26_tensorrt_benchmark(1).py` | 原始上传的 TensorRT 脚本备份（未改动） |
+| `legacy/yolo_detection_speed_benchmark(1).py` | 原始上传的 PyTorch 脚本备份（未改动） |
 
 ## 1. 第一次使用：只改 YAML
 
@@ -112,7 +109,9 @@ pytorch:
 
 tensorrt:
   enabled: true
+  builder: python          # TensorRT Python API；不需要 trtexec
   precision: fp16
+  onnx_opset: 18
   rebuild_engine: false
   output: runs-profile/vision_tensorrt_v2.csv
 ```
@@ -327,11 +326,38 @@ pip install torch numpy pyyaml
 ```
 
 Ultralytics 模型还需要 `ultralytics`；使用图片 pipeline 通常需要
-`opencv-python`。TensorRT 对比还需要 TensorRT Python bindings 和
-`trtexec`；自动导出 ONNX 时建议安装 `onnx`、`onnxscript`。
+`opencv-python`。TensorRT 对比需要 TensorRT Python bindings；默认
+`builder: python` 不需要额外安装 `trtexec`。如果选择 `builder: trtexec`，
+还需要自行安装并在配置中填写 `trtexec` 路径。自动导出 ONNX 时建议安装
+`onnx`、`onnxscript`。
+
+TensorRT 11 使用强类型网络，FP16/BF16 的实际类型由 ONNX 模型中的 dtype
+决定，不能依赖旧版 `--fp16` 或 `--bf16` 参数。脚本会在 TensorRT 11 中按
+强类型规则构建；修改模型、输入尺寸、batch、精度或 TensorRT/GPU 环境后，
+建议设置 `rebuild_engine: true` 重新构建。
 
 如果 engine 已经存在且 `tensorrt.rebuild_engine: false`，脚本会复用它；改了
-模型、输入尺寸、batch、精度或 TensorRT/GPU 环境后，建议设为 `true` 重新构建。
+模型、输入尺寸、batch、精度或 TensorRT/GPU 环境后，建议设置为 `true` 重新构建。
+
+### TensorRT engine 构建方式
+
+默认配置使用 TensorRT Python API 构建 engine：
+
+```yaml
+tensorrt:
+  builder: python
+```
+
+这要求当前环境能执行 `import tensorrt`，不要求安装 `trtexec`。也可以临时
+选择外部命令：
+
+```bash
+python benchmark_tensorrt.py --builder trtexec --trtexec /path/to/trtexec
+```
+
+`builder: auto` 会优先使用可找到的 `trtexec`，找不到时自动回退到 Python API。
+TensorRT 11 使用强类型网络，FP16/BF16 的实际类型由导出的 ONNX dtype 决定；
+脚本不会给 TensorRT 11 传入已经移除的旧式精度参数。
 
 ## 7. 输出指标
 
@@ -349,8 +375,10 @@ TensorRT engine 与 GPU、CUDA、TensorRT 版本相关，换部署机器后应�
 ### 怎么运行
 
 先保证 `benchmark_tensorrt.py` 能成功生成当前模型的 ONNX 和 engine。
-之前的 `CXXABI_1.3.15` 报错属于 ONNX 导入失败，需要先解决；添加检查脚本
-不会修复本机依赖。TensorRT 需要可用的 CUDA GPU。
+如果在 PyCharm 中出现 `CXXABI_1.3.15 not found`，入口会在导入 ONNX 前自动
+把当前 Python/conda 环境的 `lib` 放到 `LD_LIBRARY_PATH` 最前面并重启当前
+入口。这样通常不需要手工配置 PyCharm；如果当前环境没有 `libstdc++.so.6`，
+仍需先安装 `libstdcxx-ng`/`libgcc-ng`。TensorRT 需要可用的 CUDA GPU。
 
 在 PyCharm 直接右键运行 `check_consistency.py`，无需填写命令行参数。
 也可以在 `run_all.py` 中一键执行：
@@ -368,6 +396,7 @@ consistency:
   reference_precision: same
   atol: 0.001
   rtol: 0.01
+  acceptance_mode: auto      # auto / detection_only / all
   detection_mode: auto
   detection_conf: 0.25
   detection_iou: 0.95
@@ -414,7 +443,11 @@ python check_consistency.py --config benchmark_config.yaml --source /path/to/ima
    整数、布尔值严格相等。输出形状、非有限值、最大/平均绝对误差、RMSE、
    最大相对误差和满足容差的元素比例均写入报告。
    接近零的参考值会放大相对误差，需结合绝对误差看，不能只看 max_rel_error。
-5. `detection_mode: auto` 仅对 Ultralytics 的端到端 detect（例如 YOLO26）额外
+5. `acceptance_mode: auto` 在存在任务级检测输出时采用检测框匹配作为最终验收，
+   但仍保留所有原始张量的诊断结果；`detection_only` 强制采用该规则，`all`
+   要求所有输出逐元素通过。对于没有检测框匹配的分类、分割、姿态或自定义模型，
+   `auto` 会自动回退为 `all`；显式 `detection_only` 也会安全回退并在报告中说明。
+6. `detection_mode: auto` 仅对 Ultralytics 的端到端 detect（例如 YOLO26）额外
    比较第一个 `[B,N,6]` 输出，格式必须为 xyxy/conf/class、输入图片坐标。
    在 `detection_conf` 以上的框中，按类别相同、IoU≥`detection_iou`、
    置信度差≤`score_atol` 做一对一最大数量匹配，允许框的顺序改变。
@@ -429,8 +462,8 @@ adapter 钩子。`input_mode: adapter` 使用 adapter 示例输入，可能是�
 
 | 状态 | 含义 |
 | --- | --- |
-| `passed` | 本次案例所有输出满足容差；启用框匹配时也通过 |
-| `warning` | 框匹配通过，但原始张量不满足容差；可能有 top-k 顺序变化，需人工复核 |
+| `passed` | 当前验收模式通过；`all` 要求所有张量通过，检测模式要求任务级输出通过 |
+| `warning` | `all` 模式下原始张量不满足容差但检测框通过；检测模式通常不会把这种诊断差异作为失败 |
 | `failed` | 数值超差、形状不符、NaN/Inf、类别/框/置信度不匹配等 |
 | `inconclusive` | 空张量或阈值以上无检测框，证据不足，不当作验收通过 |
 | `error` | 缺依赖/文件、输入输出定义不一致、无法执行等；不是实测数值不一致 |

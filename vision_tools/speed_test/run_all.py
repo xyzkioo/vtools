@@ -143,4 +143,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # PyCharm 可能没有继承终端中的 LD_LIBRARY_PATH；在导入 ONNX 前
+    # 自动切换到当前 conda 环境的 libstdc++，避免一致性阶段出现 CXXABI 错误。
+    from core.vision_runtime import ensure_conda_library_path
+
+    ensure_conda_library_path()
     main()

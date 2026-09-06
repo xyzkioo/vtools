@@ -103,6 +103,29 @@ def _inputs(adapter: Any, source: Path | None, config: Any, seed: int) -> Any:
     return InputBundle((tensor,), batch_size=config.batch_size, description="shared RGB letterbox /255 image")
 
 
+def _acceptance_mode(values: dict[str, Any], detection: dict[str, Any] | None) -> tuple[str, str, str]:
+    """返回配置模式、实际模式和必要的回退说明。
+
+    ``auto`` 对存在任务级检测框输出的模型采用 ``detection_only``；普通
+    分类/分割或无法识别检测输出的模型仍采用严格张量模式。显式配置
+    ``detection_only`` 时若没有可匹配的检测输出，也安全回退到 ``all``。
+    """
+
+    configured = str(values.get("acceptance_mode", "auto") or "auto").strip().lower()
+    if configured not in {"auto", "all", "detection_only"}:
+        raise ValueError("acceptance_mode 只支持 auto / all / detection_only")
+    if configured == "auto":
+        effective = "detection_only" if detection is not None else "all"
+        note = "auto→detection_only" if detection is not None else "auto→all（无检测框匹配）"
+    elif configured == "detection_only" and detection is None:
+        effective = "all"
+        note = "detection_only→all（无检测框匹配）"
+    else:
+        effective = configured
+        note = effective
+    return configured, effective, note
+
+
 def _clone_bundle(bundle: Any, device: Any, float_dtype: Any = None) -> Any:
     import torch
     from core.vision_benchmark_common import InputBundle
@@ -210,8 +233,20 @@ def _check_case(
             iou_threshold=float(values.get("detection_iou", 0.95)),
             score_atol=float(values.get("score_atol", 0.01)),
         )}
+    configured_acceptance, effective_acceptance, acceptance_note = _acceptance_mode(values, detection)
+    raw_status = combine_status(comparisons)
+    case_status = combine_status(
+        comparisons,
+        detection,
+        acceptance_mode=effective_acceptance,
+    )
     return {"source": str(source) if source else "adapter_example_input", "inputs": input_info,
-            "input_description": bundle.description, "status": combine_status(comparisons, detection),
+            "input_description": bundle.description, "status": case_status,
+            "raw_tensor_status": raw_status,
+            "detection_status": detection.get("status") if detection is not None else None,
+            "acceptance_mode": configured_acceptance,
+            "acceptance_mode_effective": effective_acceptance,
+            "acceptance_note": acceptance_note,
             "outputs": comparisons, "detections": detection,
             "note": "默认只比对模型调用输出，不含完整应用后处理；不是 mAP 验证"}
 
@@ -299,6 +334,12 @@ def _check_model(entry: dict[str, Any], config_file: dict[str, Any]) -> dict[str
                             "error": f"{type(error).__name__}: {error}", "outputs": []}
                 result["cases"].append(case)
                 print(f"[一致性] {entry['name']} / {case['source']}：{case['status']}")
+                if case.get("detection_status") is not None:
+                    print(
+                        f"  原始张量={case.get('raw_tensor_status')}，"
+                        f"检测框={case.get('detection_status')}，"
+                        f"验收模式={case.get('acceptance_note')}"
+                    )
                 if case.get("error"):
                     print(f"  {case['error']}")
                 for item in case.get("outputs", []):
@@ -341,7 +382,12 @@ def save_reports(report: dict[str, Any], csv_path: Path, json_path: Path) -> Non
         cases = model.get("cases") or [{"source": "", "status": model["status"], "error": model.get("error", "")}]
         for case in cases:
             base = {"model": model["name"], "source": case["source"], "case_status": case["status"],
-                    "precision": model.get("precision", ""), "error": case.get("error", "")}
+                    "precision": model.get("precision", ""), "error": case.get("error", ""),
+                    "raw_tensor_status": case.get("raw_tensor_status", ""),
+                    "detection_status": case.get("detection_status", ""),
+                    "acceptance_mode": case.get("acceptance_mode", ""),
+                    "acceptance_mode_effective": case.get("acceptance_mode_effective", ""),
+                    "acceptance_note": case.get("acceptance_note", "")}
             rows.append({**base, "record_type": "case", "status": case["status"]})
             for item in case.get("outputs", []):
                 rows.append({**base, "record_type": "tensor", **item})
@@ -394,9 +440,13 @@ def main() -> dict[str, Any]:
     if run_dir is not None:
         print(f"本次运行目录：{run_dir}")
     print(f"一致性总状态：{report['status']}；CSV：{output}；JSON：{json_output}")
-    print("passed 只表示这些输入在所设容差下通过；warning/空框/缺失依赖不算验收通过，也不代表 mAP 不变。")
+    print("detection_only/auto 模式以任务级输出验收，原始张量仍保留在 CSV/JSON；all 模式才要求所有输出逐元素通过。")
+    print("passed 只表示这些输入在所设条件下通过；空框/缺失依赖不算验收通过，也不代表 mAP 不变。")
     return {**report, "output": str(output), "json_output": str(json_output)}
 
 
 if __name__ == "__main__":
+    from core.vision_runtime import ensure_conda_library_path
+
+    ensure_conda_library_path()
     raise SystemExit(0 if main()["status"] == "passed" else 1)

@@ -98,6 +98,11 @@ tensorrt:
   # 是否启用 TensorRT 后端。
   enabled: true
 
+  # engine 构建方式：
+  # python 使用已安装的 TensorRT Python API（推荐，不需要 trtexec）；
+  # trtexec 使用 NVIDIA 命令行工具；auto 优先 trtexec，找不到时回退 python。
+  builder: python
+
   # TensorRT 精度：fp16、fp32 或 bf16（取决于硬件和 TensorRT 支持）。
   precision: fp16
 
@@ -110,13 +115,14 @@ tensorrt:
   # true 强制重新导出 ONNX 并构建 engine；false 时尽量复用已有 engine。
   rebuild_engine: false
 
-  # ONNX 导出算子集版本。
-  onnx_opset: 17
+  # ONNX 导出算子集版本。PyTorch 2.12/TensorRT 11 建议使用 18。
+  onnx_opset: 18
 
   # trtexec 构建 engine 时允许使用的工作空间大小，单位 MB。
   workspace_mb: 2048
 
-  # trtexec 可执行文件；写文件名表示从 PATH 查找，也可写绝对路径。
+  # 仅 builder: trtexec 或 builder: auto 找到命令时使用；写文件名表示从 PATH 查找，
+  # 也可写绝对路径。builder: python 不需要此项。
   trtexec: trtexec
 
   # ONNX 和 TensorRT engine 公共缓存目录；不随 runN 搬迁，便于
@@ -149,6 +155,12 @@ consistency:
   # 整数/布尔输出严格相等，NaN/Inf 或形状不一致直接失败。
   atol: 0.001
   rtol: 0.01
+
+  # 最终验收依据：
+  # auto 自动检测任务级输出（如 Ultralytics end2end 检测框），普通模型仍比较全部张量；
+  # detection_only 只用检测框匹配验收，但仍在 CSV/JSON 中保留张量诊断；
+  # all 要求所有输出逐元素通过，适合严格数值回归。
+  acceptance_mode: auto
 
   # auto：仅对 Ultralytics 端到端 detect 额外匹配框；其他模型只比较张量。
   # none：不做框匹配；xyxy6：明确指定输出是 [B,N,6] 的 xyxy/conf/class。

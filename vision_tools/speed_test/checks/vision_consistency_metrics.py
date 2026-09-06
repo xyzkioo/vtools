@@ -158,13 +158,30 @@ def compare_detections(
     return result
 
 
-def combine_status(tensors: list[dict[str, Any]], detections: dict[str, Any] | None = None) -> str:
-    if not tensors:
-        return "error"
+def combine_status(
+    tensors: list[dict[str, Any]],
+    detections: dict[str, Any] | None = None,
+    *,
+    acceptance_mode: str = "all",
+) -> str:
+    """合并张量诊断和最终任务输出的状态。
+
+    ``all`` 保持严格的旧行为：任意逐元素张量失败都会让案例至少是
+    ``warning``。``detection_only`` 在存在检测框匹配结果时只用检测结果
+    作为验收依据，但仍保留并输出张量诊断；形状、NaN/Inf 等硬错误始终
+    失败。没有检测结果时自动回退到 ``all``，避免误把普通模型当成检测模型。
+    """
+
+    if acceptance_mode not in {"all", "detection_only"}:
+        raise ValueError("acceptance_mode 只支持 all / detection_only")
     # 形状、数据类型、NaN/Inf 等硬错误不能被框匹配覆盖。
     hard = {"shape_mismatch", "unsupported_dtype", "nan_or_inf", "discrete_dtype_kind_mismatch", "integer_mismatch"}
     if any(item.get("reason") in hard for item in tensors):
         return "failed"
+    if acceptance_mode == "detection_only" and detections is not None:
+        return detections["status"]
+    if not tensors:
+        return detections["status"] if detections is not None else "error"
     if detections is not None and detections["status"] == "failed":
         return "failed"
     if any(item["status"] == "inconclusive" for item in tensors):
