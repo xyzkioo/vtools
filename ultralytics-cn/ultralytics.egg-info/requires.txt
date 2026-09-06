@@ -1,0 +1,142 @@
+filelock>=3.16.1
+matplotlib>=3.3.0
+opencv-python!=4.13.0.90,>=4.7.0
+pillow>=7.1.2
+pyyaml>=5.3.1
+requests>=2.23.0
+torch>=1.8.0
+torchvision>=0.9.0
+psutil>=5.8.0
+polars>=0.20.0
+nvidia-ml-py>=12.0.0
+ultralytics-thop>=2.1.6
+
+[:platform_system != "Darwin"]
+numpy>=1.23.0
+
+[:platform_system == "Darwin"]
+numpy!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.0,!=2.3.1,!=2.3.2,!=2.3.3,!=2.3.4,>=1.23.0
+
+[:python_version >= "3.11"]
+ultralytics-platform>=0.1.3
+
+[:sys_platform == "win32"]
+torch!=2.4.0,>=1.8.0
+
+[export]
+ultralytics[export-base]
+ultralytics[export-tensorflow]
+ultralytics[export-coreml]
+ultralytics[export-litert]
+
+[export-base]
+onnxslim>=0.1.82
+openvino>=2024.0.0
+
+[export-base:platform_machine == "aarch64" and platform_system == "Linux" and python_version >= "3.9"]
+packaging>=26.0
+
+[export-base:platform_system != "Darwin"]
+onnx>=1.12.0
+
+[export-base:platform_system == "Darwin" and python_version < "3.13"]
+onnx<1.18.0,>=1.12.0
+
+[export-base:platform_system == "Darwin" and python_version >= "3.13"]
+onnx>=1.20.0
+
+[export-base:python_version < "3.11" and (platform_machine != "aarch64" or platform_system != "Linux")]
+onnxruntime<1.20.0
+
+[export-base:python_version >= "3.11"]
+onnxruntime>=1.20.0
+
+[export-base:python_version >= "3.9"]
+nncf<4.0.0,>=2.14.0
+
+[export-coreml]
+
+[export-coreml:platform_system != "Windows" and python_version <= "3.13"]
+numpy<=2.3.5
+coremltools>=9.0
+scikit-learn>=1.3.2
+
+[export-deepx]
+dx_com
+numpy<2
+
+[export-executorch]
+executorch
+numpy<=2.3.5
+
+[export-executorch:platform_system == "Linux" and platform_machine == "aarch64"]
+torch<2.13.0,>=2.12.0
+
+[export-legacy-torch]
+numpy<2
+
+[export-legacy-torch:python_version >= "3.9"]
+setuptools<81.0.0
+nncf<3.0.0
+
+[export-litert]
+
+[export-litert:(platform_system == "Linux" and platform_machine == "x86_64") or platform_system == "Darwin"]
+litert-torch>=0.9.0
+ai-edge-litert>=2.1.4
+ai-edge-quantizer>=0.6.0
+
+[export-tensorflow]
+
+[export-tensorflow:platform_machine != "aarch64" and python_version <= "3.12"]
+ydf<0.13.0
+
+[export-tensorflow:platform_machine == "aarch64"]
+h5py!=3.11.0
+
+[export-tensorflow:platform_machine == "aarch64" and python_version >= "3.9"]
+tensorstore>=0.1.63
+
+[export-tensorflow:python_version < "3.13"]
+numpy<2.0.0
+tensorflow<=2.19.0,>=2.0.0
+
+[export-tensorflow:python_version <= "3.12"]
+googleapis-common-protos<1.74.0
+
+[export-tensorflow:python_version >= "3.13"]
+tensorflow>2.19.0
+
+[export:platform_system == "Linux" and platform_machine == "aarch64" and python_version == "3.11"]
+torch<2.13.0,>=2.12.0
+
+[extra]
+ipython
+albumentations>=1.4.6
+faster-coco-eval>=1.6.7
+
+[llm]
+openai>=2.0.0
+
+[logging]
+wandb
+tensorboard
+mlflow
+
+[solutions]
+shapely>=2.0.0
+lap>=0.5.12
+flask>=3.0.1
+
+[solutions:python_version < "3.10" and (platform_machine != "aarch64" or platform_system != "Linux")]
+streamlit<1.51.0,>=1.29.0
+
+[solutions:python_version >= "3.10"]
+streamlit>=1.51.0
+
+[typing]
+types-pillow
+types-psutil
+types-pyyaml
+types-requests
+types-shapely

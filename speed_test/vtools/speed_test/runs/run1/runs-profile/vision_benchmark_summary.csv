@@ -1,0 +1,4 @@
+﻿record_type,backend,status,error
+stage_summary,pytorch,failed,FileNotFoundError: 模型文件不存在：/home/xyzkioo/PycharmProjects/lichiflower/vtools/speed_test/GoodModel/lycheeflo.pt
+stage_summary,tensorrt,failed,FileNotFoundError: 模型文件不存在：/home/xyzkioo/PycharmProjects/lichiflower/vtools/speed_test/GoodModel/lycheeflo.pt
+stage_summary,consistency,skipped,本次 TensorRT 阶段失败，一致性未执行；修复后重跑，或单独检查指定的已有 engine
