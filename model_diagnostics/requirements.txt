@@ -1,0 +1,8 @@
+# Needed only when using YAML configuration files.
+PyYAML>=6.0
+
+# Needed for Ultralytics data.yaml / YOLO labels so image dimensions can be read.
+Pillow>=9.0
+
+# PyTorch, OpenCV and each model framework remain adapter-specific dependencies.
+# Install ultralytics only when using its built-in adapter or .ndjson converter.

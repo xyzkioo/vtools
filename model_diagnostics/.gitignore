@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+runs/
+install_report.json
+installer/environment_report.json
+environment_report.json

@@ -1,0 +1,48 @@
+# 通用目标检测诊断配置
+#
+# 使用方法：
+#   cd model_diagnostics
+#   python diagnostics/engine.py \
+#     --gt gt.json \
+#     --pred predictions.json \
+#     --config config/config.example.yaml \
+#     --output runs/diagnostics
+#
+# 所有坐标和 GT 都必须已经统一到原图像素坐标。
+# score 是模型输出的可比较置信度，通常应在 [0, 1]。
+
+# 工作点的置信度阈值。Precision/Recall/F1、FP 和 FN 使用这个阈值。
+score_threshold: 0.25
+
+# 候选诊断阈值。建议保留低分预测，用来判断目标是否只是分数太低。
+candidate_threshold: 0.001
+
+# 正式 TP 匹配使用的 IoU 阈值。
+match_iou: 0.5
+
+# 额外报告的 Recall@IoU 和候选覆盖率。
+candidate_iou_thresholds: [0.3, 0.5, 0.75]
+
+# AP 使用的 IoU 阈值。默认对应 AP50:95，步长为 0.05。
+ap_iou_thresholds: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+
+# 置信度扫描。预测文件应保留低于工作阈值的框，否则扫描无法恢复它们。
+score_sweep: [0.001, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
+
+# 在接近这些 FP/图预算的工作点报告 Recall 和 Precision。
+fp_budgets_per_image: [0.1, 0.5, 1.0, 2.0, 5.0]
+
+# 同类别预测与 GT 的 IoU 达到这个值但没有达到 match_iou 时，记为定位候选。
+localization_iou_floor: 0.1
+
+# GT 框短边像素分组。最后一个边界使用字符串 inf。
+short_side_bins: [0, 8, 16, 32, 64, "inf"]
+
+# 每张图 GT 数量分组。
+density_bins: [0, 1, 4, 8, "inf"]
+
+# 按图像 bootstrap 的次数。0 表示不计算置信区间；小数据集可设置为 200 或 1000。
+bootstrap_images: 0
+
+# bootstrap 随机种子。
+seed: 0
