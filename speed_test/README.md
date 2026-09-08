@@ -338,6 +338,9 @@ TensorRT 11 使用强类型网络，FP16/BF16 的实际类型由 ONNX 模型中�
 
 如果 engine 已经存在且 `tensorrt.rebuild_engine: false`，脚本会复用它；改了
 模型、输入尺寸、batch、精度或 TensorRT/GPU 环境后，建议设置为 `true` 重新构建。
+成功构建后，engine 旁边会生成同名的 `.engine.build.json`，记录权重、ONNX、
+输入尺寸、batch、精度、融合、opset、workspace 和 TensorRT/CUDA/GPU 环境。
+它只用于人工核对，不参与自动重建，也不要求为整个源码树计算哈希。
 
 ### TensorRT engine 构建方式
 
@@ -427,7 +430,8 @@ python check_consistency.py --config benchmark_config.yaml --source /path/to/ima
 1. 默认沿用 TensorRT 测速的权重、batch、尺寸、精度、ONNX 和 engine 路径。
    检查脚本只读取文件，不修改 `.pt`、ONNX 或 engine。换权重、修改模型源码或融合设置后，
    先用 `tensorrt.rebuild_engine: true` 重建，再检查；文件名相同不证明模型相同。
-   报告包含本次权重/ONNX/engine 哈希，但没有替旧 engine 追溯构建来源。
+   一致性报告仍会保留本次文件哈希作为诊断证据；这与 engine 缓存策略分开，缓存本身只依赖
+   `rebuild_engine` 和旁边的构建元数据，不会因为哈希缺失而引入新的缓存策略。
 2. 输入仅准备一次，分别克隆给两个后端，防止原地操作污染另一边。
    内置 Ultralytics **detect** 图片模式采用固定尺寸 letterbox、BGR→RGB、
    CHW、除以 255。单图只算一个案例，batch>1 时复制同图；目录按路径排序读取最多

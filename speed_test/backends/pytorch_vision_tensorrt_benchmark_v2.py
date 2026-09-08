@@ -62,6 +62,7 @@ from core.vision_benchmark_config import apply_python_paths, get_model_entries, 
 from core.vision_checkpoint_inspector import inspect_entries
 from core.vision_run_manager import prepare_run_directory, resolve_cli_path
 from backends.tensorrt_engine_builder import build_engine_from_onnx
+from core.build_metadata import collect_build_metadata, compare_build_request, read_build_metadata, write_build_metadata
 
 
 def parse_input_size(value: str) -> tuple[int, int]:
@@ -520,6 +521,7 @@ def main() -> list[dict[str, Any]]:
         onnx_path = args.onnx_dir / f"{safe_name(spec.name)}_{precision}_{height}x{width}_b{args.batch}.onnx"
         engine_path = args.engine_dir / f"{safe_name(spec.name)}_{precision}_{height}x{width}_b{args.batch}.engine"
         print(f"\n[模型] {spec.name}")
+        built_this_run = False
         try:
             model = adapter.load_model(spec.weights, device)
             model = adapter.prepare_model(model, device, precision, args.fuse)
@@ -566,7 +568,45 @@ def main() -> list[dict[str, Any]]:
                     precision=precision,
                     workspace_mb=args.workspace_mb,
                 )
-            elif not onnx_path.is_file():
+                built_this_run = True
+                metadata = collect_build_metadata(
+                    status="success",
+                    model=spec.name,
+                    weights=str(spec.weights.resolve()),
+                    onnx=str(onnx_path.resolve()),
+                    engine=str(engine_path.resolve()),
+                    input_size=f"{height}x{width}",
+                    batch=args.batch,
+                    precision=precision,
+                    fuse=args.fuse,
+                    opset=args.opset,
+                    workspace_mb=args.workspace_mb,
+                    builder=args.builder,
+                )
+                metadata_file = write_build_metadata(engine_path, metadata)
+                print(f"[TensorRT] 构建元数据已保存：{metadata_file}")
+            else:
+                metadata = read_build_metadata(engine_path)
+                request = {
+                    "model": spec.name,
+                    "weights": str(spec.weights.resolve()),
+                    "onnx": str(onnx_path.resolve()),
+                    "input_size": f"{height}x{width}",
+                    "batch": args.batch,
+                    "precision": precision,
+                    "fuse": args.fuse,
+                    "opset": args.opset,
+                    "workspace_mb": args.workspace_mb,
+                    "builder": args.builder,
+                }
+                differences = compare_build_request(metadata, request)
+                if differences:
+                    print("[TensorRT] 复用已有 engine；构建参数存在记录差异，若需更新请设置 rebuild_engine: true")
+                    for difference in differences:
+                        print(f"  - {difference}")
+                elif metadata is not None:
+                    print(f"[TensorRT] 复用已有 engine，元数据已校验：{engine_path}")
+            if not built_this_run and not onnx_path.is_file():
                 print(f"[TensorRT] 复用已有 engine，不重新导出 ONNX：{engine_path}")
 
             runner = TensorRTRunner(engine_path, device)

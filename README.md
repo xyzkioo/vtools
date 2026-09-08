@@ -11,6 +11,7 @@
 | [ultralytics-cn/](ultralytics-cn/) | Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](ultralytics-cn/README.zh-CN.md)、[安装配置](ultralytics-cn/pyproject.toml) |
 | [env_test/](env_test/) | 检查 Python、依赖、实际导入的源码路径、CUDA、模型构建与前向传播 | [check_install.py](env_test/check_install.py)、[安装与检验向导](env_test/README.md) |
 | [model_diagnostics/](model_diagnostics/) | 目标检测质量与错误分析：P/R/F1、AP、候选召回、误检漏检、尺寸/密度分组、阈值扫描、计数误差等 | [run_model_diagnostics.py](model_diagnostics/run_model_diagnostics.py)、[完整说明](model_diagnostics/docs/README.md) |
+| [model_visualization/](model_visualization/) | 通用特征图、聚合激活图、可选 Grad-CAM/LayerCAM，以及检测头 raw candidate→top-k→final 阶段追踪 | [run_visualization.py](model_visualization/run_visualization.py)、[PyCharm 配置](model_visualization/config/pycharm_run.yaml) |
 | [speed_test/](speed_test/) | PyTorch / TensorRT 测速、checkpoint 可恢复性检查、转换前后输出一致性检查 | [run_all.py](speed_test/run_all.py)、[使用说明](speed_test/README.md) |
 | [transform_tools/](transform_tools/) | NDJSON 数据集转 YOLO、Ultralytics 权重转 ONNX / K230 `.kmodel`、ONNX 与 `.kmodel` 输出对比 | [脚本与环境说明](transform_tools/REQUIREMENT.md) |
 | [模型勘误方法.md](模型勘误方法.md) | 模型问题排查的思路与参考方法 | 阅读文档 |
@@ -26,10 +27,12 @@
 | `model_diagnostics/config/` | 诊断配置；日常主要修改 `pycharm_run.yaml` |
 | `model_diagnostics/diagnostics/`、`adapters/` | 评估引擎、模型运行器、自定义适配器模板 |
 | `model_diagnostics/docs/`、`data/` | 使用教程、指标解释和输入数据格式说明 |
+| `model_visualization/core/`、`adapters/` | 输入变换、激活捕获、特征/CAM 渲染、Ultralytics raw 输出和检测头阶段追踪 |
+| `model_visualization/config/`、`runs/` | PyCharm/CLI 配置和离线可视化报告；`runs/` 由运行时自动创建 |
 | `speed_test/core/`、`backends/`、`checks/` | 配置与运行目录管理、测速后端、一致性检查 |
 | `speed_test/adapters/`、`tests/` | 自定义模型适配器模板与测试 |
 
-**范围说明：** 当前 `model_diagnostics` 评估的是目标检测框，不评估实例分割掩码。其他模型接入需要提供统一预测文件或实现相应 adapter。网络结构阅读可从 `ultralytics-cn` 入手；当前仓库没有单独的通用特征图可视化入口。
+**范围说明：** 当前 `model_diagnostics` 评估的是目标检测框，不评估实例分割掩码。其他模型接入需要提供统一预测文件或实现相应 adapter。网络结构阅读可从 `ultralytics-cn` 入手；通用模型可视化独立放在 `model_visualization/`，首版内置 Ultralytics/YOLO26 适配器。
 
 ## 环境要求
 
@@ -64,6 +67,7 @@
 | 本地 YOLO 模型开发、训练、推理、诊断（模式 B） | 配套的 PyTorch / torchvision，以及本地 `ultralytics-cn` 声明的依赖 |
 | 自定义模型诊断（模式 C） | 诊断基础依赖，加上 adapter 所用框架和模型依赖 |
 | PyTorch 测速 | PyTorch、NumPy、PyYAML 和模型 adapter 依赖；内置图片流程还需要 OpenCV |
+| 特征图 / 阶段可视化 | PyTorch、NumPy、PyYAML、OpenCV、Pillow；使用本地 Ultralytics 权重时还需 `ultralytics-cn` 的依赖 |
 | TensorRT 测速与一致性检查 | NVIDIA GPU、兼容驱动、TensorRT Python API；导出/检查另需 ONNX，导出链路可能需要 onnxscript |
 | NDJSON 转 YOLO | Ultralytics 及其依赖；下载清单中的图片需要网络 |
 | K230 转换与校验 | PyTorch / Ultralytics、NumPy、Pillow、ONNX、onnxsim、ONNX Runtime，以及与目标 SDK 配套的 nncase、nncase-kpu 和所需 .NET 运行时 |
@@ -213,7 +217,38 @@ python model_diagnostics/run_model_diagnostics.py
 
 前后处理阶段对比需要另外提供真实的 raw 预测，才能生成 `stage_comparison.csv`；普通模式 B 的最终检测框不自动等于“NMS 前候选”。指标口径见 [METRICS.md](model_diagnostics/docs/METRICS.md)，数据格式与 adapter 接口见 [完整教程](model_diagnostics/docs/README.md)。
 
-### 3. 性能测速与一致性检查
+### 3. 特征图、CAM 与检测阶段追踪
+
+这个入口用于回答“问题从哪一层开始出现”以及“候选框在哪个阶段被删掉”。它和 Ultralytics 已有的训练曲线、验证指标、预测保存功能分开，输出一份可离线打开的 `index.html`。
+
+先安装可视化的轻量依赖，并确保当前环境使用仓库内的 Ultralytics 源码：
+
+```bash
+python -m pip install -r ./model_visualization/requirements.txt
+python -m pip install -e ./ultralytics-cn
+```
+
+复制 [model_visualization/config/pycharm_run.yaml](model_visualization/config/pycharm_run.yaml) 为自己的配置，至少修改 `model.weights` 和 `input.source`，然后运行：
+
+```bash
+python model_visualization/run_visualization.py --config model_visualization/config/pycharm_run.yaml
+```
+
+默认会捕获检测头进入的 P 层特征，保存以下内容：
+
+| 输出 | 用途 |
+| --- | --- |
+| `layers.csv` | 当前权重实际加载后的模块名、类型和参数量；先用 `mode: list_layers` 找到要观察的层 |
+| `features/`、`activations/` | 指定通道图、聚合激活图和原图叠加图；`layers.modules` 可改成任意模块名 |
+| `cams/` | 开启 `cam.enabled` 后生成 Grad-CAM/LayerCAM；解释前向固定使用 FP32 |
+| `stage_trace/` | 开启 `stage_trace.enabled` 后保存 raw candidate、head top-k、final、事件 JSONL、P 层/网格索引和 overlay |
+| `canonical/` | raw/final 的 canonical JSON，可直接交给 `model_diagnostics` 做阶段对照 |
+
+阶段追踪只使用检测头自己的索引：每个候选会记录 `raw_index`、`source_level`（如 P3/P4/P5）、`source_index`、stride 和网格坐标；YOLO26 的 `one2one` 分支按 top-k 与置信度形成 final，`one2many` 分支沿用 Ultralytics NMS 并保留 `return_idxs=True` 的精确索引。不会用近似 IoU 推断候选来源。首版目标是检测任务，其他模型需要实现同等 adapter 接口。
+
+TensorRT engine 仍由已有的 `rebuild_engine` 开关控制：成功构建后旁边会写一个 `.engine.build.json`，记录权重、ONNX、输入尺寸、batch、精度、融合、opset、workspace、TensorRT/CUDA/GPU 等来源。复用已有 engine 时只提示元数据差异，不会悄悄替换或自动引入新的哈希缓存策略；需要重建时设置 `rebuild_engine: true`。
+
+### 4. 性能测速与一致性检查
 
 修改 [speed_test/benchmark_config.yaml](speed_test/benchmark_config.yaml)，至少配置项目根目录、源码目录、模型权重和图片。以仓库根目录为基准，可合并以下片段到原配置：
 

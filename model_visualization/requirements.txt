@@ -1,0 +1,5 @@
+# 运行基础可视化所需依赖；PyTorch/Ultralytics 按项目环境安装。
+numpy>=1.23
+opencv-python>=4.7
+Pillow>=9.0
+PyYAML>=6.0

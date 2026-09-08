@@ -117,12 +117,17 @@ def _normalize_detections(value: Any, image_id: str) -> list[dict[str, Any]]:
         class_id = item.get("class_id", item.get("category_id", item.get("class", item.get("label", 0))))
         if bbox is None or score is None:
             raise ValueError(f"{image_id} 的第 {index} 个检测缺少 bbox 或 score")
-        normalized.append({
+        normalized_item = {
             "instance_id": str(item.get("instance_id", item.get("id", f"{image_id}:{index}"))),
             "bbox": [float(x) for x in bbox],
             "score": float(score),
             "class_id": int(class_id),
-        })
+        }
+        # Keep stage-trace provenance (source_level, raw_index, branch, ...)
+        # available to the canonical diagnostics loader as ``Instance.extra``.
+        reserved = {"bbox", "box", "score", "confidence", "conf", "class_id", "category_id", "class", "label", "instance_id", "id"}
+        normalized_item.update({str(key): value for key, value in item.items() if key not in reserved})
+        normalized.append(normalized_item)
     return normalized
 
 
@@ -136,12 +141,14 @@ class VToolsDetectionAdapter:
         self.module: Optional[ModuleType] = None
         self.model: Any = None
         self.config: Optional[BenchmarkConfig] = None
+        self.runtime_state: dict[str, Any] = {}
 
     def load(self, weights: Path, config: BenchmarkConfig) -> None:
         self.config = config
         if self.spec.lower() == "ultralytics":
             self.module = None
             self.model = self._load_ultralytics(weights, config)
+            self._default_prepare()
             return
         if self.spec.lower() == "checkpoint":
             self.module = None
@@ -194,21 +201,32 @@ class VToolsDetectionAdapter:
             target.to(self.config.device)
         if hasattr(target, "eval"):
             target.eval()
+        if self.config.fuse and hasattr(target, "fuse"):
+            target.fuse()
         if self.config.precision == "fp16" and hasattr(target, "half"):
-            target.half()
+            if getattr(self.config.device, "type", "") == "cuda":
+                target.half()
         elif self.config.precision == "bf16" and hasattr(target, "bfloat16"):
             target.bfloat16()
 
-    @staticmethod
-    def _load_ultralytics(weights: Path, config: BenchmarkConfig) -> Any:
+    def _load_ultralytics(self, weights: Path, config: BenchmarkConfig) -> Any:
         try:
             from ultralytics import YOLO
         except ImportError as exc:
             raise ImportError("使用 adapter: ultralytics 前请安装 ultralytics") from exc
-        return YOLO(str(weights), task="detect")
+        yolo = YOLO(str(weights), task="detect")
+        self.runtime_state = {
+            "adapter": "ultralytics",
+            "weights": str(weights.resolve()),
+            "device": str(config.device),
+            "requested_precision": config.precision,
+            "fuse_requested": config.fuse,
+            "model_class": type(getattr(yolo, "model", yolo)).__name__,
+        }
+        return yolo
 
     def _predict_ultralytics(self, source: Any, image_id: str) -> list[dict[str, Any]]:
-        results = self.model.predict(source=source, imgsz=self.config.image_size, conf=self.config.conf, iou=self.config.iou, max_det=self.config.max_det, device=str(self.config.device), save=False, verbose=False)
+        results = self.model.predict(source=source, imgsz=self.config.image_size, conf=self.config.conf, iou=self.config.iou, max_det=self.config.max_det, device=str(self.config.device), half=self.config.precision == "fp16" and getattr(self.config.device, "type", "") == "cuda", save=False, verbose=False)
         rows: list[dict[str, Any]] = []
         for result in results:
             boxes = getattr(result, "boxes", None)

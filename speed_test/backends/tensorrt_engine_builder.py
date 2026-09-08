@@ -183,10 +183,21 @@ def build_engine_with_trtexec(
         raise ValueError("workspace_mb 必须大于 0")
 
     engine_path.parent.mkdir(parents=True, exist_ok=True)
+    # trtexec writes directly to its output path.  Build beside the target and
+    # publish only after a complete file exists so a failed rebuild cannot
+    # damage a previously usable engine.
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=engine_path.parent,
+        prefix=f".{engine_path.name}.",
+        suffix=".trtexec.tmp",
+    )
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    temporary_path.unlink(missing_ok=True)
     command = [
         executable,
         f"--onnx={onnx_path}",
-        f"--saveEngine={engine_path}",
+        f"--saveEngine={temporary_path}",
         f"--memPoolSize=workspace:{workspace_mb}",
         "--skipInference",
     ]
@@ -204,15 +215,23 @@ def build_engine_with_trtexec(
     completed = subprocess.run(command, check=False, text=True)
 
     # TensorRT 8.x 使用旧的 --workspace 参数；对旧版 trtexec 自动回退。
-    if completed.returncode != 0 and not engine_path.is_file():
+    if completed.returncode != 0:
+        temporary_path.unlink(missing_ok=True)
         legacy_command = [
             (f"--workspace={workspace_mb}" if item.startswith("--memPoolSize=workspace:") else item)
             for item in command
         ]
         print("[TensorRT] 回退旧版 workspace 参数", flush=True)
         completed = subprocess.run(legacy_command, check=False, text=True)
-    if completed.returncode != 0 or not engine_path.is_file():
-        raise RuntimeError(f"trtexec 构建失败，退出码={completed.returncode}：{engine_path}")
+    try:
+        if completed.returncode != 0 or not temporary_path.is_file():
+            raise RuntimeError(f"trtexec 构建失败，退出码={completed.returncode}：{engine_path}")
+        payload = temporary_path.read_bytes()
+        if not payload:
+            raise RuntimeError(f"trtexec 返回空 engine：{engine_path}")
+        _atomic_write(engine_path, payload)
+    finally:
+        temporary_path.unlink(missing_ok=True)
     return engine_path
 
 
