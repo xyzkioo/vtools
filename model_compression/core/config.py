@@ -1,0 +1,138 @@
+"""读取并规范化模型压缩 YAML 配置。"""
+
+from __future__ import annotations
+
+import copy
+from pathlib import Path
+from typing import Any, Mapping, Optional
+
+
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "pycharm_run.yaml"
+
+
+def _mapping(value: Any, name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError(f"配置节 {name} 必须是 YAML 对象")
+    return dict(value)
+
+
+def _resolve(value: Any, base: Path, *, keep_plain: bool = False) -> Any:
+    if value is None or value == "":
+        return value
+    if not isinstance(value, (str, Path)):
+        return value
+    text = str(value).strip()
+    if keep_plain and not any(token in text for token in ("/", "\\")):
+        return text
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = base / path
+    return str(path.resolve())
+
+
+def _resolve_optional_mapping_paths(values: dict[str, Any], keys: tuple[str, ...], root: Path) -> dict[str, Any]:
+    result = dict(values)
+    for key in keys:
+        if result.get(key) is not None:
+            result[key] = _resolve(result[key], root)
+    return result
+
+
+def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
+    """读取 YAML，并将项目内路径统一解析为绝对路径。"""
+
+    config_path = (Path(path).expanduser() if path else DEFAULT_CONFIG_PATH).resolve()
+    if not config_path.is_file():
+        raise FileNotFoundError(f"找不到模型压缩配置：{config_path}")
+    try:
+        import yaml  # type: ignore
+    except ImportError as exc:
+        raise ImportError("读取 YAML 配置需要 PyYAML，请执行：pip install pyyaml") from exc
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, Mapping):
+        raise TypeError("配置文件顶层必须是 YAML 对象")
+    config: dict[str, Any] = copy.deepcopy(dict(raw))
+    config["_raw_config"] = copy.deepcopy(dict(raw))
+    config["_config_path"] = str(config_path)
+
+    project = _mapping(config.get("project"), "project")
+    project_root = Path(str(project.get("root", "."))).expanduser()
+    if not project_root.is_absolute():
+        project_root = config_path.parent / project_root
+    project_root = project_root.resolve()
+    project["root"] = str(project_root)
+    if project.get("python_paths") is None:
+        project["python_paths"] = []
+    if not isinstance(project["python_paths"], (list, tuple)):
+        raise TypeError("project.python_paths 必须是路径列表")
+    project["python_paths"] = [_resolve(item, project_root) for item in project["python_paths"]]
+    config["project"] = project
+
+    run = _mapping(config.get("run"), "run")
+    run["root"] = _resolve(run.get("root", "model_compression/runs"), project_root)
+    run.setdefault("enabled", True)
+    run.setdefault("name", "auto")
+    config["run"] = run
+
+    storage = _mapping(config.get("storage"), "storage")
+    storage["root"] = _resolve(storage.get("root", "model_compression/store"), project_root)
+    storage["registry"] = _resolve(storage.get("registry", "registry.json"), Path(storage["root"]))
+    config["storage"] = storage
+
+    model = _mapping(config.get("model"), "model")
+    if not model:
+        models = config.get("models")
+        if isinstance(models, list) and models and isinstance(models[0], Mapping):
+            model = dict(models[0])
+    model.setdefault("name", "model")
+    model.setdefault("adapter", "torch")
+    model.setdefault("task", "classify")
+    if model.get("weights") is not None:
+        model["weights"] = _resolve(model["weights"], project_root)
+    model["adapter"] = str(model.get("adapter") or "torch")
+    if model["adapter"].endswith(".py") or "/" in model["adapter"] or "\\" in model["adapter"]:
+        model["adapter"] = _resolve(model["adapter"], project_root)
+    config["model"] = model
+
+    for section_name in ("teacher", "student"):
+        section = _mapping(config.get(section_name), section_name)
+        if section.get("weights") is not None:
+            section["weights"] = _resolve(section["weights"], project_root)
+        if section.get("factory") is not None:
+            section["factory"] = str(section["factory"])
+        config[section_name] = section
+
+    dataset = _mapping(config.get("dataset"), "dataset")
+    dataset = _resolve_optional_mapping_paths(dataset, ("root", "train", "val", "test", "manifest"), project_root)
+    config["dataset"] = dataset
+
+    evaluation = _mapping(config.get("evaluation"), "evaluation")
+    config["evaluation"] = evaluation
+    export = _mapping(config.get("export"), "export")
+    if export.get("path") is not None:
+        export["path"] = _resolve(export["path"], project_root)
+    config["export"] = export
+    config["compression"] = _mapping(config.get("compression"), "compression")
+    config["distillation"] = _mapping(config.get("distillation"), "distillation")
+    branch = _mapping(config.get("branch"), "branch")
+    branch.setdefault("name", "main")
+    config["branch"] = branch
+    return config
+
+
+def apply_python_paths(config: Mapping[str, Any]) -> None:
+    """将项目根目录和自定义源码目录加入 ``sys.path``。"""
+
+    import sys
+
+    project = _mapping(config.get("project"), "project")
+    paths = [project.get("root"), *project.get("python_paths", [])]
+    for value in paths:
+        if value and Path(str(value)).is_dir() and str(value) not in sys.path:
+            sys.path.insert(0, str(value))
+
+
+__all__ = ["DEFAULT_CONFIG_PATH", "apply_python_paths", "load_config"]

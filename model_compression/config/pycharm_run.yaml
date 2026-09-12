@@ -1,0 +1,69 @@
+# 模型压缩、实验分支和知识蒸馏配置。
+# project.root 相对于本文件所在的 model_compression/config/ 目录解析。
+
+schema_version: 1
+operation: all            # all / baseline / branch / quantize / prune / distill / compare / export
+
+project:
+  root: ../..
+  python_paths: []
+
+run:
+  enabled: true
+  root: ./model_compression/runs
+  name: auto
+
+storage:
+  root: ./model_compression/store
+  registry: registry.json
+
+model:
+  name: base_model
+  adapter: torch            # torch/builtin 或自定义 adapter.py
+  weights: null             # 填写完整 nn.Module、包含 model 的 checkpoint 或 state_dict
+  factory: null             # state_dict 模式需要 module:function
+  task: classify
+  device: auto
+
+branch:
+  name: main
+  description: default optimization line
+  from_version: null
+
+dataset:
+  # 内置 adapter 使用 ImageFolder：train/val 指向按类别分目录的目录。
+  train: null
+  val: null
+  input_size: [224, 224]
+
+compression:
+  sparsity: 0.30
+  exclude: []
+
+distillation:
+  teacher_weights: null
+  student_weights: null
+  student_factory: null
+  temperature: 4.0
+  alpha: 0.5
+  epochs: 1
+  batch_size: 16
+  learning_rate: 0.001
+  seed: 0
+
+evaluation:
+  split: val
+
+export:
+  path: null
+
+# 任何存在的 modules 节都是显式 allow-list；CLI --only/--enable/--disable 可临时覆盖。
+modules:
+  branch.create: false
+  model.parameters: true
+  baseline.evaluate: true
+  compression.quantize.dynamic_int8: false
+  compression.prune.unstructured: false
+  distillation.classification: false
+  comparison.report: false
+  artifact.export: false
