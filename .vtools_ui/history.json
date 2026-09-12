@@ -1,0 +1,20 @@
+[
+  {
+    "time": "2026-09-12 21:02",
+    "task": "检测诊断",
+    "status": "成功",
+    "config": "/home/xyzkioo/PycharmProjects/vtools/model_diagnostics/config/pycharm_run.yaml"
+  },
+  {
+    "time": "2026-09-12 20:46",
+    "task": "检测诊断",
+    "status": "失败",
+    "config": "/home/xyzkioo/PycharmProjects/vtools/model_diagnostics/config/pycharm_run.yaml"
+  },
+  {
+    "time": "2026-09-12 20:43",
+    "task": "检测诊断",
+    "status": "失败",
+    "config": "/home/xyzkioo/PycharmProjects/vtools/model_diagnostics/config/pycharm_run.yaml"
+  }
+]
