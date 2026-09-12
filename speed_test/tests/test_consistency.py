@@ -200,7 +200,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_yaml_paths_and_preserved_settings(self):
         cfg = load_config(Path(__file__).resolve().parents[1] / "benchmark_config.yaml")
-        self.assertFalse(cfg["tensorrt"]["test_pytorch"])
+        self.assertTrue(cfg["modules"]["speed.pytorch_call"])
+        self.assertTrue(cfg["modules"]["speed.tensorrt_call"])
+        self.assertFalse(cfg["modules"]["speed.pytorch_pipeline"])
         self.assertTrue(cfg["consistency"]["enabled"])
         self.assertTrue(Path(cfg["consistency"]["output"]).is_absolute())
         self.assertEqual(cfg["benchmark"]["input_size"], "832x832")
@@ -286,6 +288,25 @@ class WorkflowTests(unittest.TestCase):
                     patch("run_all._invoke", return_value=({"backend": "tensorrt", "status": "failed", "error": "bad"}, [])) as invoke:
                 run_all_main()
                 self.assertEqual(invoke.call_count, 1)
+
+    def test_run_all_only_routes_pytorch_module_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = {
+                "_config_path": str(root / "config.yaml"),
+                "project": {"root": str(root)},
+                "run": {"enabled": True, "root": str(root / "runs")},
+                "run_all": {"summary_output": str(root / "summary.csv")},
+                "pytorch": {"enabled": True},
+                "tensorrt": {"enabled": True},
+                "consistency": {"enabled": True},
+                "modules": {"speed.pytorch_call": True},
+            }
+            with patch("run_all.load_config", return_value=config), patch("sys.argv", ["run_all.py", "--only", "speed.pytorch_call"]), \
+                    patch("run_all._invoke", return_value=({"backend": "pytorch", "status": "succeeded"}, [])) as invoke:
+                run_all_main()
+            self.assertEqual(invoke.call_count, 1)
+            self.assertEqual(invoke.call_args.args[0], "pytorch")
 
     def test_error_report_written_without_cuda(self):
         report = {"status": "error", "models": [{"name": "test", "status": "error", "error": "No CUDA"}]}

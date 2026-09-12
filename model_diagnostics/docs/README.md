@@ -5,12 +5,28 @@
 ## 最短使用路径
 
 1. 用 PyCharm 打开 `model_diagnostics` 文件夹。
-2. 安装 `pip install -r requirements.txt`。
+2. 在仓库根目录安装 `python -m pip install -r model_diagnostics/requirements.txt`。
 3. 打开 `config/pycharm_run.yaml`，填写 `dataset.data`，再选择一个 A/B/C 模式。
 4. 直接运行 `run_model_diagnostics.py`。
 5. 在 `runs/runN/<mode_name>/` 查看 `report.md`、`summary.json` 和 CSV 明细。
 
 每次运行会创建新的 `runN`，避免把上一次结果混进本次结果。入口配置只保留一个 `mode` 选择，不再使用容易混淆的 `models[].enabled` 列表。
+
+### 模块开关
+
+`config/pycharm_run.yaml` 的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50 和
+阈值曲线交给 Ultralytics 原生 `val`；诊断入口不会重复计算。未列出的模块视为关闭，
+因此可以只打开需要的功能：
+
+```yaml
+modules:
+  diagnostics.missed: true
+  diagnostics.classification: true
+  diagnostics.overlap: true
+  output.bad_cases: true
+  output.images: false
+  output.html: false
+```
 
 ## A/B/C 三种模式
 
@@ -35,7 +51,7 @@ mode_a:
   pred_format: auto
 ```
 
-预测文件支持 canonical JSON/JSONL 或 COCO detection results。预测应尽量保留低分框，诊断程序会自行做阈值扫描。
+预测文件支持 canonical JSON/JSONL 或 COCO detection results。预测应尽量保留低分框；只有显式启用 `diagnostics.threshold_sweep` 时才会执行阈值扫描。
 
 ### 模式 B：Ultralytics `.pt`
 
@@ -67,6 +83,10 @@ mode_c:
 ```
 
 模式 B/C 会自动逐图推理，并把中间预测保存为当前运行目录中的 `predictions_adapter.json`；模式 A 不会加载模型。
+
+开启 `diagnostics.overlap` 会额外生成 `overlap_gt_pairs.csv`、
+`overlap_prediction_pairs.csv` 和 `overlap_summary.json`；开启 `output.bad_cases` 会生成
+`bad_cases.csv`，`output.images` 与 `output.html` 再分别生成图片和浏览索引。
 
 ## vtools 对齐的 adapter 契约
 
@@ -184,13 +204,13 @@ COCO GT（`images` + `annotations` + `categories`）、COCO prediction results�
 
 | 指标 | 作用 | 下一步确认 |
 |---|---|---|
-| AP50、AP75、mAP50–95 | 整体检测质量与严格定位质量 | 对照不同 IoU，区分检出率和框回归 |
+| AP50、AP75、mAP50–95 | Ultralytics 原生验证提供的整体检测质量与严格定位质量 | 使用 Ultralytics `val` 的原始结果，不在本诊断入口重复计算 |
 | Precision、Recall、F1 | `diagnostics.score_threshold` 工作点表现 | 对照阈值扫描，判断是否只是工作点选择 |
 | Recall@IoU、候选覆盖率 | 宽松候选是否已经产生 | 低 IoU 高、严格 IoU 低时优先查定位 |
 | 低置信度可找回 GT | 目标是否被低分过滤 | 降低阈值并观察 FP/图，确认校准或类别区分度 |
 | 错误类型 | 漏检、背景、重复、定位、类别错误 | 查 `per_gt.csv` 与 `per_prediction.csv` |
 | 尺寸/密度/类别分组 | 小目标、拥挤场景或特定类别短板 | 固定数据分组做分辨率、裁剪和标签复核 |
-| raw vs final | 后处理/筛选是否额外丢失候选 | 传 `dataset.raw_predictions`，查看 `stage_comparison.csv` |
+| raw vs final | 后处理/筛选是否额外丢失候选 | 在 `dataset.raw_predictions` 或模型条目的 `raw_predictions` 中填写文件，查看 `stage_comparison.csv` |
 
 核心确认顺序是：
 
@@ -219,15 +239,28 @@ python diagnostics/engine.py \
 
 直接运行入口会自动加载 vtools 风格 YAML；命令行引擎仍接受扁平配置，方便脚本集成。
 
+### 按模块运行
+
+在 `config/pycharm_run.yaml` 的 `modules` 中逐项开关功能。PyCharm 直接运行
+`run_model_diagnostics.py` 与终端使用同一份配置；终端参数可临时覆盖：
+
+```bash
+python run_model_diagnostics.py --only diagnostics.overlap --predictions runs/predictions.json
+python run_model_diagnostics.py --enable output.images,output.html
+python run_model_diagnostics.py --disable diagnostics.classification
+python run_model_diagnostics.py --list-modules
+```
+
+`--only`、`--enable`、`--disable` 不能混用。开启差图时会生成 `bad_cases.csv`；
+开启重叠分析时会生成 `overlap_gt_pairs.csv`、`overlap_prediction_pairs.csv` 和
+`overlap_summary.json`。已有预测可用 `--predictions` 直接复用，不加载模型。
+
 ## 项目目录
 
 ```text
 model_diagnostics/
-├── installer/                     # 安装向导和环境检查
-│   ├── install.py
-│   └── check_environment.py
 ├── run_model_diagnostics.py       # PyCharm 入口
-├── config/                        # 带注释的 YAML/JSON 配置
+├── config/                        # 带注释的 YAML/JSON 配置和 modules 开关
 ├── core/                          # vtools 兼容类型
 ├── diagnostics/                   # 通用评估引擎和 adapter 运行器
 ├── adapters/                      # 可复制的模型适配器

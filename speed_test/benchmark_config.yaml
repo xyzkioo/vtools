@@ -77,18 +77,28 @@ benchmark:
   # 检查失败时是否立即终止。false 会先打印诊断，再进入正式测速。
   fail_on_checkpoint_inspection: false
 
+# 每个 test 内部功能的独立开关。命令行 --only/--enable/--disable 可临时覆盖。
+# 关闭 model.parameters 或 memory.pytorch_peak 后不会计算对应指标，也不会额外执行显存采样。
+modules:
+  checkpoint.inspect: true
+  checkpoint.load_check: true
+  model.parameters: false
+  model.flops: false
+  speed.pytorch_call: true
+  speed.pytorch_pipeline: false
+  speed.tensorrt_call: true
+  memory.pytorch_peak: false
+  export.onnx: false
+  build.tensorrt: true
+  consistency.tensor: true
+  consistency.detection: false
+
 pytorch:
   # 是否启用 PyTorch 后端。
   enabled: true
 
   # CUDA 可选 fp32、fp16、bf16；CPU 会自动跳过 fp16。
   precisions: [fp32, fp16]
-
-  # 是否执行纯模型调用；输入已在设备上，不含预处理和后处理。
-  test_model_call: true
-
-  # 是否执行 adapter pipeline；具体是否包含预处理/后处理由 adapter 决定。
-  test_pipeline: true
 
   # PyTorch 明细 CSV 输出路径。启用 run 后会归档到 runN；保留旧写法
   # runs-profile/... 也可以，程序会自动去掉这层前缀。
@@ -105,12 +115,6 @@ tensorrt:
 
   # TensorRT 精度：fp16、fp32 或 bf16（取决于硬件和 TensorRT 支持）。
   precision: fp16
-
-  # run_all 已测试 PyTorch，默认不重复；单独运行 TensorRT 入口要对比时再开启。
-  test_pytorch: false
-  # 这里仅指额外的 PyTorch pipeline，不是 TensorRT 图片 pipeline。
-  # test_pytorch: false 时此项也不执行。
-  test_pipeline: false
 
   # true 强制重新导出 ONNX 并构建 engine；false 时尽量复用已有 engine。
   rebuild_engine: false

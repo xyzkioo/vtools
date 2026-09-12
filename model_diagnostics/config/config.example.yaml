@@ -11,6 +11,32 @@
 # 所有坐标和 GT 都必须已经统一到原图像素坐标。
 # score 是模型输出的可比较置信度，通常应在 [0, 1]。
 
+# 每个诊断/输出功能独立开关；关闭后不会计算或生成对应结果。
+# mAP 等常规评估由 Ultralytics 验证入口负责，本工具默认不重复执行。
+modules:
+  diagnostics.missed: true
+  diagnostics.classification: true
+  diagnostics.background: true
+  diagnostics.duplicate: true
+  diagnostics.localization: true
+  diagnostics.overlap: true
+  diagnostics.groups: true
+  diagnostics.threshold_sweep: false
+  diagnostics.bootstrap: false
+  diagnostics.stage_comparison: false
+  output.bad_cases: true
+  output.images: false
+  output.html: false
+
+overlap:
+  iou_threshold: 0.30
+  smaller_area_threshold: 0.70
+  criterion: either
+  class_scope: all
+
+bad_cases:
+  top_k: 50
+
 # 工作点的置信度阈值。Precision/Recall/F1、FP 和 FN 使用这个阈值。
 score_threshold: 0.25
 
@@ -23,10 +49,9 @@ match_iou: 0.5
 # 额外报告的 Recall@IoU 和候选覆盖率。
 candidate_iou_thresholds: [0.3, 0.5, 0.75]
 
-# AP 使用的 IoU 阈值。默认对应 AP50:95，步长为 0.05。
-ap_iou_thresholds: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-
-# 置信度扫描。预测文件应保留低于工作阈值的框，否则扫描无法恢复它们。
+# AP/mAP 阈值不在这里配置，常规验证由 Ultralytics 原生 val 负责。
+# 置信度扫描只有显式开启 diagnostics.threshold_sweep 时执行；预测文件应
+# 保留低于工作阈值的框，否则扫描无法恢复它们。
 score_sweep: [0.001, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
 
 # 在接近这些 FP/图预算的工作点报告 Recall 和 Precision。

@@ -63,6 +63,7 @@ from core.vision_checkpoint_inspector import inspect_entries
 from core.vision_run_manager import prepare_run_directory, resolve_cli_path
 from backends.tensorrt_engine_builder import build_engine_from_onnx
 from core.build_metadata import collect_build_metadata, compare_build_request, read_build_metadata, write_build_metadata
+from core.module_selection import SPEED_MODULES, resolve_speed_modules
 
 
 def parse_input_size(value: str) -> tuple[int, int]:
@@ -120,6 +121,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace-mb", type=int, default=None)
     parser.add_argument("--opset", type=int, default=None)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--only", action="append", help="只运行指定模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--list-modules", action="store_true", help="列出测速模块后退出")
     return parser
 
 
@@ -400,11 +405,26 @@ def make_row(
 
 def main() -> list[dict[str, Any]]:
     args = build_parser().parse_args()
+    if args.list_modules:
+        print("\n".join(SPEED_MODULES))
+        return []
     config_file = load_config(args.config)
     run_dir = prepare_run_directory(config_file, args.run_dir)
     apply_python_paths(config_file)
     benchmark_values = config_file.get("benchmark", {})
     tensorrt_values = config_file.get("tensorrt", {})
+    modules = resolve_speed_modules(config_file, only=args.only, enable=args.enable, disable=args.disable)
+    # PyTorch call/pipeline belong to benchmark_pytorch.py.  Keeping them off
+    # here makes running the two backend scripts separately equivalent to the
+    # routed run_all plan and prevents an accidental duplicate measurement.
+    modules["speed.pytorch_call"] = False
+    modules["speed.pytorch_pipeline"] = False
+    # Peak PyTorch memory belongs to the PyTorch backend; run_all routes it
+    # there instead of silently reporting a TensorRT-stage placeholder.
+    has_model_info = any(modules.get(key) for key in ("model.parameters", "model.flops"))
+    has_checkpoint_check = any(modules.get(key) for key in ("checkpoint.inspect", "checkpoint.load_check"))
+    if not any(modules.get(key) for key in ("speed.tensorrt_call", "speed.pytorch_call", "build.tensorrt", "export.onnx")) and not has_model_info and not has_checkpoint_check:
+        raise ValueError("至少启用一个 TensorRT/PyTorch 测速、模型信息、权重检查或导出模块")
 
     args.device = args.device or benchmark_values.get("device", "auto")
     args.input_size = args.input_size or benchmark_values.get("input_size", "832")
@@ -450,11 +470,11 @@ def main() -> list[dict[str, Any]]:
     if args.source is None:
         args.source = benchmark_values.get("image", benchmark_values.get("source"))
 
-    if bool(benchmark_values.get("inspect_checkpoint", True)):
+    if modules.get("checkpoint.inspect") or modules.get("checkpoint.load_check"):
         inspection_results = inspect_entries(
             model_entries,
             benchmark_values,
-            try_adapter_load=bool(benchmark_values.get("verify_model_load", True)),
+            try_adapter_load=bool(modules.get("checkpoint.load_check")),
             print_results=True,
         )
         inspection_failures = [
@@ -466,13 +486,18 @@ def main() -> list[dict[str, Any]]:
         if inspection_failures and bool(benchmark_values.get("fail_on_checkpoint_inspection", False)):
             names = ", ".join(item.name for item in inspection_failures)
             raise RuntimeError(f"checkpoint 检查失败：{names}")
+        if has_checkpoint_check and not any(modules.get(key) for key in ("speed.tensorrt_call", "speed.pytorch_call", "build.tensorrt", "export.onnx")) and not has_model_info:
+            save_rows(args.output, [])
+            print(f"权重检查完成；结果已保存：{args.output.resolve()}")
+            return []
 
     if args.batch <= 0 or args.warmup < 0 or args.repeats <= 0:
         raise ValueError("batch>0、repeats>0，warmup 不能小于 0")
     device = resolve_device(args.device)
-    if device.type != "cuda":
-        raise RuntimeError("TensorRT 对比脚本必须使用 CUDA，例如 --device 0")
-    torch.backends.cudnn.benchmark = True
+    if device.type != "cuda" and (modules.get("speed.tensorrt_call") or modules.get("build.tensorrt")):
+        raise RuntimeError("TensorRT 测速/构建模块需要 CUDA；仅导出 ONNX 时可使用 CPU + fp32")
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
     height, width = parse_input_size(args.input_size)
     precision = normalize_precision(args.precision)
     if precision == "bf16":
@@ -494,13 +519,16 @@ def main() -> list[dict[str, Any]]:
         conf=float(benchmark_values.get("conf", 0.25)),
         iou=float(benchmark_values.get("iou", 0.70)),
         max_det=int(benchmark_values.get("max_det", 300)),
+        measure_parameters=modules.get("model.parameters", False),
+        measure_memory=modules.get("memory.pytorch_peak", False),
     )
     print("=" * 92)
     print("通用 PyTorch / TensorRT 视觉模型测速 v2")
     if run_dir is not None:
         print(f"本次运行目录：{run_dir}")
     print(f"Python：{platform.python_version()} | PyTorch：{torch.__version__}")
-    print(f"GPU：{torch.cuda.get_device_name(device)} | 输入：{height}x{width} | batch={args.batch}")
+    device_label = torch.cuda.get_device_name(device) if device.type == "cuda" else str(device)
+    print(f"设备：{device_label} | 输入：{height}x{width} | batch={args.batch}")
     adapters = ", ".join(sorted({str(item["adapter"]) for item in model_entries}))
     print(f"adapters：{adapters} | precision：{precision} | builder：{args.builder}")
     print("=" * 92)
@@ -528,8 +556,8 @@ def main() -> list[dict[str, Any]]:
             dtype = dtype_for_precision(precision, device)
             inputs = adapter.make_inputs(args.batch, (height, width), device, dtype, for_export=True)
 
-            run_pytorch = bool(tensorrt_values.get("test_pytorch", True)) and not args.skip_pytorch
-            run_pipeline = bool(tensorrt_values.get("test_pipeline", True)) and not args.skip_pipeline
+            run_pytorch = modules.get("speed.pytorch_call", False) and not args.skip_pytorch
+            run_pipeline = modules.get("speed.pytorch_pipeline", False) and not args.skip_pipeline
             if run_pytorch:
                 forward = benchmark_forward(adapter, model, config)
                 rows.append(
@@ -557,8 +585,29 @@ def main() -> list[dict[str, Any]]:
                         )
                     )
 
-            if args.rebuild_engine or not engine_path.is_file():
-                if not onnx_path.is_file() or args.rebuild_engine:
+            if not modules.get("speed.tensorrt_call") and not modules.get("build.tensorrt") and not modules.get("export.onnx"):
+                # TensorRT 关闭时，PyTorch 独立模块可以在没有 TensorRT
+                # 环境的机器上完成；不要为了准备 engine 而导入/构建它。
+                if has_model_info and not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline"):
+                    rows.append(make_row(
+                        spec,
+                        adapter.adapter_name,
+                        config,
+                        "pytorch",
+                        "model_info",
+                        "只执行模型信息检查；FLOPs/显存仅在 adapter 提供对应接口时可用",
+                        {"params": adapter.parameter_count(model) if modules.get("model.parameters") else None},
+                    ))
+                continue
+
+            if modules.get("export.onnx") and (args.rebuild_engine or not onnx_path.is_file()):
+                onnx_path = adapter.export_onnx(model, onnx_path, inputs, args.opset, dynamic=False)
+                print(f"[ONNX] 导出完成：{onnx_path}")
+            if modules.get("export.onnx") and not modules.get("build.tensorrt") and not modules.get("speed.tensorrt_call"):
+                continue
+
+            if modules.get("build.tensorrt") and (args.rebuild_engine or not engine_path.is_file()):
+                if not onnx_path.is_file() or (args.rebuild_engine and not modules.get("export.onnx")):
                     onnx_path = adapter.export_onnx(model, onnx_path, inputs, args.opset, dynamic=False)
                 build_engine_from_onnx(
                     onnx_path,
@@ -585,6 +634,8 @@ def main() -> list[dict[str, Any]]:
                 )
                 metadata_file = write_build_metadata(engine_path, metadata)
                 print(f"[TensorRT] 构建元数据已保存：{metadata_file}")
+            elif not engine_path.is_file():
+                raise FileNotFoundError(f"TensorRT engine 不存在且 build.tensorrt 已关闭：{engine_path}")
             else:
                 metadata = read_build_metadata(engine_path)
                 request = {
@@ -609,27 +660,28 @@ def main() -> list[dict[str, Any]]:
             if not built_this_run and not onnx_path.is_file():
                 print(f"[TensorRT] 复用已有 engine，不重新导出 ONNX：{engine_path}")
 
-            runner = TensorRTRunner(engine_path, device)
-            trt_result = benchmark_trt(runner, inputs, args.warmup, args.repeats)
-            rows.append(
-                make_row(
-                    spec,
-                    adapter.adapter_name,
-                    config,
-                    "tensorrt",
-                    "engine_call",
-                    "固定输入 engine 调用；不包含图像预处理和后处理",
-                    trt_result,
-                    onnx_path,
-                    engine_path,
+            if modules.get("speed.tensorrt_call"):
+                runner = TensorRTRunner(engine_path, device)
+                trt_result = benchmark_trt(runner, inputs, args.warmup, args.repeats)
+                rows.append(
+                    make_row(
+                        spec,
+                        adapter.adapter_name,
+                        config,
+                        "tensorrt",
+                        "engine_call",
+                        "固定输入 engine 调用；不包含图像预处理和后处理",
+                        trt_result,
+                        onnx_path,
+                        engine_path,
+                    )
                 )
-            )
-            print(
-                f"TensorRT：median={trt_result['median_ms']:.3f} ms, "
-                f"P90={trt_result['p90_ms']:.3f} ms, "
-                f"FPS/样本={1000.0 * args.batch / trt_result['median_ms']:.1f}"
-            )
-            del runner
+                print(
+                    f"TensorRT：median={trt_result['median_ms']:.3f} ms, "
+                    f"P90={trt_result['p90_ms']:.3f} ms, "
+                    f"FPS/样本={1000.0 * args.batch / trt_result['median_ms']:.1f}"
+                )
+                del runner
         except Exception as error:  # 记录单个模型/后端失败，保留其他模型结果
             message = f"{type(error).__name__}: {error}"
             print(f"[失败] {message}")

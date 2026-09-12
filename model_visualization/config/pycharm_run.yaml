@@ -19,6 +19,11 @@ input:
   size: [832, 832]              # [height, width]；首版固定方形 letterbox
   max_images: 10                # null 表示处理全部图片
 
+modules:
+  visualization.features: true
+  visualization.cam: false
+  visualization.stage_trace: false
+
 layers:
   # detect_inputs 自动捕获检测头进入的 P2/P3/P4/P5 特征；也可以写模块名列表。
   preset: detect_inputs

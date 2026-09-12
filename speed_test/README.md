@@ -14,7 +14,8 @@ by:小尛ovo
    其中包含本次的 PyTorch/TensorRT/一致性 CSV 或 JSON 结果。
 
 新增：直接运行 `check_consistency.py` 检查已有 ONNX/engine 与 PyTorch 的输出。
-`run_all.py` 也可以通过 `consistency.enabled` 和 `run_all.run_consistency` 执行。
+`run_all.py` 会结合 `modules.consistency.tensor`、`modules.consistency.detection`、
+`consistency.enabled` 和 `run_all.run_consistency` 决定是否执行一致性阶段。
 读取同一份输入，不重复测速；报告为 `consistency.csv` 和 `consistency.json`。
 使用方法、容差、YOLO26 框匹配及自定义 adapter 接入见完整教程第 8 节。
 
@@ -41,7 +42,6 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 ├── backends/                      # PyTorch/TensorRT 测速实现
 ├── checks/                        # 一致性检查和误差指标
 ├── adapters/                      # 自定义模型 adapter 模板
-├── legacy/                        # 原始上传脚本备份
 └── tests/                         # 离线回归测试
 ```
 
@@ -56,6 +56,7 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 | `core/vision_benchmark_config.py` | 读取 YAML、解析项目根目录和相对路径 |
 | `core/vision_run_manager.py` | 为每次入口调用创建 `run1`、`run2` 等独立目录 |
 | `core/vision_benchmark_common.py` | 计时、统计、设备、精度和 adapter 核心 |
+| `core/module_selection.py` | 统一解析 YAML 与 `--only/--enable/--disable` 模块开关 |
 | `core/vision_runtime.py` | PyCharm/conda 动态库路径兼容处理 |
 | `core/vision_checkpoint_inspector.py` | 检查 checkpoint 是否包含可恢复的模型架构 |
 | `benchmark_pytorch.py` | PyCharm 直接运行的 PyTorch 入口 |
@@ -70,8 +71,7 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 | `backends/pytorch_vision_speed_benchmark_v2.py` | PyTorch 后端实现 |
 | `backends/pytorch_vision_tensorrt_benchmark_v2.py` | TensorRT 后端实现 |
 | `tests/test_consistency.py` | 不依赖 GPU 的一致性与运行目录回归测试 |
-| `legacy/yolo26_tensorrt_benchmark(1).py` | 原始上传的 TensorRT 脚本备份（未改动） |
-| `legacy/yolo_detection_speed_benchmark(1).py` | 原始上传的 PyTorch 脚本备份（未改动） |
+| `tests/test_module_selection.py` | 模块 allow-list 与命令行选择回归测试 |
 
 ## 1. 第一次使用：只改 YAML
 
@@ -96,6 +96,21 @@ benchmark:
   batch_size: 1
   warmup: 30
   repeats: 100
+
+modules:
+  # 每个 test 内的功能只在这里开关；未列出的模块视为关闭。
+  checkpoint.inspect: true
+  checkpoint.load_check: true
+  model.parameters: false
+  model.flops: false
+  speed.pytorch_call: true
+  speed.pytorch_pipeline: false
+  speed.tensorrt_call: true
+  memory.pytorch_peak: false
+  export.onnx: false
+  build.tensorrt: true
+  consistency.tensor: true
+  consistency.detection: false
 
 run:
   enabled: true
@@ -180,15 +195,14 @@ run:
   enabled: false
 ```
 
-启动测速前，默认会自动检查每个 `.pt/.pth`：它会报告文件是完整模型对象、
-包含 `model/ema` 的训练 checkpoint，还是只有 `state_dict`。同时会用当前
-adapter 在 CPU 上尝试加载一次，以便尽早发现自定义模块或权重不匹配问题。
-可以在 `benchmark` 中调整：
+启动测速前是否检查每个 `.pt/.pth` 由 `modules.checkpoint.inspect` 和
+`modules.checkpoint.load_check` 控制。前者报告文件是完整模型对象、包含
+`model/ema` 的训练 checkpoint，还是只有 `state_dict`；后者会用当前 adapter
+在 CPU 上尝试加载一次，以便尽早发现自定义模块或权重不匹配问题。
+检查失败是否终止仍由 `benchmark` 中的选项控制：
 
 ```yaml
 benchmark:
-  inspect_checkpoint: true
-  verify_model_load: true
   fail_on_checkpoint_inspection: false
 ```
 
@@ -297,7 +311,7 @@ def export_onnx(model, output_path, inputs, opset, dynamic=False): ...
 - `make_inputs` 负责纯模型调用和 ONNX 导出的输入；分类、分割、检测、多输入
   模型都可以在这里返回自己的输入结构。
 - `predict` 是可选的真实 pipeline 边界，只有配置了 `benchmark.image` 且
-  `pytorch.test_pipeline: true` 时才会执行。
+  `modules.speed.pytorch_pipeline: true` 时才会执行。
 - state_dict 不能直接被默认 `checkpoint` adapter 恢复，必须在
   `build_model` 中先实例化网络再 `load_state_dict`。
 - TensorRT 阶段需要模型能导出 ONNX；复杂输出或多输入模型建议自行实现
@@ -387,9 +401,13 @@ TensorRT engine 与 GPU、CUDA、TensorRT 版本相关，换部署机器后应�
 也可以在 `run_all.py` 中一键执行：
 
 ```yaml
-tensorrt:
-  test_pytorch: false      # 避免重复测速；一致性检查不依赖这个开关
-  test_pipeline: false     # 这是额外的 PyTorch pipeline，不是 TensorRT 图片流程
+modules:
+  speed.pytorch_call: true
+  speed.pytorch_pipeline: false
+  speed.tensorrt_call: true
+  build.tensorrt: true
+  consistency.tensor: true
+  consistency.detection: false
 
 consistency:
   enabled: true
@@ -519,8 +537,8 @@ def validation_outputs(outputs, output_names):
 
 ### 汇总与测试说明
 
-- 新配置已把 `tensorrt.test_pytorch/test_pipeline` 设为 false，避免一键运行重复测速。
-  正确性检查仍会各做必要的推理，但不执行测速的 30 次预热/100 次计时循环。
+- `modules` 是测试功能的唯一开关。`run_all.py` 会让 PyTorch 模块和 TensorRT 模块各自
+  只执行一次；正确性检查仍会各做必要的推理，但不执行测速的 30 次预热/100 次计时循环。
 - 速度汇总只使用本次返回的明细，不在运行失败后拼入磁盘上的旧 CSV。
   `record_type: measurement` 是测速记录，`stage_summary` 是阶段状态，不是一次测量。
   TensorRT 明细中有失败时，阶段也会显示失败，并跳过本轮一致性检查。
@@ -528,6 +546,28 @@ def validation_outputs(outputs, output_names):
   覆盖输出名称、形状/空值/非有限值、容差、检测框重排/漏框/类别变化和失败状态传播。
   这些单元测试不替代目标机器的真实 PyTorch/TensorRT 执行验证。
 - `.pt` 中的完整模型反序列化可能执行 Python 代码，只使用你信任的权重文件。
+
+### test 内部功能开关
+
+测速配置中的 `modules` 让同一个 test 内的功能按项执行。`speed.pytorch_call` 和
+`speed.pytorch_pipeline` 由 `benchmark_pytorch.py` 执行，`speed.tensorrt_call`、`export.onnx`、
+`build.tensorrt` 由 `benchmark_tensorrt.py` 执行；`model.parameters`、
+`memory.pytorch_peak` 等模块彼此独立；关闭后不会执行
+对应计算或额外前向。
+
+PyCharm 直接运行原有入口即可。终端可以临时选择模块：
+
+```bash
+python benchmark_pytorch.py --only speed.pytorch_call
+python benchmark_tensorrt.py --only export.onnx
+python run_all.py --disable speed.pytorch_pipeline,memory.pytorch_peak
+python benchmark_pytorch.py --list-modules
+```
+
+优先级为终端参数高于 YAML；`--only` 不能与 `--enable/--disable` 混用。TensorRT 构建关闭
+且 engine 不存在时会直接提示需要开启 `build.tensorrt`，不会偷偷构建。
+在 `run_all.py` 中使用 `--only` 时，PyTorch、TensorRT 和一致性模块会按所属阶段路由，
+同一个模块不会在两个阶段重复执行。
 
 实现参考：
 - PyTorch 容差定义：https://docs.pytorch.org/docs/stable/generated/torch.allclose.html

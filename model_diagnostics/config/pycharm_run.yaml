@@ -75,11 +75,28 @@ benchmark:
   warmup: 0
   repeats: 1
   fuse: false
-
-  # 保留低分框，便于分析低置信度漏检。
   conf: 0.001
   iou: 0.70
   max_det: 3000
+
+# 每个分析/输出功能独立开关。PyCharm 和终端入口使用同一组模块 ID。
+# 常规 mAP/Precision/Recall 等验证由 Ultralytics 提供，本诊断默认不重复执行。
+modules:
+  predict.generate: true       # B/C 模式生成一次可复用预测；A 模式应关闭
+  validation.ultralytics: false
+  diagnostics.missed: true
+  diagnostics.classification: true
+  diagnostics.background: true
+  diagnostics.duplicate: true
+  diagnostics.localization: true
+  diagnostics.overlap: true
+  diagnostics.groups: true
+  diagnostics.threshold_sweep: false
+  diagnostics.bootstrap: false
+  diagnostics.stage_comparison: false
+  output.bad_cases: true
+  output.images: false
+  output.html: false
 
 # ==================== 诊断参数 ====================
 diagnostics:
@@ -87,7 +104,8 @@ diagnostics:
   candidate_threshold: 0.001
   match_iou: 0.5
   candidate_iou_thresholds: [0.3, 0.5, 0.75]
-  ap_iou_thresholds: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+  # AP/mAP 阈值不在这里配置，常规验证由 Ultralytics 原生 val 负责。
+  # 只有显式开启 diagnostics.threshold_sweep 时才读取下面的阈值扫描。
   score_sweep: [0.001, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
   fp_budgets_per_image: [0.1, 0.5, 1.0, 2.0, 5.0]
   localization_iou_floor: 0.1
@@ -95,3 +113,10 @@ diagnostics:
   density_bins: [0, 1, 4, 8, "inf"]
   bootstrap_images: 0
   seed: 0
+  overlap:
+    iou_threshold: 0.30
+    smaller_area_threshold: 0.70
+    criterion: either       # either / both / iou / smaller_area
+    class_scope: all        # all / same
+  bad_cases:
+    top_k: 50

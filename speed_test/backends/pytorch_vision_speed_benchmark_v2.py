@@ -28,6 +28,7 @@ import argparse
 import csv
 import platform
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,7 @@ from core.vision_benchmark_common import (
 from core.vision_benchmark_config import apply_python_paths, get_model_entries, load_config
 from core.vision_checkpoint_inspector import inspect_entries
 from core.vision_run_manager import prepare_run_directory, resolve_cli_path
+from core.module_selection import SPEED_MODULES, resolve_speed_modules
 
 
 def parse_input_size(value: str) -> tuple[int, int]:
@@ -109,6 +111,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iou", type=float, default=None)
     parser.add_argument("--max-det", type=int, default=None)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--only", action="append", help="只运行指定模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--list-modules", action="store_true", help="列出测速模块后退出")
     return parser
 
 
@@ -179,6 +185,39 @@ def rows_for_result(
     return rows
 
 
+def row_for_model_info(
+    spec: ModelSpec,
+    precision: str,
+    config: BenchmarkConfig,
+    adapter_name: str,
+    params: int | None,
+    peak_delta_mb: float | None,
+    note: str,
+) -> dict[str, Any]:
+    return {
+        "model": spec.name,
+        "weights": str(spec.weights),
+        "backend": "pytorch",
+        "adapter": adapter_name,
+        "precision": precision,
+        "height": config.height,
+        "width": config.width,
+        "batch": config.batch_size,
+        "params": params,
+        "scope": "model_info",
+        "scope_note": note,
+        "mean_ms": None,
+        "median_ms": None,
+        "p90_ms": None,
+        "min_ms": None,
+        "max_ms": None,
+        "std_ms": None,
+        "fps_per_sample": None,
+        "peak_delta_mb": peak_delta_mb,
+        "output_count": None,
+    }
+
+
 def save_rows(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = [
@@ -211,11 +250,19 @@ def save_rows(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def main() -> list[dict[str, Any]]:
     args = build_parser().parse_args()
+    if args.list_modules:
+        print("\n".join(SPEED_MODULES))
+        return []
     config_file = load_config(args.config)
     run_dir = prepare_run_directory(config_file, args.run_dir)
     apply_python_paths(config_file)
     benchmark_values = config_file.get("benchmark", {})
     pytorch_values = config_file.get("pytorch", {})
+    modules = resolve_speed_modules(config_file, only=args.only, enable=args.enable, disable=args.disable)
+    has_model_info = any(modules.get(key) for key in ("model.parameters", "model.flops", "memory.pytorch_peak"))
+    has_checkpoint_check = any(modules.get(key) for key in ("checkpoint.inspect", "checkpoint.load_check"))
+    if not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline") and not has_model_info and not has_checkpoint_check:
+        raise ValueError("至少启用一个 PyTorch 测速、模型信息、权重检查或显存模块")
 
     args.device = args.device or benchmark_values.get("device", "auto")
     args.input_size = args.input_size or benchmark_values.get("input_size", "832")
@@ -243,11 +290,11 @@ def main() -> list[dict[str, Any]]:
     if args.source is None:
         args.source = benchmark_values.get("image", benchmark_values.get("source"))
 
-    if bool(benchmark_values.get("inspect_checkpoint", True)):
+    if modules.get("checkpoint.inspect") or modules.get("checkpoint.load_check"):
         inspection_results = inspect_entries(
             model_entries,
             benchmark_values,
-            try_adapter_load=bool(benchmark_values.get("verify_model_load", True)),
+            try_adapter_load=bool(modules.get("checkpoint.load_check")),
             print_results=True,
         )
         inspection_failures = [
@@ -259,6 +306,10 @@ def main() -> list[dict[str, Any]]:
         if inspection_failures and bool(benchmark_values.get("fail_on_checkpoint_inspection", False)):
             names = ", ".join(item.name for item in inspection_failures)
             raise RuntimeError(f"checkpoint 检查失败：{names}")
+        if has_checkpoint_check and not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline") and not has_model_info:
+            save_rows(args.output, [])
+            print(f"权重检查完成；结果已保存：{args.output.resolve()}")
+            return []
 
     if args.batch <= 0 or args.warmup < 0 or args.repeats <= 0:
         raise ValueError("batch>0、repeats>0，warmup 不能小于 0")
@@ -275,6 +326,12 @@ def main() -> list[dict[str, Any]]:
         precisions = [item for item in precisions if item != "fp16"]
     if not precisions:
         raise ValueError("当前设备没有可测试的精度")
+    info_only = not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline")
+    if info_only:
+        # Parameter/FLOPs inspection is precision-independent.  A memory-only
+        # run still performs one lightweight forward below, rather than the
+        # configured timing loop.
+        precisions = precisions[:1]
 
     source = None
     if args.source:
@@ -319,20 +376,37 @@ def main() -> list[dict[str, Any]]:
                 conf=args.conf,
                 iou=args.iou,
                 max_det=args.max_det,
+                measure_parameters=modules.get("model.parameters", False),
+                measure_memory=modules.get("memory.pytorch_peak", False),
             )
+            measurement_config = replace(config, warmup=0, repeats=1) if info_only and modules.get("memory.pytorch_peak") else config
             print(f"\n[测速] {spec.name} / {precision}")
             model = adapter.load_model(spec.weights, device)
             try:
                 model = adapter.prepare_model(model, device, precision, args.fuse)
-                forward = benchmark_forward(adapter, model, config)
+                forward = benchmark_forward(adapter, model, measurement_config) if (modules.get("speed.pytorch_call") or (info_only and modules.get("memory.pytorch_peak"))) else None
                 pipeline = None
                 # Ultralytics 的 predict 没有 source 时会采用内部 demo 数据，
                 # 这不属于用户想测试的真实输入，因此默认跳过。
-                pipeline_enabled = bool(pytorch_values.get("test_pipeline", True)) and not args.skip_pipeline
+                pipeline_enabled = modules.get("speed.pytorch_pipeline", False) and not args.skip_pipeline
                 if pipeline_enabled and (source is not None or not adapter.supports_real_predict):
                     pipeline = benchmark_pipeline(adapter, model, config, source)
-                print_result(spec.name, precision, forward, pipeline)
-                rows.extend(rows_for_result(spec, precision, forward, pipeline, config, adapter.adapter_name))
+                if forward is not None and modules.get("speed.pytorch_call"):
+                    print_result(spec.name, precision, forward, pipeline)
+                    rows.extend(rows_for_result(spec, precision, forward, pipeline, config, adapter.adapter_name))
+                elif pipeline is not None:
+                    print(f"模型：{spec.name} | PyTorch | {precision} | 仅 adapter pipeline")
+                    rows.extend(rows_for_result(spec, precision, {"batch": args.batch, "median_ms": pipeline["median_ms"], "params": pipeline.get("params")}, pipeline, config, adapter.adapter_name)[1:])
+                elif info_only:
+                    params = adapter.parameter_count(model) if modules.get("model.parameters") else None
+                    note = "只执行模型信息检查"
+                    if modules.get("model.flops"):
+                        note += "；当前 adapter 未提供 FLOPs 统计接口"
+                    peak = forward.get("peak_delta_mb") if forward is not None else None
+                    if modules.get("memory.pytorch_peak"):
+                        note += "；显存模块仅执行一次前向"
+                    rows.append(row_for_model_info(spec, precision, config, adapter.adapter_name, params, peak, note))
+                    print(f"模型：{spec.name} | 模型信息 | 参数量={params or 'unknown'} | 峰值显存增量={peak if peak is not None else 'N/A'}")
             finally:
                 cleanup_model(model)
 

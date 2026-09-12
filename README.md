@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | [ultralytics-cn/](ultralytics-cn/) | Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](ultralytics-cn/README.zh-CN.md)、[安装配置](ultralytics-cn/pyproject.toml) |
 | [env_test/](env_test/) | 检查 Python、依赖、实际导入的源码路径、CUDA、模型构建与前向传播 | [check_install.py](env_test/check_install.py)、[安装与检验向导](env_test/README.md) |
-| [model_diagnostics/](model_diagnostics/) | 目标检测质量与错误分析：P/R/F1、AP、候选召回、误检漏检、尺寸/密度分组、阈值扫描、计数误差等 | [run_model_diagnostics.py](model_diagnostics/run_model_diagnostics.py)、[完整说明](model_diagnostics/docs/README.md) |
+| [model_diagnostics/](model_diagnostics/) | 目标检测错误分析：漏检、错分类、多余框、重复框、定位偏差、框重叠和差图；常规 mAP 等交给 Ultralytics 验证 | [run_model_diagnostics.py](model_diagnostics/run_model_diagnostics.py)、[完整说明](model_diagnostics/docs/README.md) |
 | [model_visualization/](model_visualization/) | 通用特征图、聚合激活图、可选 Grad-CAM/LayerCAM，以及检测头 raw candidate→top-k→final 阶段追踪 | [run_visualization.py](model_visualization/run_visualization.py)、[PyCharm 配置](model_visualization/config/pycharm_run.yaml) |
-| [speed_test/](speed_test/) | PyTorch / TensorRT 测速、checkpoint 可恢复性检查、转换前后输出一致性检查 | [run_all.py](speed_test/run_all.py)、[使用说明](speed_test/README.md) |
+| [speed_test/](speed_test/) | PyTorch / TensorRT 测速、checkpoint 可恢复性检查、转换前后输出一致性检查；功能由 `benchmark_config.yaml` 的 `modules` 控制 | [run_all.py](speed_test/run_all.py)、[使用说明](speed_test/README.md) |
 | [transform_tools/](transform_tools/) | NDJSON 数据集转 YOLO、Ultralytics 权重转 ONNX / K230 `.kmodel`、ONNX 与 `.kmodel` 输出对比 | [脚本与环境说明](transform_tools/REQUIREMENT.md) |
 | [模型勘误方法.md](模型勘误方法.md) | 模型问题排查的思路与参考方法 | 阅读文档 |
 | [LICENSE](LICENSE) | 仓库根目录许可证 | 引入的 Ultralytics 源码另保留其许可证 |
@@ -140,8 +140,6 @@ python env_test/check_install.py --source ./ultralytics-cn --weights /path/to/be
 
 通过基础检验表示安装、导入和基本前向链路可用；自己的权重、数据集和部署后端仍需分别验证。`--check-export` 可额外检查 ONNX / TensorRT 导入，`--strict` 可将部分警告提升为失败。
 
-**旧说明路径提示：** 当前检查入口是 `env_test/check_install.py`。部分子文档中的 `install_check/`、`model_diagnostics/installer/` 是旧路径，当前仓库没有这些目录，请使用本节命令。
-
 ## 使用各工具
 
 ### 1. 修改模型架构
@@ -192,6 +190,15 @@ mode_b:
   name: ultralytics_pt
   weights: /path/to/best.pt
   task: detect
+
+modules:
+  diagnostics.missed: true
+  diagnostics.classification: true
+  diagnostics.overlap: true
+  diagnostics.threshold_sweep: false
+  output.bad_cases: true
+  output.images: false
+  output.html: false
 ```
 
 然后运行：
@@ -200,7 +207,7 @@ mode_b:
 python model_diagnostics/run_model_diagnostics.py
 ```
 
-该入口固定读取 `model_diagnostics/config/pycharm_run.yaml`。按上面的路径设置，结果保存在 `model_diagnostics/runs/runN/ultralytics_pt/`。
+该入口默认读取 `model_diagnostics/config/pycharm_run.yaml`，也可以用 `--config` 指定另一份 YAML。按上面的路径设置，结果保存在 `model_diagnostics/runs/runN/ultralytics_pt/`。
 
 主要查看：
 
@@ -210,10 +217,10 @@ python model_diagnostics/run_model_diagnostics.py
 | `per_gt.csv`、`per_prediction.csv` | 每个真实目标的检出/漏检情况、每个预测框的匹配/错误类型 |
 | `per_image.csv` | 每张图片的检测和计数表现 |
 | `group_metrics.csv` | 按目标尺寸、密度、类别等分组对比 |
-| `threshold_sweep.csv`、`fp_budget.csv` | 置信度阈值、误检数量与召回的取舍 |
+| `threshold_sweep.csv`、`fp_budget.csv` | 仅在开启 `diagnostics.threshold_sweep` 时生成，用于观察置信度阈值与召回的取舍 |
 | `predictions_adapter.json` | 模式 B/C 本次推理生成的预测，便于复查或后续用模式 A 分析 |
 
-`benchmark.conf: 0.001` 用于推理时保留低分候选，`diagnostics.score_threshold: 0.25` 是正式 P/R/F1 的工作阈值，两者用途不同。候选召回还由 `diagnostics.candidate_threshold` 控制；已被推理阶段删掉的框，后续降低诊断阈值也无法找回。
+`benchmark.conf: 0.001` 用于推理时保留低分候选，`diagnostics.score_threshold: 0.25` 是正式 P/R/F1 的工作阈值，两者用途不同。候选召回还由 `diagnostics.candidate_threshold` 控制；已被推理阶段删掉的框，后续降低诊断阈值也无法找回。AP/mAP 与常规验证使用 Ultralytics 原生 `val`，不会由诊断入口重复计算。
 
 前后处理阶段对比需要另外提供真实的 raw 预测，才能生成 `stage_comparison.csv`；普通模式 B 的最终检测框不自动等于“NMS 前候选”。指标口径见 [METRICS.md](model_diagnostics/docs/METRICS.md)，数据格式与 adapter 接口见 [完整教程](model_diagnostics/docs/README.md)。
 
@@ -234,14 +241,23 @@ python -m pip install -e ./ultralytics-cn
 python model_visualization/run_visualization.py --config model_visualization/config/pycharm_run.yaml
 ```
 
+可视化功能由配置中的 `modules` 独立控制：
+
+```yaml
+modules:
+  visualization.features: true
+  visualization.cam: false
+  visualization.stage_trace: false
+```
+
 默认会捕获检测头进入的 P 层特征，保存以下内容：
 
 | 输出 | 用途 |
 | --- | --- |
 | `layers.csv` | 当前权重实际加载后的模块名、类型和参数量；先用 `mode: list_layers` 找到要观察的层 |
 | `features/`、`activations/` | 指定通道图、聚合激活图和原图叠加图；`layers.modules` 可改成任意模块名 |
-| `cams/` | 开启 `cam.enabled` 后生成 Grad-CAM/LayerCAM；解释前向固定使用 FP32 |
-| `stage_trace/` | 开启 `stage_trace.enabled` 后保存 raw candidate、head top-k、final、事件 JSONL、P 层/网格索引和 overlay |
+| `cams/` | 开启 `modules.visualization.cam` 后生成 Grad-CAM/LayerCAM；解释前向固定使用 FP32 |
+| `stage_trace/` | 开启 `modules.visualization.stage_trace` 后保存 raw candidate、head top-k、final、事件 JSONL、P 层/网格索引和 overlay |
 | `canonical/` | raw/final 的 canonical JSON，可直接交给 `model_diagnostics` 做阶段对照 |
 
 阶段追踪只使用检测头自己的索引：每个候选会记录 `raw_index`、`source_level`（如 P3/P4/P5）、`source_index`、stride 和网格坐标；YOLO26 的 `one2one` 分支按 top-k 与置信度形成 final，`one2many` 分支沿用 Ultralytics NMS 并保留 `return_idxs=True` 的精确索引。不会用近似 IoU 推断候选来源。首版目标是检测任务，其他模型需要实现同等 adapter 接口。
@@ -274,6 +290,20 @@ benchmark:
   device: auto
   input_size: [832, 832]
   batch_size: 1
+
+modules:
+  checkpoint.inspect: true
+  checkpoint.load_check: true
+  model.parameters: false
+  model.flops: false
+  speed.pytorch_call: true
+  speed.pytorch_pipeline: false
+  speed.tensorrt_call: true
+  memory.pytorch_peak: false
+  export.onnx: false
+  build.tensorrt: true
+  consistency.tensor: true
+  consistency.detection: false
 ```
 
 根据用途选择入口：
@@ -300,7 +330,27 @@ python -m pip install onnx onnxscript
 
 比较速度时应保持硬件、输入尺寸、batch、精度和计时范围一致。`model_call` 不含预处理/后处理；`adapter_pipeline` 的范围由 adapter 决定，请查看 CSV 的 `scope_note`。输出一致性检查通过也不代替验证集上的检测精度评估。详见 [CSV 指标说明](speed_test/CSV_METRICS_GUIDE.md)。
 
-### 4. 数据集与 K230 模型转换
+测速 test 内的参数量、峰值显存、PyTorch 纯调用、PyTorch pipeline、ONNX 导出、TensorRT 构建、engine 调用和一致性张量/框匹配现在都可在 `benchmark_config.yaml` 的 `modules` 中单独开关。终端可用同样的模块 ID 临时覆盖配置，例如：
+
+```bash
+python speed_test/benchmark_pytorch.py --only speed.pytorch_call
+python speed_test/benchmark_tensorrt.py --only export.onnx
+python speed_test/run_all.py --disable speed.pytorch_pipeline,memory.pytorch_peak
+```
+
+目标检测诊断也按同一粒度拆分：漏检、错分类、背景多余框、重复框、定位偏差、框重叠、差图清单、图片和 HTML 均可独立开关。诊断入口支持 PyCharm 配置和终端的 `--only/--enable/--disable`；mAP 等常规指标继续使用 Ultralytics 原生验证，避免重复测量。完整模块列表和输出规则见 [模块化 Spec](docs/specs/modular-tests-and-diagnostics.md)。
+
+也可以使用仓库根目录的统一入口选择子工具：
+
+```bash
+python run_tools.py --tool diagnostics --config config/tools.yaml
+python run_tools.py --tool pytorch --only speed.pytorch_call
+python run_tools.py --tool visualization --only visualization.features
+```
+
+`run_all.py --only ...` 会按模块所属阶段执行，避免同一个 PyTorch 测试被 TensorRT 阶段再次调用。
+
+### 5. 数据集与 K230 模型转换
 
 这些脚本当前主要使用文件顶部的参数配置，相对路径按**运行时工作目录**解释：
 
@@ -324,13 +374,15 @@ python transform_tools/PY2KM_validate.py --onnx /path/to/best.onnx --kmodel /pat
 
 | 设置 / 入口 | 相对路径的基准 |
 | --- | --- |
-| 测速 YAML 的 `project.root` | 当前配置文件所在目录，默认是 `speed_test/` |
-| 诊断 YAML 的 `project.root` | `run_model_diagnostics.py` 所在目录，即 `model_diagnostics/`，不是 `config/` |
+| 测速 YAML 的 `project.root` | 相对于配置文件所在目录，即 `speed_test/`；当前值由 YAML 明确指定 |
+| 诊断 YAML 的 `project.root` | 相对于 `run_model_diagnostics.py` 所在目录，即 `model_diagnostics/`；当前值由 YAML 明确指定 |
 | 两套配置中的权重、数据集、adapter、`run.root` 等路径 | 各自解析后的 `project.root` |
 | 环境检验的显式 `--source`、`--weights` 等参数 | 终端 / PyCharm 的工作目录 |
 | `transform_tools` 脚本中的相对文件路径 | 终端 / PyCharm 的工作目录 |
 
-因此，上文两套配置都使用 `project.root: ..` 指向 `vtools/`。仓库原始 YAML 中的 `GoodModel/`、`datasets/`、`test.jpg` 等是个人项目示例，克隆仓库后需要提供自己的权重、图片和数据集并修改路径。
+上面的示例用 `project.root: ..` 指向 `vtools/`。仓库附带 YAML 中的
+`GoodModel/`、`datasets/`、`test.jpg` 等是个人项目示例，克隆仓库后需要提供自己的权重、
+图片和数据集并修改路径；如果保留 `../..`，这些路径就会相对于上两级目录解析。
 
 将 `project.root` 改成仓库根目录后，自定义 adapter 也应写全相对于根目录的路径，例如 `speed_test/adapters/my_detector.py` 或 `model_diagnostics/adapters/my_detector.py`。
 

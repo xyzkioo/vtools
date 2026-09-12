@@ -7,6 +7,15 @@
 - 版本性质：通用视觉模型辅助工具的可视化与检测阶段追踪更新
 - 适用仓库：`xyzkioo/vtools`
 
+## 更新批次：`2026.09.10`
+
+- 功能：测速与目标检测诊断的 test 内部模块开关；差图清单、图片/HTML 输出和检测框重叠分析；可视化的特征图/CAM/阶段追踪开关；诊断默认不重复计算 Ultralytics 的 mAP/AP 与阈值扫描。
+- 新增文件：`docs/specs/modular-tests-and-diagnostics.md`、`model_diagnostics/diagnostics/modules.py`、`model_diagnostics/diagnostics/overlap.py`、`model_diagnostics/diagnostics/bad_cases.py`、`speed_test/core/module_selection.py`、`run_tools.py`、`config/tools.yaml`。
+- 修改文件：诊断引擎和 PyCharm/终端入口、PyTorch/TensorRT 测速入口、一致性检查、相关配置与 README。
+- 配置变化：新增 `modules`；支持 `--only`、`--enable`、`--disable`、`--list-modules`；诊断 YAML 移除 AP 阈值旧参数，speed_test 移除 `test_model_call/test_pipeline/test_pytorch` 独立开关，统一由 `modules` 控制。重叠分析支持 IoU、交集占较小框比例、规则和类别范围配置。
+- 验证方式：`python -m compileall -q model_diagnostics speed_test`；在 `speed_test/` 中运行 `python -m unittest discover -s tests -v`（43 项，1 项按环境跳过），在仓库根目录运行 `python -m unittest discover -s model_diagnostics/tests -v`（5 项）；各入口的 `--list-modules`；使用 canonical GT/预测进行重叠和差图离线冒烟。
+- 已知限制：`validation.ultralytics` 仅作为预留开关，具体验证仍由 Ultralytics 原生入口执行；图片绘制需要 Pillow；TensorRT 模块仍需要 CUDA/TensorRT 环境。
+
 这不是 Python 包的运行时版本号，而是仓库更新清单。以后每次增加功能时，继续在本文件追加一节即可。
 
 ## 本次更新目的

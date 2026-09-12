@@ -1,0 +1,7 @@
+# 根目录 run_tools.py 的默认说明配置。
+# 日常可直接修改各子项目配置；这里主要用于 PyCharm 选择统一入口。
+tool: diagnostics
+diagnostics_config: model_diagnostics/config/pycharm_run.yaml
+speed_config: speed_test/benchmark_config.yaml
+visualization_config: model_visualization/config/pycharm_run.yaml
+

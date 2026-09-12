@@ -15,7 +15,7 @@
 
 ```text
 vtools/
-├── install_check/
+├── env_test/
 │   ├── check_install.py
 │   └── README.md
 └── ultralytics-cn/
@@ -77,7 +77,7 @@ python -m pip install -e ./ultralytics-cn
 在 `vtools` 根目录运行：
 
 ```bash
-python install_check/check_install.py --source ./ultralytics-cn
+python env_test/check_install.py --source ./ultralytics-cn
 ```
 
 脚本会检查：
@@ -104,7 +104,7 @@ python install_check/check_install.py --source ./ultralytics-cn
 conda activate yolo
 cd /path/to/vtools
 python -m pip install -e ./ultralytics-cn
-python install_check/check_install.py --source ./ultralytics-cn
+python env_test/check_install.py --source ./ultralytics-cn
 ```
 
 如果你是在 PyCharm 中运行，检查 PyCharm 使用的解释器是否与终端中的 `sys.executable` 相同。修改解释器后重新启动运行配置。
@@ -114,7 +114,7 @@ python install_check/check_install.py --source ./ultralytics-cn
 安装检查默认不需要训练权重。要额外确认自定义 `.pt` 能否由这份源码加载并预测：
 
 ```bash
-python install_check/check_install.py \
+python env_test/check_install.py \
     --source ./ultralytics-cn \
     --weights /absolute/path/to/best.pt
 ```
@@ -124,7 +124,7 @@ python install_check/check_install.py \
 如果只想排查基础导入而暂时不进行任何模型构建/预测，可以写：
 
 ```bash
-python install_check/check_install.py \
+python env_test/check_install.py \
     --source ./ultralytics-cn \
     --weights /absolute/path/to/best.pt \
     --skip-model
@@ -150,7 +150,7 @@ python install_check/check_install.py \
 TensorRT 不是普通 PyTorch 训练的必需项。只有需要导出或 TensorRT 测速时才运行：
 
 ```bash
-python install_check/check_install.py \
+python env_test/check_install.py \
     --source ./ultralytics-cn \
     --check-export
 ```
@@ -169,7 +169,7 @@ ultralytics-cn/  →  ultralytics-custom/
 
 ```bash
 python -m pip install -e ./ultralytics-custom
-python install_check/check_install.py --source ./ultralytics-custom
+python env_test/check_install.py --source ./ultralytics-custom
 ```
 
 代码仍然使用：
@@ -183,7 +183,7 @@ from ultralytics import YOLO
 可以把 `pyproject.toml` 中 `[project]` 的 `name` 改成例如 `ultralytics-vtools`，但 Python 导入名仍是 `ultralytics`。此时建议检验时使用：
 
 ```bash
-python install_check/check_install.py \
+python env_test/check_install.py \
     --source ./ultralytics-cn \
     --distribution ultralytics-vtools
 ```
@@ -197,7 +197,7 @@ python install_check/check_install.py \
 只有完成这些修改后，才使用：
 
 ```bash
-python install_check/check_install.py \
+python env_test/check_install.py \
     --source ./ultralytics-custom \
     --module ultralytics_custom \
     --distribution ultralytics-vtools

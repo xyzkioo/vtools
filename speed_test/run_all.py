@@ -13,6 +13,7 @@ from typing import Any
 
 from core.vision_benchmark_config import load_config
 from core.vision_run_manager import prepare_run_directory
+from core.module_selection import SPEED_MODULES, resolve_speed_modules
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +29,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="复用指定的 runN 目录；省略时自动创建 runs-profile/runN",
     )
+    parser.add_argument("--only", action="append", help="只运行指定测速模块，可重复或用逗号分隔")
+    parser.add_argument("--enable", action="append", help="临时启用测速模块，可重复或用逗号分隔")
+    parser.add_argument("--disable", action="append", help="临时关闭测速模块，可重复或用逗号分隔")
+    parser.add_argument("--list-modules", action="store_true", help="列出测速模块后退出")
     return parser
 
 
@@ -36,12 +41,14 @@ def _invoke(
     module_name: str,
     config_path: str,
     run_dir: str | Path | None = None,
+    module_args: list[str] | None = None,
 ) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """连导入异常也记录；以后端实际结果决定状态，而非只检查函数是否返回。"""
     original_argv = sys.argv[:]
     sys.argv = [label, "--config", config_path]
     if run_dir is not None:
         sys.argv.extend(["--run-dir", str(run_dir)])
+    sys.argv.extend(module_args or [])
     try:
         result = importlib.import_module(module_name).main()
         if isinstance(result, dict):
@@ -95,40 +102,72 @@ def _merge_results(
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.list_modules:
+        print("\n".join(SPEED_MODULES))
+        return
     config = load_config(args.config)
     run_dir = prepare_run_directory(config, args.run_dir)
     config_path = str(config["_config_path"])
     run_values = config.get("run_all", {})
     pytorch_values = config.get("pytorch", {})
     tensorrt_values = config.get("tensorrt", {})
+    selected_modules = resolve_speed_modules(config, only=args.only, enable=args.enable, disable=args.disable)
+    # ``--only`` is an exclusive plan: route each selected module to the
+    # backend that owns it, so a PyTorch module is not accidentally measured
+    # once in both the PyTorch and TensorRT stages.
+    only_values = [item.strip() for value in args.only or [] for item in str(value).split(",") if item.strip()]
+    if only_values or "modules" in config:
+        run_pytorch_stage = any(selected_modules.get(key) for key in (
+            "checkpoint.inspect", "checkpoint.load_check", "model.parameters", "model.flops",
+            "speed.pytorch_call", "speed.pytorch_pipeline", "memory.pytorch_peak",
+        ))
+        run_tensorrt_stage = any(selected_modules.get(key) for key in (
+            "speed.tensorrt_call", "export.onnx", "build.tensorrt",
+        ))
+    else:
+        run_pytorch_stage = True
+        run_tensorrt_stage = True
 
     stage_status: list[dict[str, str]] = []
     current_rows: list[dict[str, Any]] = []
     tensorrt_failed = False
+    module_args: list[str] = []
+    for flag in ("only", "enable", "disable"):
+        for value in getattr(args, flag) or []:
+            module_args.extend([f"--{flag}", value])
 
-    if bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
-        state, rows = _invoke("pytorch", "backends.pytorch_vision_speed_benchmark_v2", config_path, run_dir)
+    if run_pytorch_stage and bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
+        state, rows = _invoke("pytorch", "backends.pytorch_vision_speed_benchmark_v2", config_path, run_dir, module_args)
         stage_status.append(state)
         current_rows.extend(rows)
     else:
-        print("[跳过] run_all.run_pytorch 或 pytorch.enabled 为 false")
+        print("[跳过] 本次模块选择不需要 PyTorch 阶段，或 run_all.run_pytorch/pytorch.enabled 为 false")
 
-    if bool(run_values.get("run_tensorrt", True)) and bool(tensorrt_values.get("enabled", True)):
-        state, rows = _invoke("tensorrt", "backends.pytorch_vision_tensorrt_benchmark_v2", config_path, run_dir)
+    if run_tensorrt_stage and bool(run_values.get("run_tensorrt", True)) and bool(tensorrt_values.get("enabled", True)):
+        trt_module_args = list(module_args)
+        if not module_args and run_pytorch_stage and bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
+            # PyTorch stage already owns these modules in a one-click run.
+            # Pass explicit disables to TensorRT so each module runs once.
+            trt_module_args.extend(["--disable", "speed.pytorch_call"])
+            trt_module_args.extend(["--disable", "speed.pytorch_pipeline"])
+        state, rows = _invoke("tensorrt", "backends.pytorch_vision_tensorrt_benchmark_v2", config_path, run_dir, trt_module_args)
         stage_status.append(state)
         current_rows.extend(rows)
         tensorrt_failed = state["status"] != "succeeded"
     else:
-        print("[跳过] run_all.run_tensorrt 或 tensorrt.enabled 为 false")
+        print("[跳过] 本次模块选择不需要 TensorRT 阶段，或 run_all.run_tensorrt/tensorrt.enabled 为 false")
 
-    if bool(run_values.get("run_consistency", True)) and bool(config.get("consistency", {}).get("enabled", False)):
+    run_consistency_stage = (not only_values and "modules" not in config) or any(
+        selected_modules.get(key) for key in ("consistency.tensor", "consistency.detection")
+    )
+    if run_consistency_stage and bool(run_values.get("run_consistency", True)) and bool(config.get("consistency", {}).get("enabled", False)):
         if tensorrt_failed:
             # 不在本次转换失败之后悄悄验证磁盘里遗留的旧 engine。
             reason = "本次 TensorRT 阶段失败，一致性未执行；修复后重跑，或单独检查指定的已有 engine"
             stage_status.append({"backend": "consistency", "status": "skipped", "error": reason})
             print(f"[跳过] {reason}")
         else:
-            state, _ = _invoke("consistency", "checks.vision_consistency", config_path, run_dir)
+            state, _ = _invoke("consistency", "checks.vision_consistency", config_path, run_dir, module_args)
             stage_status.append(state)
     else:
         print("[跳过] run_all.run_consistency 或 consistency.enabled 为 false")

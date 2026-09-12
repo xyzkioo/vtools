@@ -75,7 +75,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "candidate_threshold": 0.001,
     "match_iou": 0.50,
     "candidate_iou_thresholds": [0.30, 0.50, 0.75],
-    "ap_iou_thresholds": [round(0.50 + 0.05 * i, 2) for i in range(10)],
     "score_sweep": [0.001, 0.01, 0.03, 0.05, 0.10, 0.20, 0.30, 0.50, 0.70, 0.90],
     "fp_budgets_per_image": [0.1, 0.5, 1.0, 2.0, 5.0],
     "localization_iou_floor": 0.10,
@@ -1081,19 +1080,17 @@ def _format_value(value: Any) -> str:
 
 def write_report(output_dir: Path, config: Mapping[str, Any], summary: Mapping[str, Any], ap: Mapping[str, Any], stage_rows: Sequence[Mapping[str, Any]], warnings: Sequence[str]) -> None:
     agg = summary["aggregate"]
-    lines = ["# 通用目标检测诊断报告", "", "本报告只评估检测质量与错误来源，不包含参数量、FLOPs、显存或延迟。模型框架通过统一预测格式或 predictor adapter 接入。", "", "## 运行配置", "", f"- 工作分数阈值：`{config.get('score_threshold')}`", f"- 候选保留阈值：`{config.get('candidate_threshold')}`", f"- 正式匹配 IoU：`{config.get('match_iou')}`", f"- 图像数：`{agg.get('image_count')}`；GT 数：`{agg.get('gt_count')}`", "", "## 主要结果", "", "| 指标 | 值 |", "|---|---:|", f"| Precision | {_format_value(agg.get('precision'))} |", f"| Recall | {_format_value(agg.get('recall'))} |", f"| F1 | {_format_value(agg.get('f1'))} |", f"| MAE（每图计数） | {_format_value(agg.get('count_mae'))} |", f"| 计数偏差（预测−GT） | {_format_value(agg.get('count_bias_pred_minus_gt'))} |", f"| 每图平均 FP | {_format_value(agg.get('mean_fp_per_image'))} |", f"| 每图平均 FN | {_format_value(agg.get('mean_fn_per_image'))} |", f"| 已匹配目标平均分数 | {_format_value(agg.get('mean_matched_score'))} |", "", "## AP", "", "| 指标 | 值 |", "|---|---:|"]
-    for key in ("AP50", "AP75", "mAP50_95"):
-        lines.append(f"| {key} | {_format_value(ap.get(key))} |")
-    lines += ["", "## 低阈值候选诊断", "", "| 指标 | 值 |", "|---|---:|"]
-    for threshold in config.get("candidate_iou_thresholds", [0.3, 0.5, 0.75]):
-        threshold = float(threshold)
-        lines.append(f"| Recall@IoU={threshold:g}（一对一匹配） | {_format_value(agg.get(f'recall_at_iou_{threshold:g}'))} |")
-        lines.append(f"| 候选覆盖@IoU={threshold:g}（GT 最佳候选） | {_format_value(agg.get(f'candidate_coverage_iou_{threshold:g}'))} |")
-    lines += [f"| 低置信度可找回 GT 数 | {_format_value(agg.get('low_confidence_recoverable_gt_count'))} |", f"| 低置信度可找回 GT 占比 | {_format_value(agg.get('low_confidence_recoverable_gt_rate'))} |"]
-    lines += ["", "## 错误计数", "", "| 类型 | 数量 |", "|---|---:|"]
-    for key, value in sorted((agg.get("error_counts") or {}).items()):
-        lines.append(f"| {key} | {value} |")
-    lines += ["", "## 如何确认原因", "", "1. 先看 `per_gt.csv`：区分没有候选、定位不足和类别错误。", "2. 再看 `group_metrics.csv`：比较小目标、拥挤目标、目标密度和类别分组。", "3. 看 `threshold_sweep.csv` 与 `fp_budget.csv`：确认是否只是阈值导致的低召回。", "4. 传入 `--raw-pred` 后查看 `stage_comparison.csv`：只有 raw 候选明显好于 final，才支持后处理或输出筛选造成损失。", "5. 任何结构原因都需要进一步做分辨率、标签复核、消融或特征探针实验；本报告本身只证明可观察到的错误现象。"]
+    enabled = config.get("enabled_modules", [])
+    lines = ["# 通用目标检测诊断报告", "", "本报告按开关执行差图、错误类型和框重叠分析；mAP 等常规验证请查看 Ultralytics 原生验证结果。", "", "## 运行配置", "", f"- 启用模块：`{', '.join(enabled) or '无'}`", f"- 工作分数阈值：`{config.get('score_threshold')}`", f"- 候选保留阈值：`{config.get('candidate_threshold')}`", f"- 正式匹配 IoU：`{config.get('match_iou')}`", f"- 图像数：`{agg.get('image_count', 'N/A')}`；GT 数：`{agg.get('gt_count', 'N/A')}`"]
+    if agg:
+        lines += ["", "## 诊断匹配摘要", "", "| 指标 | 值 |", "|---|---:|", f"| Precision（诊断工作点） | {_format_value(agg.get('precision'))} |", f"| Recall（诊断工作点） | {_format_value(agg.get('recall'))} |", f"| F1（诊断工作点） | {_format_value(agg.get('f1'))} |", f"| 每图平均漏检 | {_format_value(agg.get('mean_fn_per_image'))} |", f"| 每图平均多余框 | {_format_value(agg.get('mean_fp_per_image'))} |"]
+    if ap:
+        lines += ["", "## 外部常规验证", "", "本入口不重复计算 AP；如显式导入验证结果，请以 Ultralytics 原始报告为准。"]
+    if agg.get("error_counts"):
+        lines += ["", "## 错误计数", "", "| 类型 | 数量 |", "|---|---:|"]
+        for key, value in sorted((agg.get("error_counts") or {}).items()):
+            lines.append(f"| {key} | {value} |")
+    lines += ["", "## 输出说明", "", "- `per_gt.csv`：逐目标检出和漏检原因。", "- `per_prediction.csv`：逐预测框错误类型。", "- `bad_cases.csv`：差图排序清单。", "- `overlap_*`：检测框重叠及疑似重复预测。", "", "重叠表示几何框相交，不等同于真实遮挡；仅凭最终预测不能断定 NMS 或其他后处理是原因。"]
     if stage_rows:
         lines += ["", "## 候选/后处理阶段对照", "", "详见 `stage_comparison.csv`。raw 与 final 的差值用于定位候选筛选造成的损失，不代表某个特定算法（例如 NMS），除非适配器明确提供了该阶段。"]
     if warnings:
@@ -1139,7 +1136,7 @@ def generate_predictions_from_adapter(gt_ds: Dataset, images_dir: Path, spec: st
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Framework-independent object detection diagnostics")
-    parser.add_argument("--gt", required=True, type=Path, help="GT：Ultralytics data.yaml/.ndjson、canonical JSON/JSONL、COCO JSON 或 YOLO 标签目录")
+    parser.add_argument("--gt", required=False, type=Path, help="GT：Ultralytics data.yaml/.ndjson、canonical JSON/JSONL、COCO JSON 或 YOLO 标签目录")
     parser.add_argument("--pred", type=Path, help="预测文件：canonical JSON/JSONL 或 COCO results；使用 --predictor 时可省略")
     parser.add_argument("--raw-pred", type=Path, help="可选 raw/candidate 预测，用于阶段损失对照")
     parser.add_argument("--predictor", help="可选 module:function，生成 canonical 预测")
@@ -1149,16 +1146,37 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--split", default="val", choices=["train", "val", "test"], help="Ultralytics data.yaml 使用的 split")
     parser.add_argument("--config", type=Path, help="YAML 或 JSON 配置文件；未提供时使用内置默认值")
     parser.add_argument("--output", type=Path, default=Path("runs/model-diagnostics"))
+    parser.add_argument("--only", action="append", help="只运行指定模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--list-modules", action="store_true", help="列出可用模块后退出")
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+    try:
+        from .modules import available_modules, overlap_analysis, resolve_modules, render_bad_cases, write_bad_case_html, bad_case_rows
+    except ImportError:  # direct ``python diagnostics/engine.py`` compatibility
+        from modules import available_modules, overlap_analysis, resolve_modules, render_bad_cases, write_bad_case_html, bad_case_rows
+
+    if args.list_modules:
+        for module_id in available_modules():
+            if module_id.startswith(("predict.", "validation.", "diagnostics.", "output.")):
+                print(module_id)
+        return 0
+    if args.gt is None:
+        raise SystemExit("必须提供 --gt 或使用 --list-modules")
     if args.pred is None and args.predictor is None:
         raise SystemExit("必须提供 --pred 或 --predictor 之一")
     if args.predictor and args.images_dir is None:
         raise SystemExit("使用 --predictor 时必须提供 --images-dir")
     config = load_config(args.config)
+    modules = resolve_modules(config, only=args.only, enable=args.enable, disable=args.disable)
+    config["enabled_modules"] = [
+        module_id for module_id, enabled in modules.items()
+        if enabled and (module_id.startswith("diagnostics.") or module_id.startswith("output.") or module_id in {"predict.generate", "validation.ultralytics"})
+    ]
     gt_ds = load_ground_truth(args.gt, args.gt_format, args.images_dir, split=args.split)
     warnings = list(gt_ds.warnings)
     if args.pred is not None:
@@ -1170,32 +1188,64 @@ def main() -> int:
     ds.warnings.extend(_validate_dataset(ds))
     args.output.mkdir(parents=True, exist_ok=True)
 
-    summary = evaluate_operating(ds, config)
-    ap = compute_ap_metrics(ds, config.get("ap_iou_thresholds", DEFAULT_CONFIG["ap_iou_thresholds"]))
-    sweep = threshold_sweep(ds, config)
-    budget = fp_budget_rows(sweep, config.get("fp_budgets_per_image", DEFAULT_CONFIG["fp_budgets_per_image"]))
-    groups = group_metrics(summary["per_gt"])
+    needs_diagnostics = any(modules.get(module_id) for module_id in modules if module_id.startswith("diagnostics.") or module_id.startswith("output."))
+    summary = evaluate_operating(ds, config) if needs_diagnostics else {"aggregate": {}, "per_image": [], "per_gt": [], "per_prediction": [], "area_quantiles": {}}
+    # Overlap analysis consumes the same one-to-one matching table; no second
+    # model call or GT read is needed.
+    ds.diagnostic_per_gt = summary["per_gt"]
+    overlap = overlap_analysis(ds, config) if modules.get("diagnostics.overlap") else None
+    ap: Dict[str, Any] = {}
+    sweep: list[dict[str, Any]] = threshold_sweep(ds, config) if modules.get("diagnostics.threshold_sweep") else []
+    budget: list[dict[str, Any]] = fp_budget_rows(sweep, config.get("fp_budgets_per_image", DEFAULT_CONFIG["fp_budgets_per_image"])) if sweep else []
+    groups: list[dict[str, Any]] = group_metrics(summary["per_gt"]) if modules.get("diagnostics.groups") else []
+    if modules.get("diagnostics.bootstrap") and summary["aggregate"]:
+        summary["aggregate"].update(_bootstrap_ci(ds, config))
     stage_rows: List[Dict[str, Any]] = []
-    if args.raw_pred:
+    if args.raw_pred and modules.get("diagnostics.stage_comparison"):
         raw_predictions, raw_warnings = load_predictions(args.raw_pred, gt_ds.images, args.pred_format)
         ds.warnings.extend(raw_warnings)
         stage_rows = stage_comparison(gt_ds, predictions, raw_predictions, config)
-    ci = _bootstrap_ci(ds, config)
-    summary["aggregate"].update(ci)
+    # AP is intentionally not run here; it is provided by Ultralytics
+    # validation and would repeat the standard evaluation.
 
-    _write_json(args.output / "summary.json", {"config": config, "aggregate": summary["aggregate"], "area_quantiles": summary["area_quantiles"], "ap": ap, "warnings": ds.warnings})
-    _write_csv(args.output / "per_image.csv", summary["per_image"])
-    _write_csv(args.output / "per_gt.csv", summary["per_gt"])
-    _write_csv(args.output / "per_prediction.csv", summary["per_prediction"])
-    _write_csv(args.output / "group_metrics.csv", groups)
-    _write_csv(args.output / "threshold_sweep.csv", sweep)
-    _write_csv(args.output / "fp_budget.csv", budget)
+    _write_json(args.output / "summary.json", {"config": config, "aggregate": summary["aggregate"], "area_quantiles": summary["area_quantiles"], "ap": ap, "warnings": ds.warnings, "modules": modules})
+    if needs_diagnostics:
+        _write_csv(args.output / "per_image.csv", summary["per_image"])
+    if modules.get("diagnostics.missed") or modules.get("diagnostics.localization") or modules.get("diagnostics.overlap"):
+        _write_csv(args.output / "per_gt.csv", summary["per_gt"])
+    if modules.get("diagnostics.classification") or modules.get("diagnostics.background") or modules.get("diagnostics.duplicate") or modules.get("diagnostics.localization"):
+        _write_csv(args.output / "per_prediction.csv", summary["per_prediction"])
+    if groups:
+        _write_csv(args.output / "group_metrics.csv", groups)
+    if sweep:
+        _write_csv(args.output / "threshold_sweep.csv", sweep)
+        _write_csv(args.output / "fp_budget.csv", budget)
+    if overlap is not None:
+        _write_csv(args.output / "overlap_gt_pairs.csv", overlap["gt_pairs"])
+        _write_csv(args.output / "overlap_prediction_pairs.csv", overlap["prediction_pairs"])
+        _write_csv(args.output / "overlap_per_image.csv", overlap["per_image"])
+        _write_json(args.output / "overlap_summary.json", overlap)
+    bad_rows: list[dict[str, Any]] = []
+    image_paths: list[Path] = []
+    if modules.get("output.bad_cases"):
+        bad_rows = bad_case_rows(summary)
+        _write_csv(args.output / "bad_cases.csv", bad_rows)
+    if modules.get("output.images"):
+        top_k = int((config.get("bad_cases") or {}).get("top_k", 50)) if isinstance(config.get("bad_cases"), Mapping) else 50
+        image_paths = render_bad_cases(ds, bad_rows, args.output / "images", top_k=top_k)
+    if modules.get("output.html"):
+        write_bad_case_html(args.output / "index.html", bad_rows, image_paths)
     if stage_rows:
         _write_csv(args.output / "stage_comparison.csv", stage_rows)
     _write_json(args.output / "config_used.json", config)
+    _write_json(args.output / "run_manifest.json", {"modules": modules, "output_dir": str(args.output.resolve()), "prediction_source": str(args.pred or args.predictor or "")})
     write_report(args.output, config, summary, ap, stage_rows, ds.warnings)
     print(f"诊断完成：{args.output.resolve()}")
-    print(f"Precision={_format_value(summary['aggregate'].get('precision'))} Recall={_format_value(summary['aggregate'].get('recall'))} F1={_format_value(summary['aggregate'].get('f1'))} mAP50={_format_value(ap.get('AP50'))} mAP50-95={_format_value(ap.get('mAP50_95'))}")
+    print(f"启用模块：{', '.join(config['enabled_modules']) or '无'}")
+    if summary["aggregate"]:
+        print(f"诊断匹配：Precision={_format_value(summary['aggregate'].get('precision'))} Recall={_format_value(summary['aggregate'].get('recall'))} F1={_format_value(summary['aggregate'].get('f1'))}")
+    if overlap is not None:
+        print(f"框重叠：GT 框对={overlap['summary']['gt_pair_count']}，疑似重复预测对={overlap['summary']['prediction_duplicate_pair_count']}")
     return 0
 
 

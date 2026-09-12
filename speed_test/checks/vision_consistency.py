@@ -31,6 +31,7 @@ from checks.vision_consistency_metrics import (
     compare_detections, validate_tolerances,
 )
 from core.vision_run_manager import prepare_run_directory
+from core.module_selection import resolve_speed_modules, SPEED_MODULES
 
 
 def _sha256(path: Path) -> str:
@@ -211,10 +212,11 @@ def _check_case(
         raise ValueError("TensorRT 返回输出数量异常")
     actual = {name: _to_numpy(value) for name, value in zip(runner.output_names, actual_tensors)}
     atol, rtol = float(values.get("atol", 0.001)), float(values.get("rtol", 0.01))
+    tensor_enabled = bool(values.get("tensor_enabled", True))
     comparisons = [
         {"name": name, **compare_array(a, b, atol=atol, rtol=rtol)}
         for name, a, b in align_outputs(ref, actual)
-    ]
+    ] if tensor_enabled else []
     detection = None
     mode = values.get("detection_mode", "auto")
     if mode not in {"auto", "none", "xyxy6"}:
@@ -224,7 +226,7 @@ def _check_case(
     detect = mode == "xyxy6" or (
         mode == "auto" and adapter.adapter_name == "ultralytics" and adapter.task == "detect" and end2end
     )
-    if detect:
+    if detect and bool(values.get("detection_enabled", True)):
         name = values.get("detection_output") or runner.output_names[0]
         if name not in ref:
             raise ValueError(f"detection_output 不在 ONNX 输出中：{name}")
@@ -234,12 +236,15 @@ def _check_case(
             score_atol=float(values.get("score_atol", 0.01)),
         )}
     configured_acceptance, effective_acceptance, acceptance_note = _acceptance_mode(values, detection)
-    raw_status = combine_status(comparisons)
-    case_status = combine_status(
-        comparisons,
-        detection,
-        acceptance_mode=effective_acceptance,
-    )
+    raw_status = combine_status(comparisons) if tensor_enabled else "skipped"
+    if not tensor_enabled and detection is None:
+        case_status = "skipped"
+    else:
+        case_status = combine_status(
+            comparisons,
+            detection,
+            acceptance_mode=effective_acceptance,
+        )
     return {"source": str(source) if source else "adapter_example_input", "inputs": input_info,
             "input_description": bundle.description, "status": case_status,
             "raw_tensor_status": raw_status,
@@ -412,11 +417,25 @@ def main() -> dict[str, Any]:
     parser.add_argument("--config", type=Path, default=None, help="默认读取同目录 benchmark_config.yaml")
     parser.add_argument("--run-dir", default=None, help="复用指定的 runN 目录；省略时自动创建 runs-profile/runN")
     parser.add_argument("--source", type=Path, default=None, help="临时覆盖检查图片/目录，命令行相对路径按当前工作目录解析")
+    parser.add_argument("--only", action="append", help="只运行指定一致性模块")
+    parser.add_argument("--enable", action="append", help="临时启用一致性模块")
+    parser.add_argument("--disable", action="append", help="临时关闭一致性模块")
+    parser.add_argument("--list-modules", action="store_true", help="列出可用模块后退出")
     args = parser.parse_args()
+    if args.list_modules:
+        print("\n".join(module_id for module_id in SPEED_MODULES if module_id.startswith("consistency.")))
+        return {"status": "passed", "models": []}
     config = load_config(args.config)
+    modules = resolve_speed_modules(config, only=args.only, enable=args.enable, disable=args.disable)
+    if "modules" not in config and not args.only and not args.enable and not args.disable:
+        modules["consistency.detection"] = True
     run_dir = prepare_run_directory(config, args.run_dir)
     apply_python_paths(config)
     values = config.setdefault("consistency", {})
+    values["tensor_enabled"] = modules.get("consistency.tensor", False)
+    values["detection_enabled"] = modules.get("consistency.detection", False)
+    if not values["tensor_enabled"] and not values["detection_enabled"]:
+        raise ValueError("至少启用 consistency.tensor 或 consistency.detection")
     if args.source is not None:
         values["source"] = str(args.source.resolve())
     validate_tolerances(float(values.get("atol", 0.001)), float(values.get("rtol", 0.01)))

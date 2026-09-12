@@ -226,7 +226,22 @@ class VToolsDetectionAdapter:
         return yolo
 
     def _predict_ultralytics(self, source: Any, image_id: str) -> list[dict[str, Any]]:
-        results = self.model.predict(source=source, imgsz=self.config.image_size, conf=self.config.conf, iou=self.config.iou, max_det=self.config.max_det, device=str(self.config.device), half=self.config.precision == "fp16" and getattr(self.config.device, "type", "") == "cuda", save=False, verbose=False)
+        quantize = (
+            16
+            if self.config.precision == "fp16" and getattr(self.config.device, "type", "") == "cuda"
+            else 32
+        )
+        results = self.model.predict(
+            source=source,
+            imgsz=self.config.image_size,
+            conf=self.config.conf,
+            iou=self.config.iou,
+            max_det=self.config.max_det,
+            device=str(self.config.device),
+            quantize=quantize,
+            save=False,
+            verbose=False,
+        )
         rows: list[dict[str, Any]] = []
         for result in results:
             boxes = getattr(result, "boxes", None)

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import argparse
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -59,7 +60,7 @@ def _project_root(settings: Mapping[str, Any]) -> Path:
 def _add_python_paths(settings: Mapping[str, Any], project_root: Path) -> None:
     """Apply the same project/python_paths behavior as vtools config loading."""
     project = _mapping(settings.get("project"), "project")
-    values = [project_root]
+    values = [PROJECT_ROOT, project_root]
     if project.get("ultralytics_repo"):
         values.append(project.get("ultralytics_repo"))
     extra_paths = project.get("python_paths") or []
@@ -275,10 +276,15 @@ def _run_one_model(
     model_entry: Mapping[str, Any],
     run_dir: Path,
     project_root: Path,
+    config_path: Path,
+    cli_args: argparse.Namespace,
 ) -> Path:
     # Import after project_root is known so the entry point works from PyCharm,
     # a terminal, or a run configuration with an unrelated working directory.
-    from diagnostics import engine
+    try:
+        from diagnostics import engine
+    except ImportError:
+        from model_diagnostics.diagnostics import engine
 
     dataset = _mapping(settings.get("dataset"), "dataset")
     data_yaml_value = dataset.get("data") or dataset.get("yaml")
@@ -298,7 +304,9 @@ def _run_one_model(
 
     # New A/B/C entries explicitly control the prediction source.  Preserve
     # the old dataset.predictions fallback only for legacy models entries.
-    if model_entry.get("mode") in {"B", "C"}:
+    if cli_args.predictions is not None:
+        prediction_value = str(cli_args.predictions)
+    elif model_entry.get("mode") in {"B", "C"}:
         prediction_value = None
     else:
         prediction_value = model_entry.get("predictions", dataset.get("predictions"))
@@ -316,7 +324,7 @@ def _run_one_model(
         str(PROJECT_ROOT / "diagnostics" / "engine.py"),
         "--gt", str(gt_path),
         "--pred", str(prediction_path),
-        "--config", str(RUN_CONFIG),
+        "--config", str(config_path),
         "--output", str(model_dir),
         "--gt-format", gt_format,
         "--pred-format", pred_format,
@@ -328,6 +336,12 @@ def _run_one_model(
         argv.extend(["--raw-pred", str(raw_path)])
     if images_dir is not None:
         argv.extend(["--images-dir", str(images_dir)])
+    for value in cli_args.only or []:
+        argv.extend(["--only", value])
+    for value in cli_args.enable or []:
+        argv.extend(["--enable", value])
+    for value in cli_args.disable or []:
+        argv.extend(["--disable", value])
     _run_engine(engine, argv)
 
     metadata = {
@@ -346,7 +360,26 @@ def _run_one_model(
 
 
 def main() -> int:
-    settings = _read_run_config(RUN_CONFIG)
+    parser = argparse.ArgumentParser(description="通用目标检测诊断（PyCharm/终端共用入口）")
+    parser.add_argument("--config", type=Path, default=RUN_CONFIG, help="诊断 YAML/JSON 配置，默认使用 config/pycharm_run.yaml")
+    parser.add_argument("--only", action="append", help="只运行指定模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
+    parser.add_argument("--predictions", type=Path, help="直接使用已有预测文件，覆盖模式 B/C 的推理")
+    parser.add_argument("--list-modules", action="store_true", help="列出可用模块后退出")
+    cli_args = parser.parse_args()
+    if cli_args.list_modules:
+        try:
+            from diagnostics.modules import available_modules
+        except ImportError:
+            from model_diagnostics.diagnostics.modules import available_modules
+        print("\n".join(
+            module_id for module_id in available_modules()
+            if module_id.startswith(("predict.", "validation.", "diagnostics.", "output."))
+        ))
+        return 0
+    config_path = cli_args.config.expanduser().resolve()
+    settings = _read_run_config(config_path)
     project_root = _project_root(settings)
     _add_python_paths(settings, project_root)
 
@@ -365,13 +398,21 @@ def main() -> int:
     if not models:
         raise ValueError("没有可运行的模型；请检查 mode 或 models 配置")
 
+    try:
+        from diagnostics.modules import resolve_modules
+    except ImportError:
+        from model_diagnostics.diagnostics.modules import resolve_modules
+    selected_modules = resolve_modules(settings, only=cli_args.only, enable=cli_args.enable, disable=cli_args.disable)
+    if any(model.get("mode") in {"B", "C"} for model in models) and cli_args.predictions is None and not selected_modules.get("predict.generate"):
+        raise ValueError("B/C 模式没有已有预测时必须启用 predict.generate；或使用 --predictions 直接复用预测文件")
+
     run_dir = _next_run_dir(settings, project_root)
     failures: list[str] = []
     completed: list[Path] = []
     for index, model_entry in enumerate(models):
         name = _safe_name(model_entry.get("name"), f"model_{index + 1}")
         try:
-            completed.append(_run_one_model(settings, model_entry, run_dir, project_root))
+            completed.append(_run_one_model(settings, model_entry, run_dir, project_root, config_path, cli_args))
             print(f"模型 {name} 完成：{completed[-1]}")
         except Exception as exc:  # keep other enabled models running
             failures.append(f"{name}: {type(exc).__name__}: {exc}")

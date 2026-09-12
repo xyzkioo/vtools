@@ -106,6 +106,8 @@ class BenchmarkConfig:
     conf: float = 0.25
     iou: float = 0.70
     max_det: int = 300
+    measure_parameters: bool = True
+    measure_memory: bool = True
 
     @property
     def image_size(self) -> tuple[int, int]:
@@ -754,12 +756,12 @@ def benchmark_forward(adapter: BaseAdapter, model: Any, config: BenchmarkConfig)
     result.update(
         {
             "batch": int(inputs.batch_size),
-            "params": adapter.parameter_count(model),
+            "params": adapter.parameter_count(model) if config.measure_parameters else None,
             "peak_delta_mb": None,
             "output_count": None,
         }
     )
-    if config.device.type == "cuda":
+    if config.device.type == "cuda" and config.measure_memory:
         torch.cuda.reset_peak_memory_stats(config.device)
         before = torch.cuda.memory_allocated(config.device)
         output = _run_once(adapter, model, inputs, config)
@@ -811,7 +813,7 @@ def benchmark_pipeline(
 
     result = statistics(times)
     result["batch"] = config.batch_size
-    result["params"] = adapter.parameter_count(model)
+    result["params"] = adapter.parameter_count(model) if config.measure_parameters else None
     result["output_count"] = (
         int(round(float(np.mean(output_counts)))) if output_counts else None
     )

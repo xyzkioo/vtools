@@ -37,10 +37,40 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=["list_layers", "visualize"], default=None)
     parser.add_argument("--source", default=None, help="覆盖 input.source")
     parser.add_argument("--weights", default=None, help="覆盖 model.weights")
+    parser.add_argument("--only", action="append", help="只运行 visualization.features、visualization.cam 或 visualization.stage_trace")
+    parser.add_argument("--enable", action="append", help="临时启用可视化模块")
+    parser.add_argument("--disable", action="append", help="临时关闭可视化模块")
+    parser.add_argument("--list-modules", action="store_true", help="列出可视化模块后退出")
     return parser
 
 
 def _set_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None:
+    module_ids = {"visualization.features", "visualization.cam", "visualization.stage_trace"}
+    configured = config.get("modules") if isinstance(config.get("modules"), Mapping) else {}
+    states = {
+        "visualization.features": bool(configured.get("visualization.features", config.get("features", {}).get("enabled", True))),
+        "visualization.cam": bool(configured.get("visualization.cam", config.get("cam", {}).get("enabled", False))),
+        "visualization.stage_trace": bool(configured.get("visualization.stage_trace", config.get("stage_trace", {}).get("enabled", False))),
+    }
+    only = {item.strip() for value in args.only or [] for item in str(value).split(",") if item.strip()}
+    enable = {item.strip() for value in args.enable or [] for item in str(value).split(",") if item.strip()}
+    disable = {item.strip() for value in args.disable or [] for item in str(value).split(",") if item.strip()}
+    if only and (enable or disable):
+        raise ValueError("--only 不能与 --enable/--disable 同时使用")
+    unknown = (only | enable | disable) - module_ids
+    if unknown:
+        raise ValueError(f"未知可视化模块：{', '.join(sorted(unknown))}")
+    if only:
+        states = {key: key in only for key in module_ids}
+    else:
+        for key in enable:
+            states[key] = True
+        for key in disable:
+            states[key] = False
+    config["modules"] = states
+    config.setdefault("features", {})["enabled"] = states["visualization.features"]
+    config.setdefault("cam", {})["enabled"] = states["visualization.cam"]
+    config.setdefault("stage_trace", {})["enabled"] = states["visualization.stage_trace"]
     if args.mode:
         config["mode"] = args.mode
     project_root = Path(str(config["project"]["root"]))
@@ -281,6 +311,9 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.list_modules:
+        print("visualization.features\nvisualization.cam\nvisualization.stage_trace")
+        return 0
     config = load_config(args.config)
     _set_cli_overrides(config, args)
     run_dir = _make_run_dir(config, args.run_dir)
