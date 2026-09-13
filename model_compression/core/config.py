@@ -106,7 +106,7 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
         config[section_name] = section
 
     dataset = _mapping(config.get("dataset"), "dataset")
-    dataset = _resolve_optional_mapping_paths(dataset, ("root", "train", "val", "test", "manifest"), project_root)
+    dataset = _resolve_optional_mapping_paths(dataset, ("root", "train", "val", "test", "manifest", "data"), project_root)
     config["dataset"] = dataset
 
     evaluation = _mapping(config.get("evaluation"), "evaluation")

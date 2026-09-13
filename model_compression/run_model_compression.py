@@ -52,6 +52,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--only", action="append", help="只运行指定模块，可重复或逗号分隔")
     parser.add_argument("--enable", action="append", help="临时启用模块")
     parser.add_argument("--disable", action="append", help="临时关闭模块")
+    parser.add_argument("--weights", type=Path, help="临时覆盖 model.weights")
+    parser.add_argument("--data", type=Path, help="YOLO 数据集 data.yaml")
+    parser.add_argument("--task", choices=["detect", "classify"], help="模型任务")
+    parser.add_argument("--train", type=Path, help="临时覆盖 dataset.train")
+    parser.add_argument("--val", type=Path, help="临时覆盖 dataset.val")
+    parser.add_argument("--device", help="临时覆盖 model.device：auto、cpu、cuda:0 或 0")
+    parser.add_argument("--structured-scale", help="临时覆盖结构化目标规模，例如 n、s、m、l 或 x")
+    parser.add_argument("--structured-method", choices=["scale", "torch_pruning"], help="结构化剪枝方法")
+    parser.add_argument("--structured-epochs", type=int, help="临时覆盖结构化缩放后的微调轮数；0 表示跳过微调")
+    parser.add_argument("--structured-initial-weights", type=Path, help="结构化目标规模的预训练初始化权重")
     parser.add_argument("--list-modules", action="store_true", help="列出模块后退出")
     return parser
 
@@ -270,6 +280,12 @@ def _run_prune(config: Mapping[str, Any], registry: ModelRegistry, branch: Mappi
     return result
 
 
+def _run_structured_prune(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
+    """Classification entry point guard; detection is routed separately."""
+
+    raise ValueError("结构化通道裁剪当前只支持 YOLO 检测模型（model.task: detect）。")
+
+
 def _distillation_model_config(config: Mapping[str, Any], section_name: str, *, fallback_weights: str | None = None) -> dict[str, Any]:
     section = _section(config, section_name)
     distill = _section(config, "distillation")
@@ -337,13 +353,15 @@ def _run_comparison(config: Mapping[str, Any], registry: ModelRegistry, run_dir:
     baseline_row: dict[str, Any] | None = None
     for version in versions:
         metrics = version.get("metadata", {})
-        row = {"version_id": version["id"], "name": version.get("name"), "method": version.get("method"), "parent_version_id": version.get("parent_version_id"), "accuracy": metrics.get("evaluation_accuracy", metrics.get("best_accuracy")), "size_bytes": version.get("artifact", {}).get("size_bytes"), "actual_sparsity": metrics.get("actual_sparsity"), "latency_ms": metrics.get("benchmark_latency_p50_ms")}
+        row = {"version_id": version["id"], "name": version.get("name"), "method": version.get("method"), "parent_version_id": version.get("parent_version_id"), "map50": metrics.get("evaluation_map50"), "map50_95": metrics.get("evaluation_map50_95"), "accuracy": metrics.get("evaluation_accuracy", metrics.get("best_accuracy")), "size_bytes": version.get("artifact", {}).get("size_bytes"), "actual_sparsity": metrics.get("actual_sparsity"), "latency_ms": metrics.get("benchmark_latency_p50_ms")}
         if version.get("method") in {"import", "baseline"}:
             baseline_row = row
         rows.append(row)
     if baseline_row:
         for row in rows:
             row.update(compare_to_baseline(baseline_row, row))
+            if row.get("map50_95") is not None and baseline_row.get("map50_95") is not None:
+                row["map50_95_delta"] = row["map50_95"] - baseline_row["map50_95"]
     result = {"module": "comparison.report", "status": "succeeded", "branch": branch, "versions": rows}
     write_json(_result_path(run_dir, "comparison.json"), result)
     return result
@@ -390,6 +408,43 @@ def main() -> int:
         print("\n".join(COMPRESSION_MODULES))
         return 0
     config = load_config(args.config)
+    if (args.weights or args.train or args.val or args.device or args.data or args.task
+            or args.structured_method is not None or args.structured_scale is not None or args.structured_epochs is not None
+            or args.structured_initial_weights is not None):
+        config = dict(config)
+        model = dict(_section(config, "model"))
+        dataset = dict(_section(config, "dataset"))
+        if args.weights:
+            model["weights"] = str(args.weights.expanduser().resolve())
+        if args.data:
+            dataset["data"] = str(args.data.expanduser().resolve())
+        if args.task:
+            model["task"] = args.task
+        if args.train:
+            dataset["train"] = str(args.train.expanduser().resolve())
+        if args.val:
+            dataset["val"] = str(args.val.expanduser().resolve())
+        if args.device:
+            model["device"] = args.device
+            benchmark = dict(_section(config, "benchmark"))
+            benchmark["device"] = args.device
+            config["benchmark"] = benchmark
+        if (args.structured_method is not None or args.structured_scale is not None or args.structured_epochs is not None
+                or args.structured_initial_weights is not None):
+            compression = dict(_section(config, "compression"))
+            structured = dict(compression.get("structured", {}) if isinstance(compression.get("structured"), Mapping) else {})
+            if args.structured_method is not None:
+                structured["method"] = args.structured_method
+            if args.structured_scale is not None:
+                structured["target_scale"] = args.structured_scale
+            if args.structured_epochs is not None:
+                structured["finetune_epochs"] = args.structured_epochs
+            if args.structured_initial_weights is not None:
+                structured["initial_weights"] = str(args.structured_initial_weights.expanduser().resolve())
+            compression["structured"] = structured
+            config["compression"] = compression
+        config["model"] = model
+        config["dataset"] = dataset
     apply_python_paths(config)
     selected = resolve_compression_modules(config, only=args.only, enable=args.enable, disable=args.disable)
     operation = str(config.get("operation", "all") or "all").strip().lower()
@@ -402,6 +457,8 @@ def main() -> int:
         "dynamic_int8": "compression.quantize.dynamic_int8",
         "prune": "compression.prune.unstructured",
         "pruning": "compression.prune.unstructured",
+        "structured_prune": "compression.prune.structured",
+        "structured": "compression.prune.structured",
         "distill": "distillation.classification",
         "distillation": "distillation.classification",
         "compare": "comparison.report",
@@ -428,6 +485,7 @@ def main() -> int:
         ("baseline.evaluate", lambda: _run_baseline(config, registry, branch, run_dir, run_id)),
         ("compression.quantize.dynamic_int8", lambda: _run_quantize(config, registry, branch, run_dir, run_id)),
         ("compression.prune.unstructured", lambda: _run_prune(config, registry, branch, run_dir, run_id)),
+        ("compression.prune.structured", lambda: _run_structured_prune(config, registry, branch, run_dir, run_id)),
         ("distillation.classification", lambda: _run_distillation(config, registry, branch, run_dir, run_id)),
         ("comparison.report", lambda: _run_comparison(config, registry, run_dir)),
         ("artifact.export", lambda: _run_export(config, registry, run_dir)),
@@ -436,7 +494,11 @@ def main() -> int:
         if not selected.get(module_id, False):
             continue
         try:
-            result = function()
+            from model_compression.core.detection import is_detection, run_detection_operation
+            if is_detection(config) and module_id not in {"branch.create", "comparison.report"}:
+                result = run_detection_operation(module_id, config, registry, run_dir, run_id)
+            else:
+                result = function()
             results.append(result)
             print(f"[{module_id}] 完成")
         except Exception as error:  # noqa: BLE001 - 单个实验失败也要留下可读报告

@@ -33,7 +33,7 @@ run:
 # ==================== 数据集（A/B/C 共用） ====================
 dataset:
   # 推荐填写 Ultralytics data.yaml，里面包含 path/train/val/test/names。
-  data: datasets/flowerhard0-d274c9da/data.yaml
+  data: null
   split: val
 
   # 如果不使用 data.yaml，才填写旧式 GT：
@@ -52,7 +52,7 @@ mode_a:
 # 只在 mode: B 时读取这一节。
 mode_b:
   name: ultralytics_pt
-  weights: GoodModel/lycheeflo.pt
+  weights: null
   task: detect
 
 # ==================== 模式 C：自定义 Adapter ====================

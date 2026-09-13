@@ -29,7 +29,7 @@ run:
 models:
   # 可以配置多个模型；enabled: false 表示暂时跳过该模型。
   - name: yolo26s                    # 输出 CSV 中显示的模型名称
-    weights: GoodModel/lycheeflo.pt  # 权重文件，相对 project.root
+    weights: null                   # 请填写模型权重，相对 project.root 或绝对路径
     adapter: ultralytics              # ultralytics / checkpoint / 自定义 adapter.py
     task: detect                      # detect / segment / pose / classify 等
     enabled: true
@@ -43,7 +43,7 @@ models:
 
 benchmark:
   # 可选的真实图片；用于 adapter_pipeline 测试。只测纯模型调用时可留空。
-  image: test.jpg
+  image: null
 
   # auto 自动选择 CUDA；也可写 cpu、cuda:0 或 0。
   device: auto

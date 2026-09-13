@@ -161,7 +161,12 @@ def _write_prediction_file(path: Path, gt_dataset: Any, predictions: Mapping[str
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _mode_entry(settings: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+def _mode_entry(
+    settings: Mapping[str, Any],
+    *,
+    weights_override: Path | None = None,
+    predictions_override: bool = False,
+) -> Optional[Mapping[str, Any]]:
     """Translate the simple A/B/C YAML layout into one internal model entry.
 
     The old ``models: [...]`` list remains supported below for backwards
@@ -189,8 +194,8 @@ def _mode_entry(settings: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
         }
 
     if mode == "B":
-        weights = section.get("weights")
-        if weights is None or not str(weights).strip():
+        weights = weights_override or section.get("weights")
+        if (weights is None or not str(weights).strip()) and not predictions_override:
             raise ValueError("模式 B 必须在 mode_b.weights 中填写 Ultralytics .pt 路径")
         return {
             "name": section.get("name", "mode_b_ultralytics"),
@@ -204,8 +209,10 @@ def _mode_entry(settings: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
         }
 
     weights = section.get("weights")
+    if weights_override:
+        weights = weights_override
     adapter = section.get("adapter")
-    if weights is None or not str(weights).strip():
+    if (weights is None or not str(weights).strip()) and not predictions_override:
         raise ValueError("模式 C 必须在 mode_c.weights 中填写模型权重路径")
     if adapter is None or not str(adapter).strip():
         raise ValueError("模式 C 必须在 mode_c.adapter 中填写 adapter.py 或模块名")
@@ -366,8 +373,13 @@ def main() -> int:
     parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
     parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
     parser.add_argument("--predictions", type=Path, help="直接使用已有预测文件，覆盖模式 B/C 的推理")
+    parser.add_argument("--weights", type=Path, help="直接使用模型权重，覆盖 mode_b/mode_c.weights")
+    parser.add_argument("--data", type=Path, help="直接使用数据集 YAML，覆盖 dataset.data")
+    parser.add_argument("--device", help="临时覆盖 benchmark.device：auto、cpu、cuda:0 或 0")
     parser.add_argument("--list-modules", action="store_true", help="列出可用模块后退出")
     cli_args = parser.parse_args()
+    if cli_args.predictions and cli_args.predictions.suffix.lower() in {".pt", ".pth", ".onnx", ".engine", ".kmodel"}:
+        raise ValueError("--predictions 需要 JSON/COCO 等预测文件；模型权重请使用 --weights")
     if cli_args.list_modules:
         try:
             from diagnostics.modules import available_modules
@@ -383,7 +395,11 @@ def main() -> int:
     project_root = _project_root(settings)
     _add_python_paths(settings, project_root)
 
-    selected_mode = _mode_entry(settings)
+    selected_mode = _mode_entry(
+        settings,
+        weights_override=cli_args.weights,
+        predictions_override=cli_args.predictions is not None,
+    )
     if selected_mode is not None:
         models: list[Mapping[str, Any]] = [selected_mode]
     else:
@@ -398,13 +414,36 @@ def main() -> int:
     if not models:
         raise ValueError("没有可运行的模型；请检查 mode 或 models 配置")
 
+    if cli_args.weights:
+        if any(str(model.get("mode", "")).upper() == "A" for model in models):
+            raise ValueError("模式 A 使用已有预测文件，不能传 --weights；请使用 --predictions")
+        models = [{**dict(model), "weights": str(cli_args.weights)} for model in models]
+
+    if cli_args.data:
+        # Keep model and dataset inputs independent. An absolute --data path
+        # is especially useful when the YAML file lives outside this repo.
+        settings = dict(settings)
+        dataset = dict(_mapping(settings.get("dataset"), "dataset"))
+        dataset["data"] = str(cli_args.data)
+        settings["dataset"] = dataset
+
+    if cli_args.device:
+        settings = dict(settings)
+        benchmark = dict(_mapping(settings.get("benchmark"), "benchmark"))
+        benchmark["device"] = cli_args.device
+        settings["benchmark"] = benchmark
+
     try:
         from diagnostics.modules import resolve_modules
     except ImportError:
         from model_diagnostics.diagnostics.modules import resolve_modules
     selected_modules = resolve_modules(settings, only=cli_args.only, enable=cli_args.enable, disable=cli_args.disable)
-    if any(model.get("mode") in {"B", "C"} for model in models) and cli_args.predictions is None and not selected_modules.get("predict.generate"):
-        raise ValueError("B/C 模式没有已有预测时必须启用 predict.generate；或使用 --predictions 直接复用预测文件")
+    if (
+        any(model.get("mode") in {"B", "C"} for model in models)
+        and cli_args.predictions is None
+        and not any(model.get("weights") for model in models)
+    ):
+        raise ValueError("B/C 模式没有模型权重；请填写 mode_b/mode_c.weights 或使用 --weights/--predictions")
 
     run_dir = _next_run_dir(settings, project_root)
     failures: list[str] = []

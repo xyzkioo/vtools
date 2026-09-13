@@ -416,6 +416,10 @@ def main() -> dict[str, Any]:
     parser = argparse.ArgumentParser(description="同一输入的 PyTorch/TensorRT 输出一致性检查（不测速、不构建 engine）")
     parser.add_argument("--config", type=Path, default=None, help="默认读取同目录 benchmark_config.yaml")
     parser.add_argument("--run-dir", default=None, help="复用指定的 runN 目录；省略时自动创建 runs-profile/runN")
+    parser.add_argument("--model", action="append", help="临时覆盖 YAML 中的模型权重，可传 PATH 或 NAME=PATH")
+    parser.add_argument("--adapter", default=None, help="临时覆盖模型适配器")
+    parser.add_argument("--task", default=None, help="临时覆盖模型任务")
+    parser.add_argument("--device", default=None, help="临时覆盖 benchmark.device")
     parser.add_argument("--source", type=Path, default=None, help="临时覆盖检查图片/目录，命令行相对路径按当前工作目录解析")
     parser.add_argument("--only", action="append", help="只运行指定一致性模块")
     parser.add_argument("--enable", action="append", help="临时启用一致性模块")
@@ -426,6 +430,8 @@ def main() -> dict[str, Any]:
         print("\n".join(module_id for module_id in SPEED_MODULES if module_id.startswith("consistency.")))
         return {"status": "passed", "models": []}
     config = load_config(args.config)
+    if args.device:
+        config.setdefault("benchmark", {})["device"] = args.device
     modules = resolve_speed_modules(config, only=args.only, enable=args.enable, disable=args.disable)
     if "modules" not in config and not args.only and not args.enable and not args.disable:
         modules["consistency.detection"] = True
@@ -444,7 +450,7 @@ def main() -> dict[str, Any]:
                               "scope": "shared-input model-output comparison; not dataset accuracy/mAP"}
     if run_dir is not None:
         report["run_dir"] = str(run_dir)
-    for entry in get_model_entries(config):
+    for entry in get_model_entries(config, cli_models=args.model, adapter_override=args.adapter, task_override=args.task):
         try:
             result = _check_model(entry, config)
         except Exception as error:

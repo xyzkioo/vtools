@@ -37,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=["list_layers", "visualize"], default=None)
     parser.add_argument("--source", default=None, help="覆盖 input.source")
     parser.add_argument("--weights", default=None, help="覆盖 model.weights")
+    parser.add_argument("--device", default=None, help="覆盖 model.device：auto、cpu、cuda:0 或 0")
     parser.add_argument("--only", action="append", help="只运行 visualization.features、visualization.cam 或 visualization.stage_trace")
     parser.add_argument("--enable", action="append", help="临时启用可视化模块")
     parser.add_argument("--disable", action="append", help="临时关闭可视化模块")
@@ -84,6 +85,8 @@ def _set_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None
         if not weights.is_absolute():
             weights = (project_root / weights).resolve()
         config.setdefault("model", {})["weights"] = str(weights)
+    if args.device:
+        config.setdefault("model", {})["device"] = args.device
 
 
 def _make_run_dir(config: Mapping[str, Any], requested: Path | None) -> Path:

@@ -20,7 +20,7 @@ from typing import Any, Iterable
 
 # PyCharm 直接运行时修改这里即可；命令行参数会覆盖这些配置。
 PYCHARM_CONFIG: dict[str, Any] = {
-    "input": r"/home/xyzkioo/PycharmProjects/vtools/others/07fbfeac72c36bc52e9d1ca9377760de.mp4",
+    "input": r"",
     "output_dir": r"",
     "every_n": 8,  # 1=保存每一帧；例如 10=每隔 10 帧保存一帧
     "start_frame": 0,

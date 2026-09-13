@@ -14,10 +14,10 @@ from typing import Any, Iterable
 
 
 PYCHARM_CONFIG: dict[str, Any] = {
-    "input": r"/path/to/input",       # 图片文件或目录
+    "input": r"",       # 图片文件或目录
     "output_dir": r"",                # 留空时输出到 input 同级的 resized 目录
-    "width": 1920,
-    "height": 1080,
+    "width": 1024,
+    "height": 1024,
     "mode": "fit",                   # fit=保持比例填充框；stretch=强制拉伸；crop=保持比例裁剪
     "recursive": False,
     "overwrite": False,

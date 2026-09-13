@@ -14,8 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings, QSize, Signal, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QFont, QPixmap
+from PySide6.QtCore import QObject, Qt, QSettings, QSize, Signal, QThread, QTimer, QUrl
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QScrollArea,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QTableWidget,
@@ -70,7 +71,7 @@ SPECS = [
 
 
 STYLE = """
-QMainWindow, QWidget { background: #101318; color: #e7ebf2; font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+QMainWindow, QWidget { background: #101318; color: #e7ebf2; font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; font-size: 14px; }
 QFrame#sidebar { background: #171b22; border-right: 1px solid #2a303b; }
 QFrame#topbar { background: #141820; border-bottom: 1px solid #2a303b; }
 QFrame#statusbar { background: #171b22; border-top: 1px solid #2a303b; }
@@ -83,10 +84,10 @@ QListWidget { background: transparent; border: 0; outline: 0; padding: 8px 8px; 
 QListWidget::item { padding: 10px 12px; border-radius: 6px; color: #aeb8c8; }
 QListWidget::item:selected { background: #2c65d8; color: white; }
 QListWidget::item:hover:!selected { background: #232a35; }
-QLineEdit, QComboBox, QPlainTextEdit { background: #1b212b; border: 1px solid #313a47; border-radius: 5px; padding: 8px 10px; color: #ecf1f8; selection-background-color: #2c65d8; }
+QLineEdit, QComboBox, QPlainTextEdit { background: #1b212b; border: 1px solid #313a47; border-radius: 5px; padding: 0 10px; min-height: 42px; color: #ecf1f8; selection-background-color: #2c65d8; font-size: 14px; }
 QLineEdit:focus, QComboBox:focus { border-color: #4d85f5; }
-QComboBox QAbstractItemView { background: #1b212b; color: #ecf1f8; selection-background-color: #2c65d8; }
-QPushButton { background: #242b36; border: 1px solid #364150; border-radius: 5px; padding: 8px 14px; color: #e7ebf2; }
+QComboBox QAbstractItemView { background: #1b212b; color: #ecf1f8; selection-background-color: #2c65d8; min-height: 34px; }
+QPushButton { background: #242b36; border: 1px solid #364150; border-radius: 5px; padding: 0 14px; min-height: 42px; color: #e7ebf2; font-size: 14px; }
 QPushButton:hover { background: #2d3745; }
 QPushButton:pressed { background: #1c2430; }
 QPushButton#primary { background: #2f6fe4; border-color: #397cf5; color: white; font-weight: 600; }
@@ -94,6 +95,10 @@ QPushButton#primary:hover { background: #3c7cf0; }
 QPushButton#danger { color: #ffb4b4; border-color: #6d3b42; }
 QToolButton { border: 0; padding: 6px; color: #aeb8c8; }
 QToolButton:hover { background: #242b36; border-radius: 5px; }
+QCheckBox { spacing: 10px; min-height: 30px; font-size: 14px; }
+QCheckBox::indicator { width: 20px; height: 20px; border: 1px solid #738198; border-radius: 4px; background: #10151c; }
+QCheckBox::indicator:hover { border-color: #8fb4ff; background: #172235; }
+QCheckBox::indicator:checked { border-color: #5d95ff; background: #2f6fe4; }
 QScrollArea { border: 0; }
 QFrame#panel { background: #171c24; border: 1px solid #29313c; border-radius: 7px; }
 QFrame#metric { background: #1b222c; border: 1px solid #2d3745; border-radius: 6px; }
@@ -133,6 +138,150 @@ class EmptyPage(QWidget):
         layout.addStretch()
 
 
+class StateCheckBox(QCheckBox):
+    """High-contrast checkbox that remains readable on dark Qt styles."""
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setMinimumHeight(30)
+
+    def paintEvent(self, _event) -> None:  # type: ignore[no-untyped-def]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        size = 20
+        top = max(0, (self.height() - size) // 2)
+        box = self.rect()
+        box.setX(2)
+        box.setY(top)
+        box.setWidth(size)
+        box.setHeight(size)
+        painter.setPen(QPen(QColor("#5d6c82"), 1))
+        painter.setBrush(QColor("#10151c"))
+        painter.drawRoundedRect(box, 4, 4)
+        if self.isChecked():
+            painter.setPen(QPen(QColor("#ffffff"), 2))
+            painter.setBrush(QColor("#2f6fe4"))
+            painter.drawRoundedRect(box, 4, 4)
+            painter.setPen(QPen(QColor("#ffffff"), 2))
+            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "✓")
+        if self.text():
+            painter.setPen(QColor("#e7ebf2"))
+            text_rect = self.rect().adjusted(size + 10, 0, 0, 0)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+
+
+class _ResultScanWorker(QObject):
+    finished = Signal(object, object)
+
+    def __init__(self, root: Path, project_root: Path, skip_dirs: set[str], suffixes: set[str]) -> None:
+        super().__init__()
+        self.root = root
+        self.project_root = project_root
+        self.skip_dirs = skip_dirs
+        self.suffixes = suffixes
+
+    def run(self) -> None:
+        project_scan = self.root == self.project_root
+        result_markers = {"runs", "runs-profile", "results", "outputs", "reports", "store"}
+        files: list[Path] = []
+        try:
+            for base, dirs, names in os.walk(self.root):
+                dirs[:] = [name for name in dirs if name not in self.skip_dirs and not name.startswith(".")]
+                for name in names:
+                    path = Path(base) / name
+                    if project_scan and not any(marker in path.parts for marker in result_markers):
+                        continue
+                    if path.suffix.lower() in self.suffixes:
+                        files.append(path)
+                    if len(files) >= 2000:
+                        break
+                if len(files) >= 2000:
+                    break
+            files.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+            self.finished.emit(self.root, files)
+        except OSError as exc:
+            self.finished.emit(self.root, exc)
+
+
+class _CondaScanWorker(QObject):
+    finished = Signal(object)
+
+    def run(self) -> None:
+        self.finished.emit(MainWindow._conda_environments())
+
+
+class SettingsPage(QWidget):
+    changed = Signal()
+
+    def __init__(self, settings: QSettings, history_path: Path) -> None:
+        super().__init__()
+        self.settings = settings
+        self.history_path = history_path
+        self.result_root = QLineEdit(str(settings.value("results_root") or ROOT))
+        self.history_limit = QSpinBox()
+        self.history_limit.setRange(1, 200)
+        self.history_limit.setValue(int(settings.value("history_limit") or 40))
+        self._build()
+
+    def _build(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(34, 28, 34, 20)
+        title = QLabel("设置")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        desc = QLabel("设置结果查看目录和任务记录保留数量。修改会在下次扫描或任务结束后生效。")
+        desc.setObjectName("muted")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        panel = QFrame()
+        panel.setObjectName("panel")
+        form = QFormLayout(panel)
+        form.setContentsMargins(20, 18, 20, 18)
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.addWidget(self.result_root, 1)
+        choose = QPushButton("选择")
+        choose.clicked.connect(self._choose_root)
+        row_layout.addWidget(choose)
+        form.addRow("默认结果目录", row)
+        form.addRow("历史记录数量", self.history_limit)
+        layout.addWidget(panel)
+        actions = QHBoxLayout()
+        clear = QPushButton("清空任务记录")
+        clear.clicked.connect(self._clear_history)
+        actions.addWidget(clear)
+        actions.addStretch()
+        save = QPushButton("保存设置")
+        save.setObjectName("primary")
+        save.clicked.connect(self._save)
+        actions.addWidget(save)
+        layout.addLayout(actions)
+        layout.addStretch()
+
+    def _choose_root(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "选择默认结果目录", self.result_root.text() or str(ROOT))
+        if path:
+            self.result_root.setText(path)
+
+    def _save(self) -> None:
+        path = Path(self.result_root.text()).expanduser().resolve() if self.result_root.text().strip() else ROOT
+        self.settings.setValue("results_root", str(path))
+        self.settings.setValue("history_limit", self.history_limit.value())
+        self.changed.emit()
+        QMessageBox.information(self, "设置已保存", "默认结果目录和历史记录数量已保存。")
+
+    def _clear_history(self) -> None:
+        answer = QMessageBox.question(self, "清空任务记录", "确认删除任务历史记录吗？")
+        if answer == QMessageBox.StandardButton.Yes:
+            try:
+                self.history_path.unlink(missing_ok=True)
+            except OSError as exc:
+                QMessageBox.warning(self, "清理失败", str(exc))
+                return
+            self.changed.emit()
+
+
 class ConfigEditorDialog(QDialog):
     """Graphical editor for common YAML fields with an advanced raw tab."""
 
@@ -151,7 +300,12 @@ class ConfigEditorDialog(QDialog):
                 raw_text = path.read_text(encoding="utf-8")
             except OSError as exc:
                 raw_text = f"# 无法读取配置：{exc}\n"
-        self.data = self._parse_yaml(raw_text)
+        self.parse_error: str | None = None
+        try:
+            self.data = self._parse_yaml(raw_text)
+        except ValueError as exc:
+            self.data = {}
+            self.parse_error = str(exc)
 
         layout = QVBoxLayout(self)
         location = QLabel(str(path) if path else "尚未选择 YAML 文件；保存时会选择路径")
@@ -186,9 +340,11 @@ class ConfigEditorDialog(QDialog):
             import yaml
 
             value = yaml.safe_load(text) or {}
-            return value if isinstance(value, dict) else {}
-        except Exception:
-            return {}
+            if not isinstance(value, dict):
+                raise ValueError("YAML 顶层必须是对象")
+            return value
+        except Exception as exc:
+            raise ValueError(f"YAML 解析失败：{exc}") from exc
 
     @staticmethod
     def _get(data: dict[str, object], path: str, default: object = None) -> object:
@@ -248,7 +404,7 @@ class ConfigEditorDialog(QDialog):
     def _add_field(self, form: QFormLayout, path: str, label: str, kind: str = "text", default: object = "", options: list[str] | None = None) -> None:
         value = self._get(self.data, path, default)
         if kind == "bool":
-            widget: QWidget = QCheckBox()
+            widget: QWidget = StateCheckBox()
             widget.setChecked(bool(value))  # type: ignore[attr-defined]
         elif kind == "combo":
             widget = QComboBox()
@@ -326,19 +482,36 @@ class ConfigEditorDialog(QDialog):
             self._add_section(layout, "模型与数据")
             self._add_field(form, "operation", "操作", "combo", "all", ["all", "baseline", "quantize", "prune", "distill", "compare", "export"])
             self._add_field(form, "model.weights", "模型权重", default="")
-            self._add_field(form, "model.task", "模型任务", "combo", "classify", ["classify", "detect"])
+            self._add_field(form, "model.task", "模型任务", "combo", "detect", ["detect", "classify"])
+            self._add_field(form, "dataset.data", "YOLO 数据集 YAML", default="")
             self._add_field(form, "model.device", "运行设备", "combo", "auto", ["auto", "cpu", "cuda:0"])
             self._add_field(form, "dataset.train", "训练集目录", default="")
             self._add_field(form, "dataset.val", "验证集目录", default="")
             self._add_field(form, "dataset.input_size", "输入尺寸", "size", [224, 224])
             self._add_section(layout, "压缩与蒸馏")
             self._add_field(form, "compression.sparsity", "剪枝稀疏度", "float", 0.30)
+            self._add_field(form, "compression.structured.method", "结构化剪枝方法", "combo", "scale", ["scale", "torch_pruning"])
+            self._add_field(form, "compression.structured.target_scale", "结构化目标规模", "combo", "n", ["n", "s", "m", "l", "x"])
+            self._add_field(form, "compression.structured.initial_weights", "目标规模预训练权重", default="")
+            self._add_field(form, "compression.structured.finetune_epochs", "结构化微调轮数", "int", 80)
+            self._add_field(form, "compression.structured.train_input_size", "结构化训练尺寸", "int", 1024)
+            self._add_field(form, "compression.structured.batch_size", "结构化 Batch", "int", 2)
+            self._add_field(form, "compression.structured.benchmark_warmup", "测速预热次数", "int", 5)
+            self._add_field(form, "compression.structured.benchmark_repeats", "测速重复次数", "int", 20)
+            self._add_field(form, "compression.structured.optimizer", "结构化优化器", "combo", "AdamW", ["AdamW", "SGD", "auto"])
+            self._add_field(form, "compression.structured.quality_gate", "精度门禁", "bool", True)
+            self._add_field(form, "compression.structured.max_map50_95_drop", "允许 mAP50-95 下降", "float", 0.05)
+            self._add_field(form, "compression.structured.channel_sparsity", "通道剪枝比例", "float", 0.10)
+            self._add_field(form, "compression.structured.channel_round", "通道对齐数", "int", 8)
+            self._add_field(form, "compression.structured.max_pruned_layers", "最多剪枝阶段数", "int", 6)
+            self._add_field(form, "compression.structured.stage_selection", "剪枝阶段方向", "combo", "all", ["all", "deepest", "front_to_back"])
+            self._add_field(form, "compression.structured.pruning_input_size", "剪枝示例输入尺寸", "int", 640)
             self._add_field(form, "distillation.teacher_weights", "教师模型", default="")
             self._add_field(form, "distillation.student_weights", "学生模型", default="")
             self._add_field(form, "distillation.temperature", "蒸馏温度", "float", 4.0)
             self._add_field(form, "distillation.alpha", "蒸馏权重", "float", 0.5)
             self._add_field(form, "distillation.epochs", "训练轮数", "int", 1)
-            for path, label, default in (("modules.baseline.evaluate", "基线评估", True), ("modules.compression.quantize.dynamic_int8", "动态 INT8", False), ("modules.compression.prune.unstructured", "非结构化剪枝", False), ("modules.distillation.classification", "知识蒸馏", False)):
+            for path, label, default in (("modules.baseline.evaluate", "基线评估", True), ("modules.compression.quantize.dynamic_int8", "动态 INT8", False), ("modules.compression.prune.unstructured", "非结构化剪枝", False), ("modules.distillation.classification", "知识蒸馏", False), ("modules.compression.prune.structured", "结构化通道缩放", False)):
                 self._add_field(form, path, label, "bool", default)
         else:
             layout.addWidget(QLabel("当前工具没有预置图形字段，请使用“YAML 高级”页。"))
@@ -395,7 +568,7 @@ class ConfigEditorDialog(QDialog):
             layout.addWidget(QLabel("当前配置为空，请先在 YAML 高级页填写内容。"))
         for path, value, kind in rows:
             if kind == "bool":
-                widget: QWidget = QCheckBox()
+                widget: QWidget = StateCheckBox()
                 widget.setChecked(bool(value))  # type: ignore[attr-defined]
             else:
                 widget = QLineEdit(self._display(value, kind, ""))
@@ -416,30 +589,30 @@ class ConfigEditorDialog(QDialog):
             try:
                 return int(value)
             except ValueError:
-                return 0
+                raise ValueError(f"整数格式错误：{value!r}")
         if kind == "float":
             try:
                 return float(value)
             except ValueError:
-                return 0.0
+                raise ValueError(f"小数格式错误：{value!r}")
         if kind == "size":
             parts = [part.strip() for part in str(value).replace("x", ",").split(",") if part.strip()]
             try:
                 return [int(parts[0]), int(parts[1] if len(parts) > 1 else parts[0])]
             except (IndexError, ValueError):
-                return [832, 832]
+                raise ValueError(f"尺寸格式错误：{value!r}，示例：832,832")
         if kind.startswith("list"):
             values = [item.strip() for item in str(value).split(",") if item.strip()]
             if kind == "list-int":
                 try:
                     return [int(item) for item in values]
                 except ValueError:
-                    return []
+                    raise ValueError(f"整数列表格式错误：{value!r}")
             if kind == "list-float":
                 try:
                     return [float(item) for item in values]
                 except ValueError:
-                    return []
+                    raise ValueError(f"小数列表格式错误：{value!r}")
             if kind == "list-bool":
                 return [item.lower() in {"1", "true", "yes", "on"} for item in values]
             return values
@@ -461,17 +634,25 @@ class ConfigEditorDialog(QDialog):
                     raise ValueError("YAML 顶层必须是对象")
                 text = self.editor.toPlainText()
             elif self.tabs.currentIndex() == 1:
+                if self.parse_error:
+                    raise ValueError(self.parse_error)
                 data = self._parse_yaml(self.editor.toPlainText())
                 for field_path, (widget, kind) in self.all_field_widgets.items():
                     self._set(data, field_path, self._field_value(widget, kind))
                 text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
             else:
+                if self.parse_error:
+                    raise ValueError(self.parse_error)
                 data = self._parse_yaml(self.editor.toPlainText())
                 for field_path, (widget, kind) in self.field_widgets.items():
                     self._set(data, field_path, self._field_value(widget, kind))
                 text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
+            if path.exists():
+                shutil.copy2(path, path.with_name(path.name + ".bak"))
+            temporary = path.with_name(path.name + ".tmp")
+            temporary.write_text(text, encoding="utf-8")
+            temporary.replace(path)
             self.path = path
             self.accept()
         except Exception as exc:
@@ -496,12 +677,30 @@ class ToolPage(QWidget):
         self.resource_edit.setPlaceholderText(resource_hint)
         self.dataset_edit = QLineEdit()
         self.dataset_edit.setPlaceholderText("可选：覆盖配置中的数据集 YAML")
+        self.compression_task = QComboBox()
+        self.compression_task.addItems(["YOLO 目标检测", "图像分类"])
+        self.detection_data_edit = QLineEdit()
+        self.detection_data_edit.setPlaceholderText("选择包含 names、train、val 的 data.yaml")
         self.val_edit = QLineEdit()
         self.val_edit.setPlaceholderText("可选：验证集目录")
         self.device_combo = QComboBox()
         self.device_combo.addItems(["自动选择", "CPU", "CUDA:0"])
         self.backend_combo = QComboBox()
         self.backend_combo.addItems(["PyTorch 测速", "TensorRT 测速", "输出一致性检查", "一键测速", "Checkpoint 检查"])
+        # Keep form rows stable on both normal and high-DPI desktops.  A
+        # QHBoxLayout wrapper can otherwise report a smaller height than its
+        # line edit, which clips the text and lets the next row overlap it.
+        for control in (
+            self.config_edit,
+            self.resource_edit,
+            self.dataset_edit,
+            self.detection_data_edit,
+            self.val_edit,
+            self.compression_task,
+            self.device_combo,
+            self.backend_combo,
+        ):
+            control.setMinimumHeight(56)
         self._build()
 
     def _build(self) -> None:
@@ -521,26 +720,31 @@ class ToolPage(QWidget):
         form = QFormLayout(panel)
         form.setContentsMargins(20, 18, 20, 18)
         form.setHorizontalSpacing(22)
-        form.setVerticalSpacing(14)
+        form.setVerticalSpacing(20)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
+        if self.spec.key == "compression":
+            form.addRow("模型任务", self.compression_task)
         if self.spec.key == "benchmark":
             form.addRow("测速类型", self.backend_combo)
 
         config_row = QWidget()
+        config_row.setMinimumHeight(56)
         config_layout = QHBoxLayout(config_row)
         config_layout.setContentsMargins(0, 0, 0, 0)
         config_layout.addWidget(self.config_edit, 1)
         browse = QPushButton("选择")
+        browse.setMinimumHeight(56)
         browse.clicked.connect(self._choose_config)
         config_layout.addWidget(browse)
         graphical = QPushButton("图形配置")
+        graphical.setMinimumHeight(56)
         graphical.setToolTip("打开可编辑全部 YAML 字段的配置窗口")
         graphical.clicked.connect(self._open_config_editor)
         config_layout.addWidget(graphical)
         gear = QToolButton()
         gear.setText("⚙")
-        gear.setFixedWidth(34)
+        gear.setFixedSize(56, 56)
         gear.setToolTip("打开 YAML 配置编辑器")
         gear.setAccessibleName("打开 YAML 配置编辑器")
         gear.clicked.connect(self._open_config_editor)
@@ -548,10 +752,12 @@ class ToolPage(QWidget):
         form.addRow("配置文件", config_row)
 
         resource_row = QWidget()
+        resource_row.setMinimumHeight(56)
         resource_layout = QHBoxLayout(resource_row)
         resource_layout.setContentsMargins(0, 0, 0, 0)
         resource_layout.addWidget(self.resource_edit, 1)
         pick = QPushButton("选择")
+        pick.setMinimumHeight(56)
         pick.clicked.connect(self._choose_resource)
         resource_layout.addWidget(pick)
         resource_label = "模型 / 预测文件"
@@ -560,10 +766,12 @@ class ToolPage(QWidget):
         form.addRow(resource_label, resource_row)
         if self.spec.key == "diagnostics":
             dataset_row = QWidget()
+            dataset_row.setMinimumHeight(56)
             dataset_layout = QHBoxLayout(dataset_row)
             dataset_layout.setContentsMargins(0, 0, 0, 0)
             dataset_layout.addWidget(self.dataset_edit, 1)
             dataset_pick = QPushButton("选择")
+            dataset_pick.setMinimumHeight(56)
             dataset_pick.clicked.connect(self._choose_dataset)
             dataset_layout.addWidget(dataset_pick)
             form.addRow("数据集 YAML", dataset_row)
@@ -574,9 +782,25 @@ class ToolPage(QWidget):
             self.dataset_edit.setPlaceholderText("可选：测速图片、视频或目录")
             form.addRow("测速输入", self._data_row(self.dataset_edit, "选择输入"))
         elif self.spec.key == "compression":
+            data_row = QWidget()
+            data_row.setMinimumHeight(56)
+            data_layout = QHBoxLayout(data_row)
+            data_layout.setContentsMargins(0, 0, 0, 0)
+            data_layout.addWidget(self.detection_data_edit, 1)
+            data_pick = QPushButton("选择 YAML")
+            data_pick.setMinimumHeight(56)
+            data_pick.clicked.connect(self._choose_detection_data)
+            data_layout.addWidget(data_pick)
+            form.addRow("检测数据集 YAML", data_row)
+            self._compression_form = form
+            self._compression_data_row = form.rowCount() - 1
             self.dataset_edit.setPlaceholderText("可选：训练集目录")
-            form.addRow("训练集目录", self._data_row(self.dataset_edit, "选择目录", directory=True))
-            form.addRow("验证集目录", self._data_row(self.val_edit, "选择目录", directory=True))
+            train_row = self._data_row(self.dataset_edit, "选择目录", directory=True)
+            val_row = self._data_row(self.val_edit, "选择目录", directory=True)
+            form.addRow("训练集目录", train_row)
+            self._compression_train_row = form.rowCount() - 1
+            form.addRow("验证集目录", val_row)
+            self._compression_val_row = form.rowCount() - 1
         form.addRow("运行设备", self.device_combo)
         outer.addWidget(panel)
 
@@ -590,7 +814,7 @@ class ToolPage(QWidget):
         labels = self._module_labels()
         self.module_buttons: list[QPushButton] = []
         for index, label in enumerate(labels):
-            button = QPushButton(f"✓  {label}")
+            button = QPushButton(("✓  " if index == 0 else "○  ") + label)
             button.setCheckable(True)
             button.setChecked(index == 0)
             button.toggled.connect(lambda checked, b=button: b.setText(("✓  " if checked else "○  ") + b.text()[3:]))
@@ -598,7 +822,10 @@ class ToolPage(QWidget):
             module_layout.addWidget(button, index // 2, index % 2)
         outer.addWidget(module_panel)
 
-        note = QLabel("YAML 仍是完整参数来源；模型、输入和数据集路径会作为本次运行的临时覆盖值传给对应工具。")
+        note_text = "YAML 仍是完整参数来源；模型、输入和数据集路径会作为本次运行的临时覆盖值传给对应工具。"
+        if self.spec.key == "compression":
+            note_text += " YOLO 检测支持 data.yaml、多框标签、剪枝及压缩前后 mAP 评估。非结构化剪枝不保证文件缩小或推理加速；结构化通道缩放会按 YAML 规模重建网络并可选微调。"
+        note = QLabel(note_text)
         note.setObjectName("muted")
         note.setWordWrap(True)
         outer.addWidget(note)
@@ -606,14 +833,46 @@ class ToolPage(QWidget):
 
         actions = QHBoxLayout()
         actions.addStretch()
-        save = QPushButton("保存为预设")
-        save.clicked.connect(self._save_preset)
-        actions.addWidget(save)
         self.run_button = QPushButton("开始运行")
         self.run_button.setObjectName("primary")
         self.run_button.clicked.connect(self._run)
         actions.addWidget(self.run_button)
         outer.addLayout(actions)
+        if self.spec.key == "compression":
+            self.compression_task.currentIndexChanged.connect(self._compression_task_changed)
+            self._compression_task_changed()
+
+    def _choose_detection_data(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "选择 YOLO 数据集", str(ROOT), "YAML (*.yaml *.yml)")
+        if path:
+            self.detection_data_edit.setText(path)
+
+    def _compression_task_changed(self) -> None:
+        detection = self.compression_task.currentIndex() == 0
+        self.detection_data_edit.setEnabled(detection)
+        self.dataset_edit.setEnabled(not detection)
+        self.val_edit.setEnabled(not detection)
+        self._compression_form.setRowVisible(self._compression_data_row, detection)
+        self._compression_form.setRowVisible(self._compression_train_row, not detection)
+        self._compression_form.setRowVisible(self._compression_val_row, not detection)
+        for index, button in enumerate(self.module_buttons):
+            if index in (1, 3):
+                # Dynamic INT8 and distillation still use the classification
+                # pipeline; do not leave a disabled module selected.
+                button.setEnabled(not detection)
+                if detection:
+                    button.setChecked(False)
+                button.setToolTip("仅支持分类模型" if detection else "")
+            elif index == 4:
+                # Structured width scaling is the detection-only path.
+                button.setEnabled(detection)
+                if not detection:
+                    button.setChecked(False)
+                button.setToolTip("仅支持 YOLO 检测模型" if not detection else "")
+            else:
+                button.setEnabled(True)
+                button.setToolTip("")
+        self.module_buttons[2].setChecked(detection)
 
     def _module_labels(self) -> list[str]:
         if self.spec.key == "diagnostics":
@@ -623,7 +882,7 @@ class ToolPage(QWidget):
         if self.spec.key == "benchmark":
             return ["PyTorch 调用", "TensorRT", "显存统计", "一致性检查"]
         if self.spec.key == "compression":
-            return ["基线评估", "动态 INT8", "剪枝", "知识蒸馏"]
+            return ["基线评估", "动态 INT8", "非结构化剪枝", "知识蒸馏", "结构化通道缩放"]
         return ["默认流程"]
 
     def _module_ids(self) -> list[str]:
@@ -634,7 +893,13 @@ class ToolPage(QWidget):
         if self.spec.key == "benchmark":
             return ["speed.pytorch_call", "speed.tensorrt_call", "memory.pytorch_peak", "consistency.detection"]
         if self.spec.key == "compression":
-            return ["baseline.evaluate", "compression.quantize.dynamic_int8", "compression.prune.unstructured", "distillation.classification"]
+            return [
+                "baseline.evaluate",
+                "compression.quantize.dynamic_int8",
+                "compression.prune.unstructured",
+                "distillation.classification",
+                "compression.prune.structured",
+            ]
         return []
 
     def _choose_config(self) -> None:
@@ -661,18 +926,22 @@ class ToolPage(QWidget):
 
     def _data_row(self, edit: QLineEdit, title: str, directory: bool = False) -> QWidget:
         row = QWidget()
+        row.setMinimumHeight(56)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(edit, 1)
         if directory:
             button = QPushButton(title)
+            button.setMinimumHeight(56)
             button.clicked.connect(lambda: self._choose_directory(edit, title))
             layout.addWidget(button)
         else:
             file_button = QPushButton("文件")
+            file_button.setMinimumHeight(56)
             file_button.clicked.connect(lambda: self._choose_input(edit, title))
             layout.addWidget(file_button)
             dir_button = QPushButton("目录")
+            dir_button.setMinimumHeight(56)
             dir_button.clicked.connect(lambda: self._choose_directory(edit, title))
             layout.addWidget(dir_button)
         return row
@@ -688,7 +957,10 @@ class ToolPage(QWidget):
             edit.setText(path)
 
     def _save_preset(self) -> None:
-        QMessageBox.information(self, "预设", "预设保存入口已就绪；下一步会把模块选择写入独立的配置副本。")
+        # This button used to claim that a preset was saved while doing
+        # nothing. Hide it until the preset format can represent every tool
+        # specific option without silently losing YAML fields.
+        return
 
     def _run(self) -> None:
         config = Path(self.config_edit.text()).expanduser() if self.config_edit.text() else None
@@ -696,7 +968,13 @@ class ToolPage(QWidget):
         extra_args: list[str] = []
         module_ids = self._module_ids()
         selected_modules = [module_id for button, module_id in zip(self.module_buttons, module_ids) if button.isChecked()]
+        if self.spec.key != "benchmark" and not selected_modules:
+            QMessageBox.warning(self, "未选择模块", "请至少选择一个要运行的模块。")
+            return
         resource = self.resource_edit.text().strip()
+        device = {"自动选择": "auto", "CPU": "cpu", "CUDA:0": "cuda:0"}.get(self.device_combo.currentText(), "auto")
+        if device != "auto":
+            extra_args.extend(["--device", device])
         if self.spec.key == "diagnostics" and resource:
             # A model checkpoint and an already generated prediction file are
             # different inputs. Keep the CLI flag aligned with the selected
@@ -718,11 +996,15 @@ class ToolPage(QWidget):
             if self.backend_combo.currentText() == "一键测速" and resource:
                 extra_args.extend(["--model", resource])
         if self.spec.key == "compression":
+            detection = self.compression_task.currentIndex() == 0
+            extra_args.extend(["--task", "detect" if detection else "classify"])
+            if detection and self.detection_data_edit.text().strip():
+                extra_args.extend(["--data", self.detection_data_edit.text().strip()])
             if resource:
                 extra_args.extend(["--weights", resource])
-            if self.dataset_edit.text().strip():
+            if not detection and self.dataset_edit.text().strip():
                 extra_args.extend(["--train", self.dataset_edit.text().strip()])
-            if self.val_edit.text().strip():
+            if not detection and self.val_edit.text().strip():
                 extra_args.extend(["--val", self.val_edit.text().strip()])
         if self.spec.key != "benchmark":
             for module_id in selected_modules:
@@ -854,7 +1136,7 @@ class UtilityPage(QWidget):
         return combo
 
     def _check(self, form: QFormLayout, key: str, label: str, checked: bool = False) -> QCheckBox:
-        check = QCheckBox(label)
+        check = StateCheckBox(label)
         check.setChecked(checked)
         self.fields[self._current_key][key] = check
         form.addRow("", check)
@@ -868,8 +1150,8 @@ class UtilityPage(QWidget):
             self.specs[key] = ToolSpec(key, "NDJSON → YOLO", "转换 NDJSON 数据集", script=ROOT / "transform_tools" / "ndjson_to_yolo.py")
         elif self.category == "transform" and key == "kmodel":
             self._line(form, "pt", "PyTorch 权重", path_kind="file")
-            self._line(form, "onnx", "ONNX 输出", path_kind="file")
-            self._line(form, "kmodel", "kmodel 输出", path_kind="file")
+            self._line(form, "onnx", "ONNX 输出", path_kind="save_file")
+            self._line(form, "kmodel", "kmodel 输出", path_kind="save_file")
             self._line(form, "calib", "校准图片目录", path_kind="dir")
             self._line(form, "size", "输入尺寸", "320")
             self._line(form, "samples", "校准样本数", "200")
@@ -924,6 +1206,8 @@ class UtilityPage(QWidget):
     def _choose_path(self, edit: QLineEdit, kind: str) -> None:
         if kind == "dir":
             path = QFileDialog.getExistingDirectory(self, "选择目录", str(ROOT))
+        elif kind == "save_file":
+            path, _ = QFileDialog.getSaveFileName(self, "选择输出文件", str(ROOT), "所有文件 (*)")
         elif kind == "file_or_dir":
             path, _ = QFileDialog.getOpenFileName(self, "选择文件", str(ROOT), "所有文件 (*)")
         else:
@@ -943,7 +1227,9 @@ class UtilityPage(QWidget):
         return bool(getattr(self.fields[key][field], "isChecked")())
 
     def _arg(self, args: list[str], flag: str, value: str, *, required: bool = False) -> None:
-        if value or required:
+        if required and not value:
+            raise ValueError(f"请填写 {flag} 对应的必填项")
+        if value:
             args.extend([flag, value])
 
     def _build_args(self, key: str) -> list[str]:
@@ -982,7 +1268,12 @@ class UtilityPage(QWidget):
 
     def _run(self) -> None:
         key = self._options()[self.selector.currentIndex()][0]
-        self.run_requested.emit(self.specs[key], None, self._build_args(key))
+        try:
+            args = self._build_args(key)
+        except ValueError as exc:
+            QMessageBox.warning(self, "参数不完整", str(exc))
+            return
+        self.run_requested.emit(self.specs[key], None, args)
 
     def set_running(self, running: bool) -> None:
         self.run_button.setEnabled(not running)
@@ -999,8 +1290,8 @@ class EnvironmentPage(QWidget):
         self.device = QComboBox()
         self.device.addItems(["auto", "cpu", "cuda:0"])
         self.size = QLineEdit("64")
-        self.export_check = QCheckBox("检查 ONNX / TensorRT 导入")
-        self.skip_model = QCheckBox("跳过模型构建和前向传播")
+        self.export_check = StateCheckBox("检查 ONNX / TensorRT 导入")
+        self.skip_model = StateCheckBox("跳过模型构建和前向传播")
         self._build()
 
     def _build(self) -> None:
@@ -1064,16 +1355,17 @@ class EnvironmentPage(QWidget):
 
 
 class ResultsPage(QWidget):
-    """Browse and preview files produced by vtools runs."""
+    """Browse image results produced by vtools runs."""
 
-    _TEXT_SUFFIXES = {".txt", ".log", ".json", ".jsonl", ".csv", ".yaml", ".yml", ".md", ".html"}
-    _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
-    _SKIP_DIRS = {".git", ".vtools_ui", "__pycache__", "weights", "engines", "onnx"}
+    _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".svg"}
+    _SKIP_DIRS = {".git", ".vtools_ui", "__pycache__"}
 
     def __init__(self, root: Path) -> None:
         super().__init__()
         self.root = root
         self._image_path: Path | None = None
+        self._scan_thread: QThread | None = None
+        self._scan_worker: _ResultScanWorker | None = None
         self._build()
         QTimer.singleShot(0, self._scan)
 
@@ -1085,7 +1377,7 @@ class ResultsPage(QWidget):
         title = QLabel("结果查看")
         title.setObjectName("pageTitle")
         outer.addWidget(title)
-        desc = QLabel("浏览诊断报告、可视化图片、测速 CSV 和压缩实验产物。双击文件或点击按钮可用系统默认程序打开。")
+        desc = QLabel("浏览诊断和可视化图片结果；这里只显示图片文件。")
         desc.setObjectName("muted")
         desc.setWordWrap(True)
         outer.addWidget(desc)
@@ -1108,14 +1400,13 @@ class ResultsPage(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.file_list = QListWidget()
         self.file_list.itemSelectionChanged.connect(self._preview_selected)
-        self.file_list.itemDoubleClicked.connect(lambda _item: self._open_selected())
         splitter.addWidget(self.file_list)
 
         preview_panel = QFrame()
         preview_panel.setObjectName("panel")
         preview_layout = QVBoxLayout(preview_panel)
         preview_layout.setContentsMargins(12, 12, 12, 12)
-        self.preview_title = QLabel("选择一个结果文件")
+        self.preview_title = QLabel("选择一张图片")
         self.preview_title.setObjectName("muted")
         preview_layout.addWidget(self.preview_title)
         self.preview_image = QLabel()
@@ -1124,22 +1415,15 @@ class ResultsPage(QWidget):
         self.preview_image.setMinimumSize(280, 220)
         self.preview_image.hide()
         preview_layout.addWidget(self.preview_image, 1)
-        self.preview_text = QPlainTextEdit()
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setObjectName("log")
-        preview_layout.addWidget(self.preview_text, 1)
+        self.preview_status = QLabel("只显示图片结果；文本、表格和模型文件不会出现在这里。")
+        self.preview_status.setObjectName("muted")
+        self.preview_status.setWordWrap(True)
+        self.preview_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_layout.addWidget(self.preview_status, 1)
         splitter.addWidget(preview_panel)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
         outer.addWidget(splitter, 1)
-
-        actions = QHBoxLayout()
-        actions.addStretch()
-        self.open_button = QPushButton("用系统程序打开")
-        self.open_button.setEnabled(False)
-        self.open_button.clicked.connect(self._open_selected)
-        actions.addWidget(self.open_button)
-        outer.addLayout(actions)
 
     def _choose_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "选择结果目录", self.root_edit.text() or str(ROOT))
@@ -1157,27 +1441,37 @@ class ResultsPage(QWidget):
         self.file_list.clear()
         self._image_path = None
         self.preview_image.hide()
-        self.preview_text.show()
-        self.preview_text.setPlainText("正在扫描结果文件…")
+        self.preview_status.show()
+        self.preview_status.setText("正在扫描图片结果…")
         if not root.is_dir():
-            self.preview_text.setPlainText(f"目录不存在：{root}")
+            self.preview_status.setText(f"目录不存在：{root}")
             return
-        project_scan = root == ROOT.resolve()
-        result_markers = {"runs", "runs-profile", "results", "outputs", "reports", "store"}
-        files: list[Path] = []
-        for base, dirs, names in os.walk(root):
-            dirs[:] = [name for name in dirs if name not in self._SKIP_DIRS and not name.startswith(".")]
-            for name in names:
-                path = Path(base) / name
-                if project_scan and not any(marker in path.parts for marker in result_markers):
-                    continue
-                if path.suffix.lower() in self._TEXT_SUFFIXES | self._IMAGE_SUFFIXES:
-                    files.append(path)
-                if len(files) >= 2000:
-                    break
-            if len(files) >= 2000:
-                break
-        files.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+        if self._scan_thread is not None and self._scan_thread.isRunning():
+            return
+        self._scan_thread = QThread(self)
+        suffixes = self._IMAGE_SUFFIXES
+        self._scan_worker = _ResultScanWorker(root, ROOT.resolve(), self._SKIP_DIRS, suffixes)
+        self._scan_worker.moveToThread(self._scan_thread)
+        self._scan_thread.started.connect(self._scan_worker.run)
+        self._scan_worker.finished.connect(self._scan_finished)
+        self._scan_worker.finished.connect(self._scan_thread.quit)
+        self._scan_worker.finished.connect(self._scan_worker.deleteLater)
+        self._scan_thread.finished.connect(self._scan_thread.deleteLater)
+        self._scan_thread.finished.connect(self._scan_thread_done)
+        self._scan_thread.start()
+
+    def _scan_thread_done(self) -> None:
+        self._scan_thread = None
+        self._scan_worker = None
+
+    def _scan_finished(self, root: Path, result: object) -> None:
+        current_root = Path(self.root_edit.text()).expanduser().resolve()
+        if root != current_root:
+            return
+        if isinstance(result, Exception):
+            self.preview_status.setText(f"扫描失败：{result}")
+            return
+        files = result if isinstance(result, list) else []
         for path in files:
             try:
                 size = path.stat().st_size
@@ -1187,53 +1481,38 @@ class ResultsPage(QWidget):
             item = QListWidgetItem(f"{relative}  ({self._format_size(size)})")
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             self.file_list.addItem(item)
-        self.preview_text.setPlainText(f"找到 {len(files)} 个结果文件。")
+        self.preview_status.setText(f"找到 {len(files)} 张图片。")
 
     def _preview_selected(self) -> None:
         item = self.file_list.currentItem()
         if not item:
-            self.open_button.setEnabled(False)
+            self.preview_status.setText("选择一张图片预览")
             return
         path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
-        self.open_button.setEnabled(path.exists())
         self.preview_title.setText(str(path))
         suffix = path.suffix.lower()
         if suffix in self._IMAGE_SUFFIXES:
             self._image_path = path
-            self.preview_text.hide()
+            self.preview_status.hide()
             self.preview_image.show()
             self._show_image()
             return
         self._image_path = None
         self.preview_image.hide()
-        self.preview_text.show()
-        if suffix in self._TEXT_SUFFIXES:
-            try:
-                content = path.read_text(encoding="utf-8", errors="replace")
-                self.preview_text.setPlainText(content[:300_000])
-            except OSError as exc:
-                self.preview_text.setPlainText(f"无法读取文件：{exc}")
-        else:
-            self.preview_text.setPlainText("该文件类型不适合内置预览，请点击“用系统程序打开”。")
+        self.preview_status.show()
+        self.preview_status.setText("该结果不是图片，无法在此预览。")
 
     def _show_image(self) -> None:
         if not self._image_path:
             return
         pixmap = QPixmap(str(self._image_path))
         if pixmap.isNull():
-            self.preview_text.show()
+            self.preview_status.show()
             self.preview_image.hide()
-            self.preview_text.setPlainText("无法读取图片，请用系统程序打开。")
+            self.preview_status.setText("无法读取图片。")
             return
         target = self.preview_image.size()
         self.preview_image.setPixmap(pixmap.scaled(target, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-
-    def _open_selected(self) -> None:
-        item = self.file_list.currentItem()
-        if item:
-            path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
-            if path.exists():
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     @staticmethod
     def _format_size(size: int) -> str:
@@ -1382,7 +1661,13 @@ class MainWindow(QMainWindow):
                 page = ToolPage(spec)
                 page.run_requested.connect(self._start_run)
                 self.tool_pages[spec.key] = page
-                self.pages[spec.key] = page
+                # Tool pages contain a relatively tall form.  Keep the page
+                # at its natural minimum height so a short or high-DPI window
+                # scrolls instead of compressing rows and clipping controls.
+                scroll = QScrollArea()
+                scroll.setWidgetResizable(True)
+                scroll.setWidget(page)
+                self.pages[spec.key] = scroll
             else:
                 page = UtilityPage(spec.key) if spec.key in {"transform", "data"} else EmptyPage(spec.title, spec.description)
                 if isinstance(page, UtilityPage):
@@ -1392,14 +1677,16 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(self.pages[spec.key])
         self.pages["history"] = self._make_history_page()
         self.stack.addWidget(self.pages["history"])
-        self.pages["results"] = ResultsPage(ROOT)
+        results_root = Path(str(self.settings.value("results_root") or ROOT)).expanduser().resolve()
+        self.pages["results"] = ResultsPage(results_root)
         self.stack.addWidget(self.pages["results"])
         environment_page = EnvironmentPage()
         environment_page.run_requested.connect(self._start_run)
         self.pages["environment"] = environment_page
         self.tool_pages["environment"] = environment_page
         self.stack.addWidget(self.pages["environment"])
-        self.pages["settings"] = EmptyPage("设置", "管理主题、默认目录和任务保留策略。")
+        self.pages["settings"] = SettingsPage(self.settings, HISTORY_PATH)
+        self.pages["settings"].changed.connect(self._settings_changed)  # type: ignore[attr-defined]
         self.stack.addWidget(self.pages["settings"])
         body.addWidget(self.stack, 1)
         root_layout.addLayout(body, 1)
@@ -1450,6 +1737,13 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.history_table)
         self._reload_history()
         return page
+
+    def _settings_changed(self) -> None:
+        results_page = self.pages.get("results")
+        if isinstance(results_page, ResultsPage):
+            results_page.root_edit.setText(str(self.settings.value("results_root") or ROOT))
+            results_page._scan()
+        self._reload_history()
 
     def _reload_history(self) -> None:
         if not hasattr(self, "history_table"):
@@ -1514,17 +1808,43 @@ class MainWindow(QMainWindow):
         for page in self.tool_pages.values():
             page.set_running(running)
 
+    def _latest_failure_detail(self) -> str:
+        for line in reversed(self.log.toPlainText().splitlines()):
+            text = line.strip()
+            if "失败：" in text or text.startswith("错误："):
+                return text[:600]
+        return ""
+
     def _run_finished(self, exit_code: int, task_name: str, was_stopped: bool = False) -> None:
-        append_history(HISTORY_PATH, task_name, exit_code, self._active_config, "已停止" if was_stopped else None)
+        history_limit = int(self.settings.value("history_limit") or 40)
+        append_history(HISTORY_PATH, task_name, exit_code, self._active_config, "已停止" if was_stopped else None, history_limit)
+        run_dir = self.runner.last_run_dir
         self._active_config = None
         self._reload_history()
-        self._set_run_state("已停止" if was_stopped else ("成功" if exit_code == 0 else f"失败（退出码 {exit_code}）"))
+        status = "已停止" if was_stopped else ("成功" if exit_code == 0 else f"失败（退出码 {exit_code}）")
+        self._set_run_state(status)
+        if run_dir:
+            self._append_log(f"\n结果目录：{run_dir}\n")
+            self.state_label.setText(f"{status} · 结果目录：{run_dir}")
+        message = status
+        if run_dir:
+            message += f"\n结果目录：\n{run_dir}"
+        else:
+            message += "\n未检测到结果目录，请查看运行日志。"
+        if exit_code != 0 and not was_stopped:
+            detail = self._latest_failure_detail()
+            if detail:
+                message += f"\n\n{detail}"
+        if not was_stopped:
+            box = QMessageBox.information if exit_code == 0 else QMessageBox.warning
+            box(self, "任务完成" if exit_code == 0 else "任务失败", message)
 
     def _environment_changed(self, index: int) -> None:
         raw_path = self.env_combo.itemData(index)
         if raw_path:
             executable = Path(str(raw_path)).expanduser().resolve()
             self.runner.set_python_executable(executable)
+            self.settings.setValue("python_executable", str(executable))
             self.env_combo.setToolTip(f"任务解释器：{executable}")
             return
         if self.env_combo.itemText(index) == "选择 Python 解释器…":
@@ -1541,8 +1861,26 @@ class MainWindow(QMainWindow):
 
     def _scan_environments(self) -> None:
         """Discover Conda and common system interpreters without changing the current one."""
-
         current = Path(sys.executable).resolve()
+        if getattr(self, "_env_scan_thread", None) is not None and self._env_scan_thread.isRunning():
+            return
+        self._env_scan_current = current
+        self._env_scan_thread = QThread(self)
+        self._env_scan_worker = _CondaScanWorker()
+        self._env_scan_worker.moveToThread(self._env_scan_thread)
+        self._env_scan_thread.started.connect(self._env_scan_worker.run)
+        self._env_scan_worker.finished.connect(lambda conda: self._populate_environments(current, conda))
+        self._env_scan_worker.finished.connect(self._env_scan_thread.quit)
+        self._env_scan_worker.finished.connect(self._env_scan_worker.deleteLater)
+        self._env_scan_thread.finished.connect(self._env_scan_thread.deleteLater)
+        self._env_scan_thread.finished.connect(self._env_scan_thread_done)
+        self._env_scan_thread.start()
+
+    def _env_scan_thread_done(self) -> None:
+        self._env_scan_thread = None
+        self._env_scan_worker = None
+
+    def _populate_environments(self, current: Path, conda_values: object) -> None:
         found: list[tuple[str, Path]] = [(self._environment_label(current), current)]
         seen = {str(current)}
 
@@ -1553,7 +1891,8 @@ class MainWindow(QMainWindow):
             seen.add(str(executable))
             found.append((label, executable))
 
-        for env_path, label in self._conda_environments():
+        values = conda_values if isinstance(conda_values, list) else []
+        for env_path, label in values:
             add(label, self._python_in_prefix(env_path))
 
         for command, label in (("python3", "系统 Python 3"), ("python", "PATH 中的 Python")):
@@ -1563,7 +1902,7 @@ class MainWindow(QMainWindow):
         for candidate in (Path("/usr/bin/python3"), Path("/usr/local/bin/python3")):
             add("系统 Python 3", candidate)
 
-        selected = str(self.env_combo.currentData() or current)
+        selected = str(self.settings.value("python_executable") or self.env_combo.currentData() or current)
         self.env_combo.blockSignals(True)
         self.env_combo.clear()
         selected_index = 0
@@ -1651,6 +1990,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if self.runner.is_running:
             self.runner.stop()
+        for thread in (
+            getattr(self, "_env_scan_thread", None),
+            getattr(self.pages.get("results"), "_scan_thread", None),
+        ):
+            if thread is not None and thread.isRunning():
+                thread.quit()
+                thread.wait(5000)
         self.settings.setValue("geometry", self.saveGeometry())
         super().closeEvent(event)
 

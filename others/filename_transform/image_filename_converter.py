@@ -40,14 +40,14 @@ from typing import Any, Iterable
 #   coco_json: /home/用户名/datasets/coco/annotations/instances_train.json
 # ============================================================================
 PYCHARM_CONFIG: dict[str, Any] = {
-    "input_dir": r"/home/xyzkioo/PycharmProjects/vtools/flowerhard0",
-    "dataset_format": "yolo",
+    "input_dir": r"",
+    "dataset_format": "images",
     "labels_dir": r"",
     "coco_json": r"",
     "recursive": True,
     "include_hidden": False,
     "extensions": "jpg,jpeg,png,bmp,gif,tif,tiff,webp,heic,avif",
-    "template": "{prefix}{index:04d}{suffix}",
+    "template": "08-{index:02d}",
     "prefix": "",
     "suffix": "",
     "start": 1,

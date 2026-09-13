@@ -29,6 +29,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="复用指定的 runN 目录；省略时自动创建 runs-profile/runN",
     )
+    parser.add_argument("--model", action="append", help="临时覆盖 YAML 中的模型权重，可传 PATH 或 NAME=PATH")
+    parser.add_argument("--source", type=Path, help="临时覆盖测速图片、视频或目录")
+    parser.add_argument("--device", help="临时覆盖测速设备")
+    parser.add_argument("--adapter", help="临时覆盖模型适配器")
+    parser.add_argument("--task", help="临时覆盖模型任务")
     parser.add_argument("--only", action="append", help="只运行指定测速模块，可重复或用逗号分隔")
     parser.add_argument("--enable", action="append", help="临时启用测速模块，可重复或用逗号分隔")
     parser.add_argument("--disable", action="append", help="临时关闭测速模块，可重复或用逗号分隔")
@@ -135,6 +140,14 @@ def main() -> None:
     for flag in ("only", "enable", "disable"):
         for value in getattr(args, flag) or []:
             module_args.extend([f"--{flag}", value])
+    for value in args.model or []:
+        module_args.extend(["--model", value])
+    if args.source:
+        module_args.extend(["--source", str(args.source)])
+    for flag in ("device", "adapter", "task"):
+        value = getattr(args, flag)
+        if value:
+            module_args.extend([f"--{flag}", str(value)])
 
     if run_pytorch_stage and bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
         state, rows = _invoke("pytorch", "backends.pytorch_vision_speed_benchmark_v2", config_path, run_dir, module_args)
@@ -145,7 +158,7 @@ def main() -> None:
 
     if run_tensorrt_stage and bool(run_values.get("run_tensorrt", True)) and bool(tensorrt_values.get("enabled", True)):
         trt_module_args = list(module_args)
-        if not module_args and run_pytorch_stage and bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
+        if not (args.only or args.enable or args.disable) and run_pytorch_stage and bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
             # PyTorch stage already owns these modules in a one-click run.
             # Pass explicit disables to TensorRT so each module runs once.
             trt_module_args.extend(["--disable", "speed.pytorch_call"])

@@ -175,6 +175,11 @@ def _default_loader(path: Any, *, batch_size: int, train: bool, config: Mapping[
     root = Path(str(path)).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(f"数据集目录不存在：{root}")
+    if (root / "images").is_dir() and (root / "labels").is_dir():
+        raise ValueError(
+            "检测到 YOLO 数据集目录（images/labels）；模型压缩内置评测器当前只支持分类 ImageFolder，"
+            "请提供 <数据集>/<类别名>/*.jpg 目录，或改用检测诊断/模型测速工具。"
+        )
     size = config.get("input_size", [224, 224])
     if isinstance(size, int):
         size = [size, size]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -44,6 +45,8 @@ class ToolRunner(QObject):
         self._task_name = ""
         self._started_at = ""
         self._stopping = False
+        self.last_run_dir: Path | None = None
+        self._run_dir_buffer = ""
 
     def set_python_executable(self, executable: Path) -> None:
         self.python_executable = executable.expanduser().resolve()
@@ -81,6 +84,8 @@ class ToolRunner(QObject):
         self._task_name = spec.title
         self._started_at = datetime.now().isoformat(timespec="seconds")
         self._stopping = False
+        self.last_run_dir = None
+        self._run_dir_buffer = ""
         self.output.emit(f"$ {self._format_command(args)}")
         self.output.emit(f"开始执行：{spec.title}\n")
         self.process.setWorkingDirectory(str(self.project_root))
@@ -176,7 +181,41 @@ class ToolRunner(QObject):
             "utf-8", errors="replace"
         )
         if data:
+            self._capture_run_dir(data)
             self.output.emit(data)
+
+    def _capture_run_dir(self, data: str) -> None:
+        """Remember the result directory printed by vtools entry points."""
+
+        self._run_dir_buffer = (self._run_dir_buffer + data)[-8192:]
+        for line in self._run_dir_buffer.splitlines():
+            text = line.strip()
+            match = re.search(r"(?:本次运行目录|运行目录)\s*[:：]\s*(.+?)\s*$", text)
+            if match:
+                value = match.group(1).strip().strip('"')
+                if value:
+                    self.last_run_dir = Path(value).expanduser().resolve()
+                continue
+            saved = re.search(
+                r"(?:可视化报告已保存|汇总结果已保存|模块列表已保存|完整改名清单已保存|权重检查完成；结果已保存|结果已保存|输出目录)\s*[:：]\s*(.+?)\s*$",
+                text,
+            )
+            if saved:
+                self._remember_saved_path(saved.group(1), directory=text.startswith("输出目录"))
+                continue
+            completed = re.search(r"完成\s*[:：].*?->\s*(.+?)(?:[，,（(].*)?$", text)
+            if completed:
+                self._remember_saved_path(completed.group(1), directory=True)
+                continue
+            generated = re.search(r"(?:生成|导出|简化)\s*[:：]\s*(.+?)\s*$", text)
+            if generated:
+                self._remember_saved_path(generated.group(1))
+
+    def _remember_saved_path(self, value: str, *, directory: bool = False) -> None:
+        value = value.strip().strip('"')
+        if value:
+            path = Path(value).expanduser().resolve()
+            self.last_run_dir = path if directory or path.is_dir() else path.parent
 
     def _process_error(self, error: QProcess.ProcessError) -> None:
         if error == QProcess.ProcessError.FailedToStart:
@@ -198,7 +237,14 @@ class ToolRunner(QObject):
         return " ".join(item.replace(" ", "\\ ") for item in command)
 
 
-def append_history(path: Path, task_name: str, exit_code: int, config: Path | None, status_override: str | None = None) -> None:
+def append_history(
+    path: Path,
+    task_name: str,
+    exit_code: int,
+    config: Path | None,
+    status_override: str | None = None,
+    limit: int = 40,
+) -> None:
     """Keep a small, human-readable task history next to the UI settings."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -217,4 +263,4 @@ def append_history(path: Path, task_name: str, exit_code: int, config: Path | No
             "config": str(config) if config else "默认配置",
         },
     )
-    path.write_text(json.dumps(records[:40], ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(records[: max(1, int(limit))], ensure_ascii=False, indent=2), encoding="utf-8")

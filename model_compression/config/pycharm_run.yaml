@@ -1,48 +1,63 @@
-# 模型压缩、实验分支和知识蒸馏配置。
-# project.root 相对于本文件所在的 model_compression/config/ 目录解析。
-
 schema_version: 1
-operation: all            # all / baseline / branch / quantize / prune / distill / compare / export
-
+operation: all
 project:
   root: ../..
   python_paths: []
-
 run:
   enabled: true
   root: ./model_compression/runs
   name: auto
-
 storage:
   root: ./model_compression/store
   registry: registry.json
-
 model:
   name: base_model
-  adapter: torch            # torch/builtin 或自定义 adapter.py
-  weights: null             # 填写完整 nn.Module、包含 model 的 checkpoint 或 state_dict
-  factory: null             # state_dict 模式需要 module:function
-  task: classify
+  adapter: torch
+  weights: ''
+  factory: null
+  task: detect
   device: auto
-
 branch:
   name: main
   description: default optimization line
   from_version: null
-
 dataset:
-  # 内置 adapter 使用 ImageFolder：train/val 指向按类别分目录的目录。
-  train: null
-  val: null
-  input_size: [224, 224]
-
+  data: ''
+  train: ''
+  val: ''
+  input_size:
+  - 640
+  - 640
 compression:
-  sparsity: 0.30
+  sparsity: 0.3
   exclude: []
-
+  structured:
+    # scale 保持当前稳定的 YOLO s→n 缩放；torch_pruning 为依赖感知物理通道剪枝
+    method: scale
+    target_scale: n
+    # 留空时自动查找项目 weights/yolo26n.pt；也可填写绝对路径
+    initial_weights: ''
+    finetune_epochs: 80
+    # 与当前 best.pt 的训练配置保持一致
+    train_input_size: 1024
+    batch_size: 2
+    learning_rate: 0.001
+    optimizer: AdamW
+    benchmark_warmup: 5
+    benchmark_repeats: 20
+    # 精度下降超过 0.05 时不把压缩模型登记为可用版本
+    quality_gate: true
+    max_map50_95_drop: 0.05
+    # torch_pruning 方法使用的通道剪枝参数
+    channel_sparsity: 0.10
+    channel_round: 8
+    max_pruned_layers: 6
+    stage_selection: all
+    importance_norm: 2
+    pruning_input_size: 640
 distillation:
-  teacher_weights: null
-  student_weights: null
+  teacher_weights: ''
+  student_weights: ''
   student_factory: null
   temperature: 4.0
   alpha: 0.5
@@ -50,20 +65,17 @@ distillation:
   batch_size: 16
   learning_rate: 0.001
   seed: 0
-
 evaluation:
   split: val
-
 export:
   path: null
-
-# 任何存在的 modules 节都是显式 allow-list；CLI --only/--enable/--disable 可临时覆盖。
 modules:
   branch.create: false
   model.parameters: true
   baseline.evaluate: true
-  compression.quantize.dynamic_int8: false
-  compression.prune.unstructured: false
+  compression.quantize.dynamic_int8: true
+  compression.prune.unstructured: true
+  compression.prune.structured: false
   distillation.classification: false
   comparison.report: false
   artifact.export: false

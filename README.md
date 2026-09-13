@@ -4,16 +4,31 @@
 
 项目以 Python 脚本和 YAML 配置为主要入口，可在终端或 PyCharm 中运行。测速与诊断支持通过 adapter（模型适配器）接入自定义模型；内置 Ultralytics 接口可直接使用兼容的 YOLO 权重。
 
+## 桌面工作台（Windows / Ubuntu）
+
+仓库包含一个独立的 PySide6 桌面工作台，可将检测诊断、模型可视化、性能测速和模型压缩集中到同一个入口。界面通过独立子进程调用现有的 `run_tools.py`，不会改变原有命令行流程，也不会因为 CUDA 或 TensorRT 任务阻塞窗口。
+
+首次使用时安装 UI 依赖并启动：
+
+```bash
+python -m pip install -r vtools_ui/requirements.txt
+python -m vtools_ui
+```
+
+当前版本已经接入检测诊断、模型可视化、PyTorch/TensorRT 测速、输出一致性、checkpoint 检查、模型压缩、K230 转换、视频抽帧、图片缩放和文件名转换。模型类工具继续以已有 YAML 为真实参数来源，独立脚本的常用参数由 UI 表单填写。
+
 ## 项目组成
 
 | 目录 / 文件 | 主要内容 | 使用入口 / 说明 |
 | --- | --- | --- |
+| [vtools_ui/](vtools_ui/) | PySide6 跨平台桌面工作台；统一工具导航、配置选择、运行日志和任务记录 | [桌面 UI 说明](vtools_ui/README.md) |
 | [ultralytics-cn/](ultralytics-cn/) | Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](ultralytics-cn/README.zh-CN.md)、[安装配置](ultralytics-cn/pyproject.toml) |
 | [env_test/](env_test/) | 检查 Python、依赖、实际导入的源码路径、CUDA、模型构建与前向传播 | [check_install.py](env_test/check_install.py)、[安装与检验向导](env_test/README.md) |
 | [model_diagnostics/](model_diagnostics/) | 目标检测错误分析：漏检、错分类、多余框、重复框、定位偏差、框重叠和差图；常规 mAP 等交给 Ultralytics 验证 | [run_model_diagnostics.py](model_diagnostics/run_model_diagnostics.py)、[完整说明](model_diagnostics/docs/README.md) |
 | [model_visualization/](model_visualization/) | 通用特征图、聚合激活图、可选 Grad-CAM/LayerCAM，以及检测头 raw candidate→top-k→final 阶段追踪 | [run_visualization.py](model_visualization/run_visualization.py)、[PyCharm 配置](model_visualization/config/pycharm_run.yaml) |
 | [speed_test/](speed_test/) | PyTorch / TensorRT 测速、checkpoint 可恢复性检查、转换前后输出一致性检查；功能由 `benchmark_config.yaml` 的 `modules` 控制 | [run_all.py](speed_test/run_all.py)、[使用说明](speed_test/README.md) |
 | [transform_tools/](transform_tools/) | NDJSON 数据集转 YOLO、Ultralytics 权重转 ONNX / K230 `.kmodel`、ONNX 与 `.kmodel` 输出对比 | [脚本与环境说明](transform_tools/REQUIREMENT.md) |
+| [model_compression/](model_compression/) | 模型版本分支、基线评测、动态 INT8、非结构化剪枝、YOLO 结构化通道缩放和分类知识蒸馏；保存模型血缘与实验产物 | [使用说明](model_compression/README.md) |
 | [模型勘误方法.md](模型勘误方法.md) | 模型问题排查的思路与参考方法 | 阅读文档 |
 | [LICENSE](LICENSE) | 仓库根目录许可证 | 引入的 Ultralytics 源码另保留其许可证 |
 
@@ -31,6 +46,8 @@
 | `model_visualization/config/`、`runs/` | PyCharm/CLI 配置和离线可视化报告；`runs/` 由运行时自动创建 |
 | `speed_test/core/`、`backends/`、`checks/` | 配置与运行目录管理、测速后端、一致性检查 |
 | `speed_test/adapters/`、`tests/` | 自定义模型适配器模板与测试 |
+| `model_compression/core/`、`modules/` | 配置、运行目录、版本注册表、量化、剪枝和蒸馏执行 |
+| `model_compression/config/`、`adapters/`、`tests/` | PyCharm/CLI 配置、模型与数据 adapter 模板、离线回归测试 |
 
 **范围说明：** 当前 `model_diagnostics` 评估的是目标检测框，不评估实例分割掩码。其他模型接入需要提供统一预测文件或实现相应 adapter。网络结构阅读可从 `ultralytics-cn` 入手；通用模型可视化独立放在 `model_visualization/`，首版内置 Ultralytics/YOLO26 适配器。
 
@@ -69,6 +86,7 @@
 | PyTorch 测速 | PyTorch、NumPy、PyYAML 和模型 adapter 依赖；内置图片流程还需要 OpenCV |
 | 特征图 / 阶段可视化 | PyTorch、NumPy、PyYAML、OpenCV、Pillow；使用本地 Ultralytics 权重时还需 `ultralytics-cn` 的依赖 |
 | TensorRT 测速与一致性检查 | NVIDIA GPU、兼容驱动、TensorRT Python API；导出/检查另需 ONNX，导出链路可能需要 onnxscript |
+| 模型压缩与知识蒸馏 | PyYAML、与设备匹配的 PyTorch；分类 ImageFolder 另需 torchvision，YOLO 检测压缩使用匹配的 Ultralytics 环境 |
 | NDJSON 转 YOLO | Ultralytics 及其依赖；下载清单中的图片需要网络 |
 | K230 转换与校验 | PyTorch / Ultralytics、NumPy、Pillow、ONNX、onnxsim、ONNX Runtime，以及与目标 SDK 配套的 nncase、nncase-kpu 和所需 .NET 运行时 |
 
@@ -346,11 +364,36 @@ python speed_test/run_all.py --disable speed.pytorch_pipeline,memory.pytorch_pea
 python run_tools.py --tool diagnostics --config config/tools.yaml
 python run_tools.py --tool pytorch --only speed.pytorch_call
 python run_tools.py --tool visualization --only visualization.features
+python run_tools.py --tool compression --only compression.quantize.dynamic_int8
 ```
 
 `run_all.py --only ...` 会按模块所属阶段执行，避免同一个 PyTorch 测试被 TensorRT 阶段再次调用。
 
-### 5. 数据集与 K230 模型转换
+### 5. 模型压缩、分支与知识蒸馏
+
+修改 [model_compression/config/pycharm_run.yaml](model_compression/config/pycharm_run.yaml) 中的 `model.weights`，然后运行：
+
+```bash
+python model_compression/run_model_compression.py
+```
+
+这个工具按 vtools 的模块化约定保存 `runN/` 结果和 `store/registry.json` 注册表。可按需开启以下模块：
+
+```bash
+python model_compression/run_model_compression.py --only branch.create
+python model_compression/run_model_compression.py --only compression.quantize.dynamic_int8
+python model_compression/run_model_compression.py --only compression.prune.unstructured
+python run_tools.py --tool compression --task detect \
+  --weights /absolute/path/to/best.pt --data /absolute/path/to/data.yaml \
+  --structured-scale n --structured-initial-weights /absolute/path/to/yolo26n.pt \
+  --structured-epochs 80 \
+  --only compression.prune.structured
+python model_compression/run_model_compression.py --only distillation.classification
+```
+
+模型压缩同时保留 PyTorch 分类流程，并接入 YOLO 检测基线、非结构化 L1 剪枝、结构化通道缩放、保存重载和 mAP/固定输入延迟对比；动态 INT8 与分类 logits 蒸馏仍属于分类流程。YOLO 检测输入使用 `data.yaml`，配置和产物边界见 [工具说明](model_compression/README.md)、[分类 Spec](docs/specs/model-compression.md) 和 [YOLO 检测压缩 Spec](docs/specs/yolo-detection-compression.md)。非结构化剪枝稀疏度不会自动等同于文件变小或推理加速，最终收益仍用 `speed_test` 在目标设备上实测。
+
+### 6. 数据集与 K230 模型转换
 
 这些脚本当前主要使用文件顶部的参数配置，相对路径按**运行时工作目录**解释：
 
@@ -439,6 +482,9 @@ print(ultralytics.__file__)
 - [测速工具使用教程](speed_test/README.md)
 - [测速环境要求](speed_test/REQUIREMENTS.md)
 - [测速与一致性 CSV 指标说明](speed_test/CSV_METRICS_GUIDE.md)
+- [模型压缩工具使用说明](model_compression/README.md)
+- [模型压缩工具 Spec](docs/specs/model-compression.md)
+- [YOLO 检测压缩 Spec](docs/specs/yolo-detection-compression.md)
 - [数据和模型转换说明](transform_tools/REQUIREMENT.md)
 - [模型勘误方法](模型勘误方法.md)
 

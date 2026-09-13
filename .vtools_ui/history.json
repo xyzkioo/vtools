@@ -1,5 +1,23 @@
 [
   {
+    "time": "2026-09-13 12:10",
+    "task": "模型压缩",
+    "status": "成功",
+    "config": "/home/xyzkioo/PycharmProjects/vtools/model_compression/config/pycharm_run.yaml"
+  },
+  {
+    "time": "2026-09-13 00:34",
+    "task": "模型压缩",
+    "status": "失败",
+    "config": "/home/xyzkioo/PycharmProjects/vtools/model_compression/config/pycharm_run.yaml"
+  },
+  {
+    "time": "2026-09-13 00:24",
+    "task": "模型压缩",
+    "status": "失败",
+    "config": "/home/xyzkioo/PycharmProjects/vtools/model_compression/config/pycharm_run.yaml"
+  },
+  {
     "time": "2026-09-12 21:02",
     "task": "检测诊断",
     "status": "成功",

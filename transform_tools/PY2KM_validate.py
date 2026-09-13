@@ -3,7 +3,8 @@ import os, sys, argparse, numpy as np
 #ONNX vs kmodel 推理一致性校验脚本
 #在 PyCharm 中可直接右键运行；参数优先级: 命令行 > 环境变量 > 下方默认配置
 
-os.environ.setdefault("DOTNET_ROOT", os.path.expanduser("~/miniconda3/lib/dotnet"))
+# Respect an SDK path supplied by the user; do not assume a Linux-specific
+# Conda installation on Windows or another Ubuntu machine.
 _site_packages = os.path.join(sys.prefix, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
 os.environ["PATH"] = _site_packages + os.pathsep + os.environ.get("PATH", "")
 
@@ -15,7 +16,7 @@ import nncase
 # ================== 路径与参数配置 ==================
 ONNX_PATH = "best.onnx"                                                  # ONNX 模型路径
 KMODEL_PATH = "best.kmodel"                                              # kmodel 模型路径
-IMAGE_PATH = "IMG20260724155631/IMG20260724155007.jpg"                    # 测试图片路径
+IMAGE_PATH = ""                                                            # 测试图片路径
 TARGET_SIZE = 320                                                        # letterbox 目标尺寸（与 convert.py 保持一致）
 FILL_COLOR = (128, 128, 128)                                             # letterbox 填充色 (R, G, B)
 NORMALIZE = True                                                         # ONNX 输入是否 /255 归一化 (kmodel 始终 uint8)

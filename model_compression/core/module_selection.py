@@ -11,6 +11,7 @@ COMPRESSION_MODULES: dict[str, bool] = {
     "baseline.evaluate": True,
     "compression.quantize.dynamic_int8": False,
     "compression.prune.unstructured": False,
+    "compression.prune.structured": False,
     "distillation.classification": False,
     "comparison.report": False,
     "artifact.export": False,

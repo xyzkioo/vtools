@@ -123,7 +123,16 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
         model = dict(item)
         weights = model.get("weights") or model.get("path")
         if not weights:
-            raise ValueError(f"models[{index}] 缺少 weights")
+            # Keep an intentionally blank template loadable so the UI can
+            # open and edit it. Execution still fails later with a clear
+            # "没有启用的模型" message instead of a path conversion error.
+            model["weights"] = None
+            model.setdefault("name", f"model_{index + 1}")
+            model.setdefault("adapter", benchmark.get("adapter", "checkpoint"))
+            model.setdefault("task", benchmark.get("task", "detect"))
+            model["enabled"] = bool(model.get("enabled", True))
+            models.append(model)
+            continue
         weights_path = Path(str(weights)).expanduser()
         if not weights_path.is_absolute():
             weights_path = project_root / weights_path
@@ -196,6 +205,7 @@ def get_model_entries(
 ) -> list[dict[str, Any]]:
     """返回脚本可以直接消费的模型配置列表。"""
     entries: list[dict[str, Any]] = []
+    configured_entries = [dict(item) for item in config.get("models", []) if isinstance(item, dict) and item.get("enabled", True)]
     if cli_models:
         for value in cli_models:
             text = str(value)
@@ -209,15 +219,26 @@ def get_model_entries(
                 name = Path(weights).stem
             entries.append({"name": name, "weights": str(Path(weights).expanduser())})
     else:
-        entries = [dict(item) for item in config.get("models", []) if item.get("enabled", True)]
+        entries = [dict(item) for item in config.get("models", []) if item.get("enabled", True) and item.get("weights")]
 
     benchmark = _as_mapping(config.get("benchmark"), "benchmark")
+    project = _as_mapping(config.get("project"), "project")
+    project_root = Path(str(project.get("root") or ".")).expanduser()
+    if not project_root.is_absolute():
+        project_root = project_root.resolve()
+    # A temporary path should inherit the configured model's adapter/task.
+    # Otherwise a YOLO checkpoint silently falls back to the generic
+    # checkpoint adapter when the UI overrides only the weights path.
+    inherited = configured_entries[0] if len(configured_entries) == 1 else {}
     default_adapter = benchmark.get("adapter", "checkpoint")
     default_task = benchmark.get("task", "detect")
     for entry in entries:
-        entry["adapter"] = str(adapter_override or entry.get("adapter") or default_adapter)
-        entry["task"] = str(task_override or entry.get("task") or default_task)
-        entry["weights"] = str(Path(str(entry["weights"])).expanduser())
+        entry["adapter"] = str(adapter_override or entry.get("adapter") or inherited.get("adapter") or default_adapter)
+        entry["task"] = str(task_override or entry.get("task") or inherited.get("task") or default_task)
+        weights_path = Path(str(entry["weights"])).expanduser()
+        if not weights_path.is_absolute():
+            weights_path = project_root / weights_path
+        entry["weights"] = str(weights_path.resolve())
     if not entries:
         raise ValueError("没有启用的模型，请在 benchmark_config.yaml 的 models 中添加模型")
     return entries

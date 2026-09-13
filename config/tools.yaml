@@ -4,4 +4,4 @@ tool: diagnostics
 diagnostics_config: model_diagnostics/config/pycharm_run.yaml
 speed_config: speed_test/benchmark_config.yaml
 visualization_config: model_visualization/config/pycharm_run.yaml
-
+compression_config: model_compression/config/pycharm_run.yaml
