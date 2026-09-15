@@ -4,6 +4,20 @@
 
 项目以 Python 脚本和 YAML 配置为主要入口，可在终端或 PyCharm 中运行。测速与诊断支持通过 adapter（模型适配器）接入自定义模型；内置 Ultralytics 接口可直接使用兼容的 YOLO 权重。
 
+## 统一入口
+
+从仓库根目录启动桌面界面或统一命令行入口：
+
+```bash
+python -m vtools_ui
+python run_tools.py --tool diagnostics --config model_diagnostics/config/pycharm_run.yaml
+python run_tools.py --tool visualization --config model_visualization/config/pycharm_run.yaml
+python run_tools.py --tool pytorch --config speed_test/benchmark_config.yaml
+python run_tools.py --tool compression --config model_compression/config/pycharm_run.yaml
+```
+
+文件处理、环境检验和 K230 转换使用各目录 README 中列出的独立脚本入口。
+
 ## 桌面工作台（Windows / Ubuntu）
 
 仓库包含一个独立的 PySide6 桌面工作台，可将检测诊断、模型可视化、性能测速和模型压缩集中到同一个入口。界面通过独立子进程调用现有的 `run_tools.py`，不会改变原有命令行流程，也不会因为 CUDA 或 TensorRT 任务阻塞窗口。
@@ -22,6 +36,7 @@ python -m vtools_ui
 | 目录 / 文件 | 主要内容 | 使用入口 / 说明 |
 | --- | --- | --- |
 | [vtools_ui/](vtools_ui/) | PySide6 跨平台桌面工作台；统一工具导航、配置选择、运行日志和任务记录 | [桌面 UI 说明](vtools_ui/README.md) |
+| [AGENTS.md](AGENTS.md) | AI coding agent 和协作者的目录边界、入口、配置、验证与交付约定 | 编辑代码前先阅读 |
 | [ultralytics-cn/](ultralytics-cn/) | Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](ultralytics-cn/README.zh-CN.md)、[安装配置](ultralytics-cn/pyproject.toml) |
 | [env_test/](env_test/) | 检查 Python、依赖、实际导入的源码路径、CUDA、模型构建与前向传播 | [check_install.py](env_test/check_install.py)、[安装与检验向导](env_test/README.md) |
 | [model_diagnostics/](model_diagnostics/) | 目标检测错误分析：漏检、错分类、多余框、重复框、定位偏差、框重叠和差图；常规 mAP 等交给 Ultralytics 验证 | [run_model_diagnostics.py](model_diagnostics/run_model_diagnostics.py)、[完整说明](model_diagnostics/docs/README.md) |
@@ -367,6 +382,8 @@ python run_tools.py --tool visualization --only visualization.features
 python run_tools.py --tool compression --only compression.quantize.dynamic_int8
 ```
 
+统一入口也支持 `tools.yaml` 中的 `tool` 字段；不传 `--tool` 时会按该字段选择子工具。检测任务的压缩默认关闭动态 INT8，分类任务需显式切换 `model.task: classify` 后再启用。
+
 `run_all.py --only ...` 会按模块所属阶段执行，避免同一个 PyTorch 测试被 TensorRT 阶段再次调用。
 
 ### 5. 模型压缩、分支与知识蒸馏
@@ -399,7 +416,7 @@ python model_compression/run_model_compression.py --only distillation.classifica
 
 | 脚本 | 操作与运行前配置 |
 | --- | --- |
-| `transform_tools/ndjson_to_yolo.py` | 将 NDJSON 下载/转换为本地 YOLO 数据集；修改 `convert_ndjson_to_yolo(...)` 中的输入文件与输出目录 |
+| `transform_tools/ndjson_to_yolo.py` | 将 NDJSON 转换为本地 YOLO 数据集；使用 `--input` 和 `--output` 指定输入文件与输出目录 |
 | `transform_tools/py2kmodel.py` | Ultralytics `.pt` → ONNX → 简化 → nncase 量化生成 K230 `.kmodel`；检查 `PT_PATH`、`ONNX_PATH`、`KMODEL_PATH`、`CALIB_DIR` 和输入尺寸 |
 | `transform_tools/PY2KM_validate.py` | 用 ONNX Runtime 和 nncase Simulator 比较输出；设置 ONNX、kmodel、测试图片和预处理参数，也可传命令行参数 |
 
@@ -408,6 +425,8 @@ python model_compression/run_model_compression.py --only distillation.classifica
 ```bash
 python transform_tools/PY2KM_validate.py --onnx /path/to/best.onnx --kmodel /path/to/best.kmodel --image /path/to/test.jpg --size 320
 ```
+
+校验会严格检查输出数量、形状、有限值、余弦相似度和 MAE；默认阈值为 cosine ≥ 0.99、MAE ≤ 0.05，可用 `--cosine-threshold` 和 `--mae-threshold` 调整。ONNX 输入会根据模型声明的 dtype 选择浮点或整数；只有浮点输入启用归一化时才执行 `/255`，并保留模型声明的浮点精度。
 
 当前转换与校验脚本默认使用 `320×320`、RGB、CHW、灰色 `(128, 128, 128)` 填充；ONNX 端默认归一化，kmodel 接收 `uint8` 输入。更改预处理时要同步转换、校验与板端代码。转换脚本发现 ONNX 已存在会跳过导出，更换权重后要处理旧 ONNX，防止继续编译旧模型。
 

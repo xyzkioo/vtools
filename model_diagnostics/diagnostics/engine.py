@@ -407,17 +407,12 @@ def _ultralytics_label_path(image_path: Path, root: Path) -> Path:
     return (root / "labels" / relative).with_suffix(".txt")
 
 
-def _ultralytics_image_id(image_path: Path, root: Path, used: set[str]) -> str:
-    """Use the filename stem when unique, otherwise a relative path without suffix."""
-    stem = image_path.stem
-    if stem not in used:
-        used.add(stem)
-        return stem
+def _ultralytics_image_id(image_path: Path, root: Path, used: set[str], duplicate_bases: set[str] | None = None) -> str:
+    """Use a dataset-relative path including extension, independent of selection."""
     try:
-        relative = image_path.relative_to(root).with_suffix("")
-        image_id = relative.as_posix()
+        image_id = image_path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        image_id = image_path.with_suffix("").as_posix()
+        image_id = image_path.resolve().as_posix()
     used.add(image_id)
     return image_id
 
@@ -532,6 +527,9 @@ def _find_image(images_dir: Path, image_id: str, file_name: Optional[str] = None
             candidate = images_dir / candidate
         if candidate.exists():
             return candidate
+    direct = images_dir / image_id
+    if direct.is_file():
+        return direct
     for suffix in (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"):
         candidate = images_dir / f"{image_id}{suffix}"
         if candidate.exists():
@@ -604,6 +602,37 @@ def load_config(path: Optional[Path]) -> Dict[str, Any]:
         user = merged
     config.update(user)
     return config
+
+
+def validate_config(config: Mapping[str, Any]) -> None:
+    unit_values = {
+        "score_threshold": config.get("score_threshold", 0.25),
+        "candidate_threshold": config.get("candidate_threshold", 0.001),
+        "match_iou": config.get("match_iou", 0.5),
+        "localization_iou_floor": config.get("localization_iou_floor", 0.1),
+    }
+    for name, raw in unit_values.items():
+        value = float(raw)
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"{name} 必须是 0-1 之间的有限数值")
+    if float(unit_values["candidate_threshold"]) > float(unit_values["score_threshold"]):
+        raise ValueError("candidate_threshold 不能高于 score_threshold")
+    for name in ("candidate_iou_thresholds", "score_sweep"):
+        raw_values = config.get(name, DEFAULT_CONFIG[name])
+        if not isinstance(raw_values, Sequence) or isinstance(raw_values, (str, bytes)) or not raw_values:
+            raise ValueError(f"{name} 必须是非空数值列表")
+        if any(not math.isfinite(float(value)) or not 0.0 <= float(value) <= 1.0 for value in raw_values):
+            raise ValueError(f"{name} 的所有值必须在 0-1 之间")
+    budgets = config.get("fp_budgets_per_image", DEFAULT_CONFIG["fp_budgets_per_image"])
+    if not isinstance(budgets, Sequence) or isinstance(budgets, (str, bytes)) or not budgets:
+        raise ValueError("fp_budgets_per_image 必须是非空数值列表")
+    if any(not math.isfinite(float(value)) or float(value) < 0 for value in budgets):
+        raise ValueError("fp_budgets_per_image 不能包含负数或非有限数值")
+    if int(config.get("bootstrap_images", 0) or 0) < 0:
+        raise ValueError("bootstrap_images 不能小于 0")
+    bad_cases = config.get("bad_cases")
+    if isinstance(bad_cases, Mapping) and int(bad_cases.get("top_k", 50)) < 0:
+        raise ValueError("bad_cases.top_k 不能小于 0")
 
 
 def box_area(box: BBox) -> float:
@@ -1134,13 +1163,14 @@ def generate_predictions_from_adapter(gt_ds: Dataset, images_dir: Path, spec: st
     return predictions
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Framework-independent object detection diagnostics")
     parser.add_argument("--gt", required=False, type=Path, help="GT：Ultralytics data.yaml/.ndjson、canonical JSON/JSONL、COCO JSON 或 YOLO 标签目录")
     parser.add_argument("--pred", type=Path, help="预测文件：canonical JSON/JSONL 或 COCO results；使用 --predictor 时可省略")
     parser.add_argument("--raw-pred", type=Path, help="可选 raw/candidate 预测，用于阶段损失对照")
     parser.add_argument("--predictor", help="可选 module:function，生成 canonical 预测")
     parser.add_argument("--images-dir", type=Path, help="旧式 YOLO GT 或 --predictor 使用的图片目录；data.yaml 通常不需要")
+    parser.add_argument("--base-dir", type=Path, help="解析 data.yaml 相对路径的项目根目录")
     parser.add_argument("--gt-format", default="auto", choices=["auto", "canonical", "coco", "yolo", "ultralytics", "yolo_yaml", "ndjson"])
     parser.add_argument("--pred-format", default="auto", choices=["auto", "canonical", "coco"])
     parser.add_argument("--split", default="val", choices=["train", "val", "test"], help="Ultralytics data.yaml 使用的 split")
@@ -1150,11 +1180,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
     parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
     parser.add_argument("--list-modules", action="store_true", help="列出可用模块后退出")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parse_args(argv)
     try:
         from .modules import available_modules, overlap_analysis, resolve_modules, render_bad_cases, write_bad_case_html, bad_case_rows
     except ImportError:  # direct ``python diagnostics/engine.py`` compatibility
@@ -1172,12 +1202,13 @@ def main() -> int:
     if args.predictor and args.images_dir is None:
         raise SystemExit("使用 --predictor 时必须提供 --images-dir")
     config = load_config(args.config)
+    validate_config(config)
     modules = resolve_modules(config, only=args.only, enable=args.enable, disable=args.disable)
     config["enabled_modules"] = [
         module_id for module_id, enabled in modules.items()
         if enabled and (module_id.startswith("diagnostics.") or module_id.startswith("output.") or module_id in {"predict.generate", "validation.ultralytics"})
     ]
-    gt_ds = load_ground_truth(args.gt, args.gt_format, args.images_dir, split=args.split)
+    gt_ds = load_ground_truth(args.gt, args.gt_format, args.images_dir, split=args.split, base_dir=args.base_dir)
     warnings = list(gt_ds.warnings)
     if args.pred is not None:
         predictions, pred_warnings = load_predictions(args.pred, gt_ds.images, args.pred_format)
@@ -1193,6 +1224,7 @@ def main() -> int:
     # Overlap analysis consumes the same one-to-one matching table; no second
     # model call or GT read is needed.
     ds.diagnostic_per_gt = summary["per_gt"]
+    ds.diagnostic_per_prediction = summary["per_prediction"]
     overlap = overlap_analysis(ds, config) if modules.get("diagnostics.overlap") else None
     ap: Dict[str, Any] = {}
     sweep: list[dict[str, Any]] = threshold_sweep(ds, config) if modules.get("diagnostics.threshold_sweep") else []
@@ -1232,7 +1264,7 @@ def main() -> int:
         _write_csv(args.output / "bad_cases.csv", bad_rows)
     if modules.get("output.images"):
         top_k = int((config.get("bad_cases") or {}).get("top_k", 50)) if isinstance(config.get("bad_cases"), Mapping) else 50
-        image_paths = render_bad_cases(ds, bad_rows, args.output / "images", top_k=top_k)
+        image_paths = render_bad_cases(ds, bad_rows, args.output / "images", top_k=top_k, score_threshold=float(config.get("score_threshold", 0.25)), base_dir=args.images_dir or args.base_dir or args.output.parent)
     if modules.get("output.html"):
         write_bad_case_html(args.output / "index.html", bad_rows, image_paths)
     if stage_rows:

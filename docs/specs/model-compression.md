@@ -1,6 +1,6 @@
 # 模型压缩、实验分支与知识蒸馏工具 Spec
 
-状态：已落地首版（PyTorch 分类 MVP）  
+状态：已落地首版（PyTorch 分类与 YOLO 检测流程）
 范围：`model_compression/`
 
 检测模型扩展见 [YOLO 目标检测压缩 Spec](yolo-detection-compression.md)，包含 UI/CLI、模块调用、Ultralytics 接口和分阶段验收。
@@ -33,6 +33,8 @@ python run_tools.py --tool compression --config config/tools.yaml
 ```
 
 `--only`、`--enable`、`--disable` 与其他 vtools 工具具有相同优先级和冲突规则；`--list-modules` 不加载 PyTorch。
+
+检测默认配置不会启用动态 INT8；该模块只适用于分类模型。模型版本产物使用唯一文件名，重复运行不会覆盖已有 checkpoint。
 
 ## 版本和产物
 

@@ -10,8 +10,8 @@
 
 常用命令：
 
-    python install_check/check_install.py --source ./ultralytics-cn
-    python install_check/check_install.py --source ./ultralytics-cn --weights ./best.pt
+    python env_test/check_install.py --source ./ultralytics-cn
+    python env_test/check_install.py --source ./ultralytics-cn --weights ./best.pt
 
 退出码为 0 表示必需检查通过；非 0 表示至少有一项必需检查失败。
 """

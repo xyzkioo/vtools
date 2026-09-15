@@ -2,6 +2,17 @@
 
 基于上传的 **Ultralytics 8.4.128** 仓库整理，用于阅读网络架构、修改模型，以及训练、验证、推理和按需导出。
 
+## 在 vtools 中的入口
+
+从仓库根目录安装本地源码后，模型诊断、可视化、测速和压缩会通过各自的 YAML 配置调用本目录的 `ultralytics` 包：
+
+```bash
+python -m pip install -e ./ultralytics-cn
+python env_test/check_install.py --source ./ultralytics-cn
+```
+
+直接使用该源码包时，在 `ultralytics-cn/` 目录执行 `yolo --help`，或在 Python 中使用 `from ultralytics import YOLO`。vtools 的统一入口见仓库根目录 [README](../README.md)。
+
 本版删除了官方自动化维护、文档站点、Docker 和测试套件，保留完整的 `ultralytics/` 运行时源码。原有 Python 源码、模型 YAML 和中文注释保持不变。
 
 ## 1. 留下了什么

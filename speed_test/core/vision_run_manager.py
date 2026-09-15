@@ -77,6 +77,13 @@ def _relative_to(path: Path, root: Path) -> Optional[Path]:
         return None
 
 
+def _join_within(root: Path, relative: Path, label: str) -> Path:
+    target = (root / relative).resolve()
+    if _relative_to(target, root) is None:
+        raise ValueError(f"{label} 不能通过 .. 跳出运行目录：{relative}")
+    return target
+
+
 def _raw_relative_to_run_root(raw_value: Any, run_root: Path, project_root: Path) -> Optional[Path]:
     """把 ``runs-profile/foo`` 这类旧配置转换为 ``foo``。"""
 
@@ -116,7 +123,7 @@ def _map_output_path(
             # 明确写在 runs-profile 之外的绝对路径不强制搬迁；这是给
             # 需要固定外部日志目录的用户留下的逃生口。
             return str(Path(str(raw_value)).expanduser().resolve())
-    return str((run_dir / relative).resolve())
+    return str(_join_within(run_dir, relative, "相对输出路径"))
 
 
 def apply_run_directory(config: dict[str, Any], run_dir: str | Path) -> dict[str, Any]:
@@ -225,7 +232,7 @@ def resolve_cli_path(value: str | Path | None, run_dir: str | Path | None, proje
     if path.is_absolute():
         return path
     base = Path(run_dir).expanduser() if run_dir else Path(project_root).expanduser()
-    return (base / path).resolve()
+    return _join_within(base.resolve(), path, "命令行相对输出路径")
 
 
 __all__ = [

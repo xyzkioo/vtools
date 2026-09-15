@@ -8,4 +8,5 @@ if __name__ == "__main__":
     ensure_conda_library_path()
     from backends.pytorch_vision_tensorrt_benchmark_v2 import main
 
-    main()
+    rows = main()
+    raise SystemExit(1 if any(row.get("status") in {"failed", "error"} for row in rows) else 0)

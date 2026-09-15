@@ -120,6 +120,18 @@ def _branch_name(config: Mapping[str, Any]) -> str:
     return str(_section(config, "branch").get("name", "main"))
 
 
+def _validate_initial_branch_input(registry: ModelRegistry, config: Mapping[str, Any]) -> None:
+    """Validate explicit weights once, before a run starts advancing its head.
+
+    ``model.weights`` may point at the branch head or at any ancestor the branch
+    was derived from, because sequential modules keep the original weights in the
+    config (prune -> export).  Weights from outside the branch are rejected here
+    instead of being mixed into the lineage.
+    """
+
+    registry.resolve_input_version(_branch_name(config), _section(config, "model").get("weights"))
+
+
 def _base_version(
     registry: ModelRegistry,
     config: Mapping[str, Any],
@@ -128,9 +140,11 @@ def _base_version(
     run_id: str,
 ) -> str:
     # 前一个模块可能已经推进了分支；不要使用入口时的旧快照。
-    current_branch = registry.get_branch(_branch_name(config))
-    if current_branch.get("head_version_id"):
-        return str(current_branch["head_version_id"])
+    current_id, _artifact = registry.resolve_input_version(
+        _branch_name(config), _section(config, "model").get("weights")
+    )
+    if current_id:
+        return current_id
     model = _section(config, "model")
     weights = model.get("weights")
     if not weights:
@@ -172,11 +186,27 @@ def _result_path(run_dir: Path, filename: str) -> Path:
     return target
 
 
+def _artifact_path(run_dir: Path, relative: str) -> Path:
+    """Return an immutable artifact path, avoiding silent overwrite on reruns."""
+    target = run_dir / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        return target
+    stem, suffix = target.stem, target.suffix
+    for index in range(2, 10000):
+        candidate = target.with_name(f"{stem}-{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"运行目录中的产物过多，无法生成唯一文件名：{target}")
+
+
 def _run_baseline(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
-    current_branch = registry.get_branch(_branch_name(config))
-    current_id = current_branch.get("head_version_id")
+    current_id, current_artifact = registry.resolve_input_version(
+        _branch_name(config), _section(config, "model").get("weights")
+    )
     if current_id:
-        model_config = _model_config(config, weights=_version_artifact(registry, str(current_id)))
+        current_path = Path(str(current_artifact)).resolve()
+        model_config = _model_config(config, weights=str(current_path))
         model_device = _version_device(registry, str(current_id), config)
     else:
         model_config = _model_config(config)
@@ -256,7 +286,7 @@ def _run_quantize(config: Mapping[str, Any], registry: ModelRegistry, branch: Ma
     metadata.update({f"benchmark_{key}": value for key, value in benchmark_model_call(transformed, _runtime_config(config), device="cpu").items()})
     _, val_loader = build_dataloaders(_runtime_config(config), adapter)
     metadata.update({f"evaluation_{key}": value for key, value in evaluate_classification(transformed, val_loader, device="cpu").items()})
-    artifact = _result_path(run_dir, f"models/{_safe_name(_branch_name(config), 'main')}-dynamic-int8.pt")
+    artifact = _artifact_path(run_dir, f"models/{_safe_name(_branch_name(config), 'main')}-dynamic-int8.pt")
     save_model(transformed, artifact, adapter=None)
     record = _register_transformed(config=config, registry=registry, parent_id=parent_id, artifact=artifact, run_id=run_id, method="dynamic_int8", metadata=metadata)
     result = {"module": "compression.quantize.dynamic_int8", "status": "succeeded", "version_id": record["id"], "parent_version_id": parent_id, "artifact": artifact_info(artifact), "metadata": metadata}
@@ -272,7 +302,7 @@ def _run_prune(config: Mapping[str, Any], registry: ModelRegistry, branch: Mappi
     metadata.update({f"benchmark_{key}": value for key, value in benchmark_model_call(transformed, _runtime_config(config), device=_version_device(registry, parent_id, config)).items()})
     _, val_loader = build_dataloaders(_runtime_config(config), adapter)
     metadata.update({f"evaluation_{key}": value for key, value in evaluate_classification(transformed, val_loader, device=_version_device(registry, parent_id, config)).items()})
-    artifact = _result_path(run_dir, f"models/{_safe_name(_branch_name(config), 'main')}-pruned.pt")
+    artifact = _artifact_path(run_dir, f"models/{_safe_name(_branch_name(config), 'main')}-pruned.pt")
     save_model(transformed, artifact, adapter=adapter)
     record = _register_transformed(config=config, registry=registry, parent_id=parent_id, artifact=artifact, run_id=run_id, method="unstructured_l1", metadata=metadata)
     result = {"module": "compression.prune.unstructured", "status": "succeeded", "version_id": record["id"], "parent_version_id": parent_id, "artifact": artifact_info(artifact), "metadata": metadata}
@@ -298,7 +328,23 @@ def _distillation_model_config(config: Mapping[str, Any], section_name: str, *, 
     values = _model_config(config, weights=weights or fallback_weights)
     if factory:
         values["factory"] = factory
+        if section_name == "student":
+            values["force_factory"] = True
+            if not weights:
+                values.pop("weights", None)
     return values
+
+
+def _source_version(registry: ModelRegistry, path: str | Path, *, run_id: str, role: str) -> str:
+    info = artifact_info(path)
+    for version_id, version in registry.data.get("versions", {}).items():
+        if version.get("artifact", {}).get("sha256") == info.get("sha256"):
+            return str(version_id)
+    record = registry.add_version(
+        name=f"{role}-{Path(path).stem}", artifact=path, parent_version_id=None,
+        run_id=run_id, method=f"import_{role}", metadata={"role": role, "environment": environment_info()},
+    )
+    return str(record["id"])
 
 
 def _run_distillation(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
@@ -309,9 +355,19 @@ def _run_distillation(config: Mapping[str, Any], registry: ModelRegistry, branch
     distill_device = _version_device(registry, parent_id, config)
     teacher, teacher_adapter = load_model(teacher_config, device=distill_device)
     student, student_adapter = load_model(student_config, device=distill_device)
+    teacher_source = teacher_config.get("weights") or parent_artifact
+    student_source = student_config.get("weights")
+    teacher_version_id = _source_version(registry, teacher_source, run_id=run_id, role="teacher")
+    student_version_id = _source_version(registry, student_source, run_id=run_id, role="student") if student_source else None
     runtime = _runtime_config(config)
     train_loader, val_loader = build_dataloaders(runtime, student_adapter or teacher_adapter)
     output_dir = run_dir / "distillation"
+    if output_dir.exists() and any(output_dir.iterdir()):
+        for index in range(2, 10000):
+            candidate = run_dir / f"distillation-{index}"
+            if not candidate.exists():
+                output_dir = candidate
+                break
     training = train_distillation(
         student,
         teacher,
@@ -331,15 +387,15 @@ def _run_distillation(config: Mapping[str, Any], registry: ModelRegistry, branch
         artifact=Path(checkpoint),
         run_id=run_id,
         method="distillation_classification",
-        metadata={"teacher_version_id": parent_id, "student_init_version_id": parent_id, "training": training},
+        metadata={"teacher_version_id": teacher_version_id, "student_init_version_id": student_version_id, "training": training},
     )
     # 注册表的关系字段需要单独保留，避免把教师和学生来源混在普通 parent 中。
-    registry.data["versions"][record["id"]]["teacher_version_id"] = parent_id
-    registry.data["versions"][record["id"]]["student_init_version_id"] = parent_id
-    registry.data.setdefault("relations", []).extend([
-        {"source_version_id": parent_id, "target_version_id": record["id"], "role": "teacher"},
-        {"source_version_id": parent_id, "target_version_id": record["id"], "role": "student_initialization"},
-    ])
+    registry.data["versions"][record["id"]]["teacher_version_id"] = teacher_version_id
+    registry.data["versions"][record["id"]]["student_init_version_id"] = student_version_id
+    relations = [{"source_version_id": teacher_version_id, "target_version_id": record["id"], "role": "teacher"}]
+    if student_version_id:
+        relations.append({"source_version_id": student_version_id, "target_version_id": record["id"], "role": "student_initialization"})
+    registry.data.setdefault("relations", []).extend(relations)
     registry.save()
     result = {"module": "distillation.classification", "status": "succeeded", "version_id": record["id"], "parent_version_id": parent_id, "training": training}
     write_json(_result_path(run_dir, "distillation.json"), result)
@@ -353,7 +409,8 @@ def _run_comparison(config: Mapping[str, Any], registry: ModelRegistry, run_dir:
     baseline_row: dict[str, Any] | None = None
     for version in versions:
         metrics = version.get("metadata", {})
-        row = {"version_id": version["id"], "name": version.get("name"), "method": version.get("method"), "parent_version_id": version.get("parent_version_id"), "map50": metrics.get("evaluation_map50"), "map50_95": metrics.get("evaluation_map50_95"), "accuracy": metrics.get("evaluation_accuracy", metrics.get("best_accuracy")), "size_bytes": version.get("artifact", {}).get("size_bytes"), "actual_sparsity": metrics.get("actual_sparsity"), "latency_ms": metrics.get("benchmark_latency_p50_ms")}
+        training = metrics.get("training") if isinstance(metrics.get("training"), Mapping) else {}
+        row = {"version_id": version["id"], "name": version.get("name"), "method": version.get("method"), "parent_version_id": version.get("parent_version_id"), "map50": metrics.get("evaluation_map50"), "map50_95": metrics.get("evaluation_map50_95"), "accuracy": metrics.get("evaluation_accuracy", metrics.get("best_accuracy", training.get("best_accuracy"))), "size_bytes": version.get("artifact", {}).get("size_bytes"), "actual_sparsity": metrics.get("actual_sparsity"), "latency_ms": metrics.get("benchmark_latency_p50_ms", metrics.get("benchmark_inference_ms_median", metrics.get("after_benchmark_inference_ms_median")))}
         if version.get("method") in {"import", "baseline"}:
             baseline_row = row
         rows.append(row)
@@ -376,6 +433,8 @@ def _run_export(config: Mapping[str, Any], registry: ModelRegistry, run_dir: Pat
     export = _section(config, "export")
     target = Path(str(export.get("path"))).expanduser().resolve() if export.get("path") else (run_dir / "export" / source.name)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target != source and target.exists():
+        target = _artifact_path(target.parent, target.name)
     if source != target:
         shutil.copy2(source, target)
     verification: dict[str, Any] = {"reload": False, "sample_inference": "not_requested"}
@@ -396,8 +455,9 @@ def _run_export(config: Mapping[str, Any], registry: ModelRegistry, run_dir: Pat
         except StopIteration:
             verification["sample_inference"] = "skipped_empty_validation"
     manifest = {"version_id": version_id, "source": artifact_info(source), "exported": artifact_info(target), "verification": verification}
-    write_json(target.parent / "model_manifest.json", manifest)
-    result = {"module": "artifact.export", "status": "succeeded", "version_id": version_id, "artifact": artifact_info(target), "manifest": str(target.parent / "model_manifest.json")}
+    manifest_path = target.parent / f"{target.stem}_manifest.json"
+    write_json(manifest_path, manifest)
+    result = {"module": "artifact.export", "status": "succeeded", "version_id": version_id, "artifact": artifact_info(target), "manifest": str(manifest_path)}
     write_json(_result_path(run_dir, "export.json"), result)
     return result
 
@@ -447,26 +507,6 @@ def main() -> int:
         config["dataset"] = dataset
     apply_python_paths(config)
     selected = resolve_compression_modules(config, only=args.only, enable=args.enable, disable=args.disable)
-    operation = str(config.get("operation", "all") or "all").strip().lower()
-    operation_modules = {
-        "branch": "branch.create",
-        "baseline": "baseline.evaluate",
-        "parameters": "model.parameters",
-        "quantize": "compression.quantize.dynamic_int8",
-        "quantization": "compression.quantize.dynamic_int8",
-        "dynamic_int8": "compression.quantize.dynamic_int8",
-        "prune": "compression.prune.unstructured",
-        "pruning": "compression.prune.unstructured",
-        "structured_prune": "compression.prune.structured",
-        "structured": "compression.prune.structured",
-        "distill": "distillation.classification",
-        "distillation": "distillation.classification",
-        "compare": "comparison.report",
-        "export": "artifact.export",
-    }
-    if not (args.only or args.enable or args.disable) and operation in operation_modules:
-        selected = {key: False for key in selected}
-        selected[operation_modules[operation]] = True
     run_dir = prepare_run_directory(config, args.run_dir)
     if run_dir is None:
         run_dir = Path(_section(config, "project").get("root", Path.cwd())) / "model_compression" / "runs" / "adhoc"
@@ -475,6 +515,9 @@ def main() -> int:
     storage = _section(config, "storage")
     registry = ModelRegistry(storage.get("registry", Path(run_dir) / "registry.json"))
     branch = _ensure_branch(registry, config)
+    config = dict(config)
+    config["_run_start_head_id"] = branch.get("head_version_id")
+    _validate_initial_branch_input(registry, config)
     run_id = str(run_dir.name or uuid.uuid4().hex[:8])
     registry.add_run(run_id, {"status": "running", "branch": _branch_name(config), "modules": selected})
     results: list[dict[str, Any]] = []

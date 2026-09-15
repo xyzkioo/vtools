@@ -1,15 +1,10 @@
 import argparse
-import os, sys, shutil
+import os, sys, shutil, tempfile
 from pathlib import Path
-import numpy as np
 
 # Respect an SDK path supplied by the user; do not assume a Linux-specific
 # Conda installation on Windows or another Ubuntu machine.
 
-from PIL import Image
-from ultralytics import YOLO
-import onnx, onnxsim
-import nncase
 #这个是01studio的k230用的.py转换成.kmodel的代码
 # ================== 路径与参数配置 ==================
 PT_PATH = "best.pt"
@@ -22,6 +17,7 @@ CALIB_SAMPLES = 200 #修正用的图片数量
 
 # ================== 与板端 AI2D 一致的 Letterbox ==================
 def letterbox(img, target_size=640, color=FILL_COLOR):
+    from PIL import Image
     w, h = img.size
     scale = min(target_size / w, target_size / h)
     new_w, new_h = int(w * scale), int(h * scale)
@@ -34,8 +30,13 @@ def letterbox(img, target_size=640, color=FILL_COLOR):
 
 # ================== 步骤1：导出 + 简化 ONNX ==================
 def export_onnx(pt_path=PT_PATH, onnx_path=ONNX_PATH, target_size=TARGET_SIZE, rebuild=False):
+    from ultralytics import YOLO
+    import onnx
+    import onnxsim
     print("=" * 50)
     print("[1/2] 导出并简化 ONNX ...")
+    if target_size < 1:
+        raise ValueError("输入边长必须大于 0")
     if os.path.exists(onnx_path) and not rebuild:
         print("ONNX 已存在，跳过导出。若需重新导出请删除旧文件。")
         return
@@ -63,21 +64,32 @@ def export_onnx(pt_path=PT_PATH, onnx_path=ONNX_PATH, target_size=TARGET_SIZE, r
     input_shapes = {node.name: [1, 3, target_size, target_size]
                     for node in onnx_model.graph.input}
     onnx_model, check = onnxsim.simplify(onnx_model, input_shapes=input_shapes)
-    assert check, "模型简化校验失败"
+    if not check:
+        raise RuntimeError("模型简化校验失败")
     onnx.save_model(onnx_model, onnx_path)
     print(f"✅ ONNX 已简化: {onnx_path}")
 
 # ================== 步骤2：量化生成 kmodel ==================
 def quantize(onnx_path=ONNX_PATH, kmodel_path=KMODEL_PATH, calib_dir=CALIB_DIR, target_size=TARGET_SIZE, calib_samples=CALIB_SAMPLES, rebuild=False):
+    import nncase
+    import numpy as np
+    from PIL import Image
     print("=" * 50)
     print("[2/2] INT8 量化（灰度 128 填充 + 200 张校准）...")
+    if target_size < 1:
+        raise ValueError("输入边长必须大于 0")
+    if calib_samples < 1:
+        raise ValueError("校准样本数必须大于 0")
     if not os.path.exists(onnx_path):
         raise FileNotFoundError(f"❌ 未找到 ONNX: {onnx_path}")
     if os.path.exists(kmodel_path) and not rebuild:
         print(f"kmodel 已存在，跳过量化：{kmodel_path}")
         return
+    if not os.path.isdir(calib_dir):
+        raise RuntimeError(f"❌ 校准文件夹不存在: {calib_dir}")
 
-    dump_dir = "dump"
+    target = Path(kmodel_path).expanduser().resolve()
+    dump_dir = str(target.parent / f"{target.stem}_dump")
     if not os.path.exists(dump_dir):
         os.makedirs(dump_dir)
 
@@ -101,12 +113,9 @@ def quantize(onnx_path=ONNX_PATH, kmodel_path=KMODEL_PATH, calib_dir=CALIB_DIR, 
     ptq.w_quant_type = "uint8"
     ptq.calibrate_method = "NoClip"
 
-    if not os.path.exists(calib_dir):
-        raise RuntimeError(f"❌ 校准文件夹不存在: {calib_dir}")
-
     print(f"从 '{calib_dir}' 加载校准图片（目标 {calib_samples} 张）...")
     images = []
-    for f in os.listdir(calib_dir):
+    for f in sorted(os.listdir(calib_dir), key=str.casefold):
         if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
             try:
                 img = Image.open(os.path.join(calib_dir, f)).convert("RGB")
@@ -132,9 +141,16 @@ def quantize(onnx_path=ONNX_PATH, kmodel_path=KMODEL_PATH, calib_dir=CALIB_DIR, 
     compiler.compile()
 
     kmodel = compiler.gencode_tobytes()
-    Path(kmodel_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(kmodel_path, "wb") as f:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp", delete=False) as f:
+        temporary = Path(f.name)
         f.write(kmodel)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
     print(f"✅ kmodel 生成: {kmodel_path}")
     print(f"   文件大小: {len(kmodel)/1024/1024:.2f} MB")

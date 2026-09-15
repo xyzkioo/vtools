@@ -61,9 +61,12 @@ def _invoke(
             state = result.get("status", "error")
             return {"backend": label, "status": state, "error": result.get("error", ""),
                     "report": result.get("json_output", "")}, []
-        if not isinstance(result, list) or not result:
-            raise RuntimeError("后端未返回本次有效结果；请使用同一新版压缩包中的全部文件")
-        failures = [row for row in result if row.get("status") in {"failed", "error"}]
+        if not isinstance(result, list):
+            raise RuntimeError("后端未返回可汇总结果；请使用同一新版压缩包中的全部文件")
+        failures = [
+            row for row in result
+            if "status" in row and str(row.get("status", "")).lower() not in {"succeeded", "passed", "ok", "skipped"}
+        ]
         return {"backend": label, "status": "failed" if failures else "succeeded",
                 "error": " | ".join(str(row.get("error", "failed")) for row in failures)}, result
     except Exception as error:  # noqa: BLE001 - 一键运行需要汇总单阶段失败
@@ -105,11 +108,11 @@ def _merge_results(
         writer.writerows(rows)
 
 
-def main() -> None:
+def main() -> int:
     args = build_parser().parse_args()
     if args.list_modules:
         print("\n".join(SPEED_MODULES))
-        return
+        return 0
     config = load_config(args.config)
     run_dir = prepare_run_directory(config, args.run_dir)
     config_path = str(config["_config_path"])
@@ -192,6 +195,8 @@ def main() -> None:
     if run_dir is not None:
         print(f"本次运行目录：{run_dir}")
     print(f"\n汇总结果已保存：{summary.resolve()}")
+    successful = {"succeeded", "passed", "ok", "skipped"}
+    return 1 if any(str(item.get("status", "")).lower() not in successful for item in stage_status) else 0
 
 
 if __name__ == "__main__":
@@ -200,4 +205,4 @@ if __name__ == "__main__":
     from core.vision_runtime import ensure_conda_library_path
 
     ensure_conda_library_path()
-    main()
+    raise SystemExit(main())

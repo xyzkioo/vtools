@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -64,7 +65,8 @@ def save_image(image: Any, output: Path, output_format: str, jpeg_quality: int) 
             if "A" in image.getbands():
                 background.paste(image, mask=image.getchannel("A"))
             else:
-                background.paste(image.convert("RGBA"))
+                rgba = image.convert("RGBA")
+                background.paste(rgba, mask=rgba.getchannel("A"))
             image = background
         else:
             image = image.convert("RGB")
@@ -108,18 +110,36 @@ def main() -> int:
         output_dir = Path(config["output_dir"]).expanduser().resolve() if config["output_dir"] else (
             input_path.parent / "resized" if input_path.is_file() else input_path / "resized"
         )
+        if output_dir == input_path or output_dir in input_path.parents:
+            raise ValueError("输出目录不能是输入目录本身或其父目录")
+        if input_path.is_dir():
+            images = [source for source in images if output_dir not in source.parents]
         output_format = str(config["output_format"]).lower()
-        saved = 0
+        plan = []
+        targets = set()
         for source in images:
             relative = Path(source.name) if input_path.is_file() else source.relative_to(input_path)
             suffix = "." + output_format if output_format != "same" else source.suffix
             target = output_dir / relative.with_suffix(suffix)
+            if target in targets:
+                raise ValueError(f"多张输入图片会写入同一输出文件：{target}；请保留原格式或先调整文件名")
+            targets.add(target)
             if target.exists() and not config["overwrite"]:
                 raise FileExistsError(f"输出文件已存在（可加 --overwrite）：{target}")
+            plan.append((source, target))
+        saved = 0
+        for source, target in plan:
             with Image.open(source) as opened:
                 image = ImageOps.exif_transpose(opened)
                 resized = resize_image(image, (width, height), str(config["mode"]))
-                save_image(resized, target, output_format, int(config["jpeg_quality"]))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=target.parent, suffix=target.suffix, delete=False) as handle:
+                    temporary = Path(handle.name)
+                try:
+                    save_image(resized, temporary, output_format, int(config["jpeg_quality"]))
+                    temporary.replace(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
             saved += 1
             print(f"完成：{source} -> {target}（{resized.width}x{resized.height}）")
         print(f"共处理 {saved} 张图片，输出目录：{output_dir}")

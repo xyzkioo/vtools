@@ -98,7 +98,7 @@ def resolve_modules(
     disable_values = _split_values(disable)
     if only_values and (enable_values or disable_values):
         raise ValueError("--only 不能与 --enable/--disable 同时使用")
-    requested = set(only_values or enable_values or disable_values)
+    requested = set(only_values) | set(enable_values) | set(disable_values)
     unknown = sorted(requested - set(values))
     if unknown:
         raise ValueError(f"未知模块：{', '.join(unknown)}；请使用 --list-modules 查看可用模块")
@@ -162,9 +162,12 @@ def overlap_analysis(dataset: Any, config: Mapping[str, Any]) -> dict[str, Any]:
     gt_ids_by_image: dict[str, set[str]] = defaultdict(set)
     missed_gt_ids_by_image: dict[str, set[str]] = defaultdict(set)
     summary_rows = dataset_summary_rows(dataset)
+    prediction_rows = list(getattr(dataset, "diagnostic_per_prediction", None) or [])
+    if not prediction_rows:
+        prediction_rows = [row for row in summary_rows if row.get("prediction_id") is not None]
     pred_gt_map: dict[str, str] = {
         str(row.get("prediction_id")): str(row.get("matched_gt_id", ""))
-        for row in summary_rows
+        for row in prediction_rows
     }
     gt_summary_map: dict[tuple[str, str], Mapping[str, Any]] = {
         (str(row.get("image_id", "")), str(row.get("gt_id", ""))): row
@@ -207,7 +210,10 @@ def overlap_analysis(dataset: Any, config: Mapping[str, Any]) -> dict[str, Any]:
                     continue
                 left_gt = pred_gt_map.get(left.instance_id, "")
                 right_gt = pred_gt_map.get(right.instance_id, "")
-                duplicate = left.class_id == right.class_id and not (left_gt and right_gt and left_gt != right_gt)
+                duplicate = left.class_id == right.class_id and (
+                    bool(left_gt and right_gt and left_gt == right_gt)
+                    or bool(not left_gt and not right_gt)
+                )
                 pred_pairs.append({"image_id": image_id, "left_prediction_id": left.instance_id, "right_prediction_id": right.instance_id, "left_class_id": left.class_id, "right_class_id": right.class_id, "left_score": float(left.score or 0.0), "right_score": float(right.score or 0.0), "iou": iou, "intersection_over_smaller": ios, "suspected_duplicate": duplicate})
                 image_rows[image_id]["prediction_pair_count"] += 1
                 image_rows[image_id]["prediction_duplicate_pair_count"] += int(duplicate)
@@ -253,7 +259,7 @@ def bad_case_rows(summary: Mapping[str, Any]) -> list[dict[str, Any]]:
     return sorted((row for row in rows if int(row["error_count"]) > 0), key=lambda row: (-int(row["error_count"]), str(row["image_id"])))
 
 
-def render_bad_cases(dataset: Any, rows: Sequence[Mapping[str, Any]], output_dir: Path, top_k: int = 50) -> list[Path]:
+def render_bad_cases(dataset: Any, rows: Sequence[Mapping[str, Any]], output_dir: Path, top_k: int = 50, score_threshold: float = 0.25, base_dir: Path | None = None) -> list[Path]:
     try:
         from PIL import Image, ImageDraw  # type: ignore
     except ImportError as exc:
@@ -266,13 +272,18 @@ def render_bad_cases(dataset: Any, rows: Sequence[Mapping[str, Any]], output_dir
         extra = getattr(info, "extra", {}) if info is not None else {}
         source = extra.get("source_path") if isinstance(extra, Mapping) else None
         source = source or (getattr(info, "file_name", None) if info is not None else None)
-        if not source or not Path(str(source)).is_file():
+        source_path = Path(str(source)) if source else Path()
+        if source and not source_path.is_absolute() and base_dir is not None:
+            source_path = (base_dir / source_path).resolve()
+        if not source or not source_path.is_file():
             continue
-        with Image.open(str(source)).convert("RGB") as image:
+        with Image.open(str(source_path)).convert("RGB") as image:
             draw = ImageDraw.Draw(image)
             for gt in dataset.gt.get(image_id, []):
                 draw.rectangle(tuple(gt.bbox), outline=(0, 200, 0), width=3)
             for pred in dataset.predictions.get(image_id, []):
+                if float(getattr(pred, "score", 0.0) or 0.0) < score_threshold:
+                    continue
                 draw.rectangle(tuple(pred.bbox), outline=(220, 40, 40), width=2)
             draw.text((8, 8), f"{image_id}  errors={row.get('error_count', 0)}", fill=(255, 160, 0))
             target = output_dir / f"{_safe_image_name(image_id)}.jpg"

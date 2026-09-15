@@ -1,5 +1,14 @@
 # vtools 桌面工作台
 
+## 入口
+
+```bash
+python -m pip install -r vtools_ui/requirements.txt
+python -m vtools_ui
+```
+
+UI 当前没有单独的命令行帮助页；启动后通过界面选择工具和配置。也可以在 PyCharm 直接运行 `vtools_ui/__main__.py`。
+
 这是 vtools 的第一版跨平台桌面 UI。它使用 PySide6/Qt Widgets，Windows 和 Ubuntu 都可以运行；模型推理、测速和诊断在独立子进程中执行，界面不会被长任务阻塞。
 
 ## 运行

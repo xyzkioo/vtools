@@ -1,5 +1,14 @@
 # 视频解帧工具
 
+## 入口
+
+```bash
+python others/video_frame_extractor.py --help
+python others/video_frame_extractor.py --input /path/to/video.mp4 --output-dir /path/to/frames
+```
+
+也可以修改脚本顶部的 `PYCHARM_CONFIG` 后在 PyCharm 直接运行。
+
 `video_frame_extractor.py` 将视频保存成图片，支持：
 
 - `every_n=1`：保存每一帧。
@@ -64,7 +73,7 @@ python others/video_frame_extractor.py \
 PYCHARM_CONFIG = {
     "input": r"/path/to/video.mp4",
     "output_dir": r"/path/to/frames",
-    "every_n": 1,       # 1=每一帧；10=每隔 10 帧
+    "every_n": 8,       # 默认每隔 8 帧；1=每一帧
     "start_frame": 0,
     "end_frame": None,
     "extension": ".jpg",

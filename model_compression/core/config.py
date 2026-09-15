@@ -116,7 +116,15 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
         export["path"] = _resolve(export["path"], project_root)
     config["export"] = export
     config["compression"] = _mapping(config.get("compression"), "compression")
-    config["distillation"] = _mapping(config.get("distillation"), "distillation")
+    distillation = _mapping(config.get("distillation"), "distillation")
+    for key in ("teacher_weights", "student_weights"):
+        if distillation.get(key) is not None:
+            distillation[key] = _resolve(distillation[key], project_root)
+    config["distillation"] = distillation
+    structured = _mapping(config["compression"].get("structured"), "compression.structured")
+    if structured.get("initial_weights") is not None:
+        structured["initial_weights"] = _resolve(structured["initial_weights"], project_root)
+    config["compression"]["structured"] = structured
     branch = _mapping(config.get("branch"), "branch")
     branch.setdefault("name", "main")
     config["branch"] = branch

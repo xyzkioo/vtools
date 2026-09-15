@@ -221,7 +221,7 @@ def row_for_model_info(
 def save_rows(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = [
-        "model",
+        "model", "status", "error", "architecture_status", "adapter_load_status",
         "weights",
         "backend",
         "adapter",
@@ -303,13 +303,14 @@ def main() -> list[dict[str, Any]]:
             if item.architecture_status in {"missing", "unknown"}
             or item.adapter_load_status == "failed"
         ]
-        if inspection_failures and bool(benchmark_values.get("fail_on_checkpoint_inspection", False)):
-            names = ", ".join(item.name for item in inspection_failures)
-            raise RuntimeError(f"checkpoint 检查失败：{names}")
+        inspection_rows = []
+        for item in inspection_results:
+            failed = item in inspection_failures
+            inspection_rows.append({"model": item.name, "status": "failed" if failed else "succeeded", "error": item.raw_error or item.adapter_error, "architecture_status": item.architecture_status, "adapter_load_status": item.adapter_load_status})
         if has_checkpoint_check and not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline") and not has_model_info:
-            save_rows(args.output, [])
+            save_rows(args.output, inspection_rows)
             print(f"权重检查完成；结果已保存：{args.output.resolve()}")
-            return []
+            return inspection_rows
 
     if args.batch <= 0 or args.warmup < 0 or args.repeats <= 0:
         raise ValueError("batch>0、repeats>0，warmup 不能小于 0")

@@ -2,6 +2,15 @@
 
 这个文件夹用于确认 `vtools/ultralytics-cn/` 这份精简版 Ultralytics 是否安装成功，以及当前 Python 是否真的加载了本地源码。
 
+## 入口
+
+```bash
+python env_test/check_install.py --source ./ultralytics-cn
+python env_test/check_install.py --help
+```
+
+也可以在 PyCharm 直接运行 `check_install.py`。
+
 仓库中有两种容易混淆的东西：
 
 - **项目目录名**：当前是 `ultralytics-cn`，可以改成别的名字；

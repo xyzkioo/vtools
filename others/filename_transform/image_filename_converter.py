@@ -18,6 +18,8 @@ import json
 import re
 import sys
 import tempfile
+import shutil
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -54,7 +56,7 @@ PYCHARM_CONFIG: dict[str, Any] = {
     "digits": None,  # 例如填写 5，生成 00001、00002；填写 None 才使用 template
     "lowercase_ext": False,
     "allow_unreferenced": False,  # COCO 中未被 JSON 引用的图片是否也允许改名
-    "apply": True,  # True=真正执行；False=只预览
+    "apply": False,  # True=真正执行；False=只预览
     "yes": False,  # True=执行时跳过 yes 确认
 }
 
@@ -245,10 +247,12 @@ def build_coco_updates(
         if not isinstance(record, dict) or not isinstance(record.get("file_name"), str):
             continue
         file_name = record["file_name"]
-        candidates: list[RenameItem] = []
-        for key in {normalize_coco_name(file_name), normalize_coco_name(Path(file_name).name)}:
-            candidates.extend(by_key.get(key, []))
-        unique = {item.old: item for item in candidates}
+        exact = {item.old: item for item in by_key.get(normalize_coco_name(file_name), [])}
+        # A full relative path is authoritative.  Only fall back to a
+        # basename when it identifies exactly one source image.
+        unique = exact if len(exact) == 1 else {
+            item.old: item for item in by_key.get(normalize_coco_name(Path(file_name).name), [])
+        }
         if len(unique) != 1:
             continue
         item = next(iter(unique.values()))
@@ -305,11 +309,15 @@ def apply_plan(plan: list[RenameItem]) -> int:
             temp_path.rename(new_path)
             committed.append((old_path, new_path))
     except Exception:
+        # Move committed destinations back to their reserved temporary names
+        # first; this also handles cycles such as a.jpg <-> b.jpg.
         for old_path, new_path in reversed(committed):
-            if new_path.exists() and not old_path.exists():
-                new_path.rename(old_path)
+            if new_path.exists():
+                temp_back = next((temp for old, temp, new in temporary if old == old_path and new == new_path), None)
+                if temp_back is not None:
+                    new_path.rename(temp_back)
         for old_path, temp_path, _ in reversed(temporary):
-            if temp_path.exists() and not old_path.exists():
+            if temp_path.exists():
                 temp_path.rename(old_path)
         raise
     return len(changed)
@@ -317,19 +325,12 @@ def apply_plan(plan: list[RenameItem]) -> int:
 
 def rollback_plan(plan: list[RenameItem]) -> None:
     changed = [item for item in plan if item.old != item.new]
-    temporary: list[tuple[Path, Path]] = []
     for item in changed:
         if not item.new.exists():
             raise FileNotFoundError(f"回滚失败，找不到新文件：{item.new}")
-        with tempfile.NamedTemporaryFile(
-            prefix=".image_rollback_", suffix=item.new.suffix, dir=item.new.parent, delete=False
-        ) as handle:
-            temp_path = Path(handle.name)
-        temp_path.unlink()
-        item.new.rename(temp_path)
-        temporary.append((item.old, temp_path))
-    for old_path, temp_path in temporary:
-        temp_path.rename(old_path)
+    reverse = [RenameItem(item.new, item.old, item.kind) for item in changed]
+    validate_plan(reverse)
+    apply_plan(reverse)
 
 
 def write_coco_with_backup(
@@ -342,8 +343,9 @@ def write_coco_with_backup(
         updated["images"][update.record_index]["file_name"] = update.new_name
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup = coco_path.with_name(f"{coco_path.name}.{timestamp}.bak")
-    coco_path.replace(backup)
+    backup = coco_path.with_name(f"{coco_path.name}.{timestamp}.{uuid.uuid4().hex}.bak")
+    shutil.copy2(coco_path, backup)
+    temp_json = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", suffix=".json", dir=coco_path.parent, delete=False
@@ -352,11 +354,9 @@ def write_coco_with_backup(
             json.dump(updated, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
         temp_json.replace(coco_path)
-    except Exception:
-        if coco_path.exists():
-            coco_path.unlink()
-        backup.replace(coco_path)
-        raise
+    finally:
+        if temp_json is not None:
+            temp_json.unlink(missing_ok=True)
     return backup
 
 
@@ -432,7 +432,7 @@ def main() -> int:
         if dataset_format == "auto":
             if coco_json_value:
                 dataset_format = "coco"
-            elif labels_dir or (directory.name.lower() == "images" and (directory.parent / "labels").is_dir()):
+            elif labels_dir or (directory.name.lower() == "images" and (directory.parent / "labels").is_dir()) or ((directory / "images").is_dir() and (directory / "labels").is_dir()):
                 dataset_format = "yolo"
             else:
                 dataset_format = "images"

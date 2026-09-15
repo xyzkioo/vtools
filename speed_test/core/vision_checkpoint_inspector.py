@@ -16,12 +16,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 import torch
 from torch import nn
+
+# 支持既作为 core 包导入，也直接执行本文件。
+SPEED_TEST_ROOT = Path(__file__).resolve().parents[1]
+if str(SPEED_TEST_ROOT) not in sys.path:
+    sys.path.insert(0, str(SPEED_TEST_ROOT))
 
 from core.vision_benchmark_common import cleanup_model, create_adapter
 from core.vision_benchmark_config import apply_python_paths, get_model_entries, load_config
@@ -253,7 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main() -> int:
     args = build_parser().parse_args()
     config = load_config(args.config)
     apply_python_paths(config)
@@ -276,7 +282,9 @@ def main() -> None:
             encoding="utf-8",
         )
         print(f"JSON 检查报告已保存：{args.json_output.resolve()}")
+    failed = any(item.adapter_load_status == "failed" or item.architecture_status in {"missing", "unknown"} for item in results)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

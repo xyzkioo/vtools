@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import copy
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QSettings, QSize, Signal, QThread, QTimer, QUrl
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QStackedWidget,
@@ -292,6 +294,8 @@ class ConfigEditorDialog(QDialog):
         self.data: dict[str, object] = {}
         self.field_widgets: dict[str, tuple[QWidget, str]] = {}
         self.all_field_widgets: dict[str, tuple[QWidget, str]] = {}
+        self._field_initial: dict[str, object] = {}
+        self._all_initial: dict[str, object] = {}
         self.setWindowTitle("图形化配置（常用 / 全部 / YAML 高级）")
         self.resize(840, 680)
         raw_text = ""
@@ -321,6 +325,8 @@ class ConfigEditorDialog(QDialog):
         self.editor.setObjectName("log")
         self.tabs.addTab(self.editor, "YAML 高级")
         self.tabs.setCurrentIndex(1)
+        self._active_config_tab = 1
+        self.tabs.currentChanged.connect(self._config_tab_changed)
         layout.addWidget(self.tabs, 1)
 
         hint = QLabel("常用配置页适合日常修改；未知字段和自定义模块请在 YAML 高级页编辑。")
@@ -409,10 +415,14 @@ class ConfigEditorDialog(QDialog):
         elif kind == "combo":
             widget = QComboBox()
             widget.addItems(options or [])  # type: ignore[attr-defined]
+            if self._display(value, kind, default) not in (options or []):
+                widget.setEditable(True)  # type: ignore[attr-defined]
+                widget.addItem(self._display(value, kind, default))  # type: ignore[attr-defined]
             widget.setCurrentText(self._display(value, kind, default))  # type: ignore[attr-defined]
         else:
             widget = QLineEdit(self._display(value, kind, default))
         self.field_widgets[path] = (widget, kind)
+        self._field_initial[path] = self._field_value(widget, kind)
         form.addRow(label, widget)
 
     def _add_section(self, layout: QVBoxLayout, text: str) -> None:
@@ -528,11 +538,11 @@ class ConfigEditorDialog(QDialog):
             return rows
         if isinstance(value, list):
             if not value or all(not isinstance(item, (dict, list)) for item in value):
-                if all(isinstance(item, bool) for item in value):
+                if value and all(isinstance(item, bool) for item in value):
                     kind = "list-bool"
-                elif all(isinstance(item, int) and not isinstance(item, bool) for item in value):
+                elif value and all(isinstance(item, int) and not isinstance(item, bool) for item in value):
                     kind = "list-int"
-                elif all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value):
+                elif value and all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value):
                     kind = "list-float"
                 else:
                     kind = "list-text"
@@ -573,6 +583,7 @@ class ConfigEditorDialog(QDialog):
             else:
                 widget = QLineEdit(self._display(value, kind, ""))
             self.all_field_widgets[path] = (widget, kind)
+            self._all_initial[path] = self._field_value(widget, kind)
             form.addRow(path, widget)
         layout.addLayout(form)
         layout.addStretch()
@@ -618,6 +629,57 @@ class ConfigEditorDialog(QDialog):
             return values
         return str(value)
 
+    def _commit_config_tab(self) -> None:
+        if self._active_config_tab == 2:
+            self.data = self._parse_yaml(self.editor.toPlainText())
+            self.parse_error = None
+            return
+        if self.parse_error:
+            raise ValueError(self.parse_error)
+        widgets = self.field_widgets if self._active_config_tab == 0 else self.all_field_widgets
+        initials = self._field_initial if self._active_config_tab == 0 else self._all_initial
+        data = copy.deepcopy(self.data)
+        for path, (widget, kind) in widgets.items():
+            value = self._field_value(widget, kind)
+            if value != initials.get(path):
+                self._set(data, path, value)
+        self.data = data
+
+    def _config_tab_changed(self, index: int) -> None:
+        import yaml
+
+        try:
+            if not (self.parse_error and index == 2):
+                self._commit_config_tab()
+        except ValueError as exc:
+            self.tabs.blockSignals(True)
+            self.tabs.setCurrentIndex(self._active_config_tab)
+            self.tabs.blockSignals(False)
+            QMessageBox.warning(self, "配置格式错误", str(exc))
+            return
+        self.tabs.blockSignals(True)
+        try:
+            if index == 2:
+                if not self.parse_error:
+                    self.editor.setPlainText(yaml.safe_dump(self.data, allow_unicode=True, sort_keys=False))
+            else:
+                old = self.tabs.widget(index)
+                if index == 0:
+                    self.field_widgets.clear()
+                    self._field_initial.clear()
+                    new = self._build_graphical_tab()
+                else:
+                    self.all_field_widgets.clear()
+                    self._all_initial.clear()
+                    new = self._build_all_tab()
+                self.tabs.removeTab(index)
+                self.tabs.insertTab(index, new, "常用配置" if index == 0 else "全部配置")
+                self.tabs.setCurrentIndex(index)
+                old.deleteLater()
+            self._active_config_tab = index
+        finally:
+            self.tabs.blockSignals(False)
+
     def _save(self) -> None:
         path = self.path
         if path is None:
@@ -628,25 +690,8 @@ class ConfigEditorDialog(QDialog):
         try:
             import yaml
 
-            if self.tabs.currentIndex() == 2:
-                data = yaml.safe_load(self.editor.toPlainText()) or {}
-                if not isinstance(data, dict):
-                    raise ValueError("YAML 顶层必须是对象")
-                text = self.editor.toPlainText()
-            elif self.tabs.currentIndex() == 1:
-                if self.parse_error:
-                    raise ValueError(self.parse_error)
-                data = self._parse_yaml(self.editor.toPlainText())
-                for field_path, (widget, kind) in self.all_field_widgets.items():
-                    self._set(data, field_path, self._field_value(widget, kind))
-                text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
-            else:
-                if self.parse_error:
-                    raise ValueError(self.parse_error)
-                data = self._parse_yaml(self.editor.toPlainText())
-                for field_path, (widget, kind) in self.field_widgets.items():
-                    self._set(data, field_path, self._field_value(widget, kind))
-                text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+            self._commit_config_tab()
+            text = yaml.safe_dump(self.data, allow_unicode=True, sort_keys=False)
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists():
                 shutil.copy2(path, path.with_name(path.name + ".bak"))
@@ -687,6 +732,9 @@ class ToolPage(QWidget):
         self.device_combo.addItems(["自动选择", "CPU", "CUDA:0"])
         self.backend_combo = QComboBox()
         self.backend_combo.addItems(["PyTorch 测速", "TensorRT 测速", "输出一致性检查", "一键测速", "Checkpoint 检查"])
+        self._loading_module_selection = False
+        self._module_selection_touched = False
+        self._configured_modules: dict[str, bool] = {}
         # Keep form rows stable on both normal and high-DPI desktops.  A
         # QHBoxLayout wrapper can otherwise report a smaller height than its
         # line edit, which clips the text and lets the next row overlap it.
@@ -818,6 +866,7 @@ class ToolPage(QWidget):
             button.setCheckable(True)
             button.setChecked(index == 0)
             button.toggled.connect(lambda checked, b=button: b.setText(("✓  " if checked else "○  ") + b.text()[3:]))
+            button.toggled.connect(self._module_toggled)
             self.module_buttons.append(button)
             module_layout.addWidget(button, index // 2, index % 2)
         outer.addWidget(module_panel)
@@ -841,6 +890,60 @@ class ToolPage(QWidget):
         if self.spec.key == "compression":
             self.compression_task.currentIndexChanged.connect(self._compression_task_changed)
             self._compression_task_changed()
+        self._load_module_defaults()
+        self.config_edit.textChanged.connect(lambda _text: self._load_module_defaults())
+
+    def _module_toggled(self, _checked: bool) -> None:
+        if not self._loading_module_selection:
+            self._module_selection_touched = True
+
+    def _load_module_defaults(self) -> None:
+        """Reflect the selected YAML module states in the graphical controls."""
+        import yaml
+
+        states: dict[str, bool] = {}
+        payload = {}
+        path = Path(self.config_edit.text()).expanduser() if self.config_edit.text().strip() else None
+        if path and path.exists():
+            try:
+                import yaml
+
+                payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                configured = payload.get("modules") if isinstance(payload, dict) else None
+                if isinstance(configured, dict):
+                    states = {str(key): bool(value) for key, value in configured.items()}
+            except (OSError, ValueError, TypeError, yaml.YAMLError):
+                states = {}
+        if isinstance(payload, dict):
+            try:
+                if self.spec.key == "diagnostics":
+                    from model_diagnostics.diagnostics.modules import resolve_modules
+                    states = resolve_modules(payload)
+                elif self.spec.key == "compression":
+                    from model_compression.core.module_selection import resolve_compression_modules
+                    states = resolve_compression_modules(payload)
+                elif self.spec.key == "benchmark":
+                    from speed_test.core.module_selection import resolve_speed_modules
+                    states = resolve_speed_modules(payload)
+                elif self.spec.key == "visualization" and payload.get("modules") is None:
+                    states = {"visualization." + key: bool((payload.get(key) or {}).get("enabled", key == "features"))
+                              for key in ("features", "cam", "stage_trace")}
+            except (ValueError, TypeError, AttributeError, ImportError):
+                states = {}
+        self._loading_module_selection = True
+        try:
+            if self.spec.key == "compression" and isinstance(payload, dict):
+                from model_compression.core.detection import is_detection
+                self.compression_task.blockSignals(True)
+                self.compression_task.setCurrentIndex(0 if is_detection(payload) else 1)
+                self.compression_task.blockSignals(False)
+                self._compression_task_changed()
+            for button, module_id in zip(self.module_buttons, self._module_ids()):
+                button.setChecked(states.get(module_id, False))
+        finally:
+            self._loading_module_selection = False
+        self._configured_modules = copy.deepcopy(states)
+        self._module_selection_touched = False
 
     def _choose_detection_data(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择 YOLO 数据集", str(ROOT), "YAML (*.yaml *.yml)")
@@ -872,7 +975,6 @@ class ToolPage(QWidget):
             else:
                 button.setEnabled(True)
                 button.setToolTip("")
-        self.module_buttons[2].setChecked(detection)
 
     def _module_labels(self) -> list[str]:
         if self.spec.key == "diagnostics":
@@ -906,6 +1008,7 @@ class ToolPage(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "选择 YAML 配置", str(ROOT), "YAML (*.yaml *.yml)")
         if path:
             self.config_edit.setText(path)
+            self._load_module_defaults()
 
     def _open_config_editor(self) -> None:
         raw = self.config_edit.text().strip()
@@ -913,6 +1016,7 @@ class ToolPage(QWidget):
         dialog = ConfigEditorDialog(path, self.spec.key, self)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.path:
             self.config_edit.setText(str(dialog.path))
+            self._load_module_defaults()
 
     def _choose_resource(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择模型或数据", str(ROOT), "所有文件 (*)")
@@ -967,10 +1071,15 @@ class ToolPage(QWidget):
         selected_spec = self.spec
         extra_args: list[str] = []
         module_ids = self._module_ids()
-        selected_modules = [module_id for button, module_id in zip(self.module_buttons, module_ids) if button.isChecked()]
+        module_states = dict(self._configured_modules)
+        if self._module_selection_touched or not module_states:
+            module_states.update({module_id: button.isChecked() for button, module_id in zip(self.module_buttons, module_ids)})
+        selected_modules = [module_id for module_id, enabled in module_states.items() if enabled]
         if self.spec.key != "benchmark" and not selected_modules:
             QMessageBox.warning(self, "未选择模块", "请至少选择一个要运行的模块。")
             return
+        if "output.images" in selected_modules and "output.bad_cases" not in selected_modules:
+            selected_modules.append("output.bad_cases")
         resource = self.resource_edit.text().strip()
         device = {"自动选择": "auto", "CPU": "cpu", "CUDA:0": "cuda:0"}.get(self.device_combo.currentText(), "auto")
         if device != "auto":
@@ -1006,23 +1115,31 @@ class ToolPage(QWidget):
                 extra_args.extend(["--train", self.dataset_edit.text().strip()])
             if not detection and self.val_edit.text().strip():
                 extra_args.extend(["--val", self.val_edit.text().strip()])
-        if self.spec.key != "benchmark":
+        if self.spec.key != "benchmark" and self._module_selection_touched:
             for module_id in selected_modules:
                 extra_args.extend(["--only", module_id])
         if self.spec.key == "benchmark":
             backend = self.backend_combo.currentText()
-            if backend == "TensorRT 测速":
-                selected_modules = [item for item in selected_modules if item in {"speed.tensorrt_call", "export.onnx", "build.tensorrt"}]
-                if not selected_modules:
-                    selected_modules = ["speed.tensorrt_call"]
+            if backend == "PyTorch 测速":
+                selected_modules = [item for item in selected_modules if item in {
+                    "checkpoint.inspect", "checkpoint.load_check", "model.parameters", "model.flops",
+                    "speed.pytorch_call", "speed.pytorch_pipeline", "memory.pytorch_peak",
+                }]
+            elif backend == "TensorRT 测速":
+                selected_modules = [item for item in selected_modules if item in {
+                    "checkpoint.inspect", "checkpoint.load_check", "model.parameters", "model.flops",
+                    "speed.tensorrt_call", "export.onnx", "build.tensorrt",
+                }]
             elif backend == "输出一致性检查":
                 selected_modules = [item for item in selected_modules if item.startswith("consistency.")]
-                if not selected_modules:
-                    selected_modules = ["consistency.tensor"]
             elif backend == "Checkpoint 检查":
                 selected_modules = []
-            for module_id in selected_modules:
-                extra_args.extend(["--only", module_id])
+            if self._module_selection_touched and backend != "Checkpoint 检查" and not selected_modules:
+                QMessageBox.warning(self, "未选择模块", "请为当前测速类型选择至少一个模块。")
+                return
+            if self._module_selection_touched:
+                for module_id in selected_modules:
+                    extra_args.extend(["--only", module_id])
             if backend == "TensorRT 测速":
                 selected_spec = ToolSpec("benchmark-tensorrt", "TensorRT 测速", self.spec.description, "tensorrt", self.spec.default_config)
             elif backend == "输出一致性检查":
@@ -1129,6 +1246,9 @@ class UtilityPage(QWidget):
     def _combo(self, form: QFormLayout, key: str, label: str, values: list[str], current: str = "") -> QComboBox:
         combo = QComboBox()
         combo.addItems(values)
+        if current and current not in values:
+            combo.setEditable(True)
+            combo.addItem(current)
         if current:
             combo.setCurrentText(current)
         self.fields[self._current_key][key] = combo
@@ -1260,7 +1380,7 @@ class UtilityPage(QWidget):
         elif key == "filename":
             for field, flag in (("dir", "--dir"), ("dataset", "--dataset-format"), ("labels", "--labels-dir"), ("coco", "--coco-json"), ("template", "--template"), ("prefix", "--prefix"), ("suffix", "--suffix"), ("start", "--start"), ("digits", "--digits"), ("plan", "--plan")):
                 self._arg(args, flag, self._value(key, field), required=field in {"dir", "dataset"})
-            if self._checked(key, "recursive"): args.append("--recursive")
+            args.append("--recursive" if self._checked(key, "recursive") else "--no-recursive")
             if self._checked(key, "apply"): args.append("--apply")
             else: args.append("--dry-run")
             if self._checked(key, "yes"): args.append("--yes")
@@ -1273,6 +1393,19 @@ class UtilityPage(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "参数不完整", str(exc))
             return
+        if key == "filename" and self._checked(key, "apply") and not self._checked(key, "yes"):
+            answer = QMessageBox.question(
+                self,
+                "确认批量改名",
+                "已选择直接修改文件名。确认继续吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            # The child process must not wait for stdin after the GUI has
+            # already confirmed the destructive operation.
+            args.append("--yes")
         self.run_requested.emit(self.specs[key], None, args)
 
     def set_running(self, running: bool) -> None:
@@ -1399,6 +1532,13 @@ class ResultsPage(QWidget):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.file_list = QListWidget()
+        # Keep the file browser wide enough to read generated names such as
+        # ``model.23.input.0.2_overlay.jpg``.  Without an explicit initial
+        # size QSplitter may collapse the first pane to its size hint.
+        self.file_list.setMinimumWidth(340)
+        self.file_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.file_list.setWordWrap(False)
         self.file_list.itemSelectionChanged.connect(self._preview_selected)
         splitter.addWidget(self.file_list)
 
@@ -1421,7 +1561,8 @@ class ResultsPage(QWidget):
         self.preview_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview_layout.addWidget(self.preview_status, 1)
         splitter.addWidget(preview_panel)
-        splitter.setStretchFactor(0, 1)
+        splitter.setSizes([380, 820])
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 2)
         outer.addWidget(splitter, 1)
 
@@ -1480,6 +1621,7 @@ class ResultsPage(QWidget):
             relative = path.relative_to(root)
             item = QListWidgetItem(f"{relative}  ({self._format_size(size)})")
             item.setData(Qt.ItemDataRole.UserRole, str(path))
+            item.setToolTip(str(relative))
             self.file_list.addItem(item)
         self.preview_status.setText(f"找到 {len(files)} 张图片。")
 

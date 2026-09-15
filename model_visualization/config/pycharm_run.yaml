@@ -16,6 +16,7 @@ model:
 
 input:
   source: /path/to/image_or_directory
+  dataset_root: null             # 非标准 images/ 布局时填写；须与诊断 data.yaml 的 path 一致
   size: [832, 832]              # [height, width]；首版固定方形 letterbox
   max_images: 10                # null 表示处理全部图片
 

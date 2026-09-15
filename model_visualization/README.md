@@ -1,5 +1,15 @@
 # 模型可视化与检测阶段追踪
 
+## 入口
+
+```bash
+python model_visualization/run_visualization.py --config model_visualization/config/pycharm_run.yaml
+python model_visualization/run_visualization.py --list-modules
+python run_tools.py --tool visualization --config model_visualization/config/pycharm_run.yaml
+```
+
+默认读取 `model_visualization/config/pycharm_run.yaml`；PyCharm 直接运行 `run_visualization.py` 等价。
+
 这个目录只负责“看模型内部发生了什么”，不重复 Ultralytics 已有的训练曲线、验证指标和普通预测保存。
 首版适配本仓库的 Ultralytics/YOLO26 检测模型，其他 PyTorch 模型可按 `adapters/ultralytics.py` 的边界扩展。
 
@@ -49,3 +59,10 @@ YOLO26 默认选择 `one2one` 分支。选择 `one2many` 时，final 阶段调�
 - `features.channels` 支持 `first`、`variance`、`explicit`；默认每层保存前 16 个通道和一个 `mean_abs` 聚合图。
 - `cam.target.kind` 支持 `raw_candidate`、`final_detection`；`index` 是检测头的精确 anchor 索引，不是绘图排序后的序号。
 - TensorRT 缓存仍只由 `rebuild_engine` 控制。engine 旁边的 `.build.json` 只是记录构建来源和参数，不参与自动重建，也不引入全量哈希策略。
+
+
+### 与诊断工具交换预测
+
+图片 `image_id` 使用数据集根目录下的相对路径，始终保留扩展名，例如 `images/val/a.jpg`。单图、目录和 `max_images` 子集使用同一规则。旧版不带扩展名或带 `#jpg` 的预测文件需要重新生成后再与新版诊断匹配。
+
+标准 `images` 目录可自动识别根目录；其他布局请设置 `input.dataset_root`，或传入 `--dataset-root /path/to/dataset`。该值必须与诊断 data.yaml 解析后的 `path` 一致。YAML 中相对路径按 `project.root` 解析。自定义布局缺少根目录时会明确报错，避免生成无法匹配的结果。

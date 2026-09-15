@@ -8,4 +8,4 @@ if __name__ == "__main__":
     ensure_conda_library_path()
     from core.vision_checkpoint_inspector import main
 
-    main()
+    raise SystemExit(main())

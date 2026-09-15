@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.bak
+*.tmp
+*.lock
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vtools_ui/
+**/runs/
+**/runs-profile/
+**/outputs/
+**/results/
+**/reports/
+**/store/

@@ -2,14 +2,28 @@ import unittest
 from collections import defaultdict
 
 try:
-    from diagnostics.engine import Dataset, ImageInfo, Instance
+    from diagnostics.engine import Dataset, ImageInfo, Instance, validate_config
     from diagnostics.modules import overlap_analysis, resolve_modules
 except ModuleNotFoundError:
-    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance
+    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, validate_config
     from model_diagnostics.diagnostics.modules import overlap_analysis, resolve_modules
 
 
 class ModuleSelectionTests(unittest.TestCase):
+    def test_invalid_diagnostic_thresholds_are_rejected(self):
+        invalid = (
+            {"score_threshold": 1.1},
+            {"candidate_threshold": 0.5, "score_threshold": 0.25},
+            {"candidate_iou_thresholds": []},
+            {"score_sweep": [-0.1]},
+            {"fp_budgets_per_image": [-1]},
+            {"bootstrap_images": -1},
+            {"bad_cases": {"top_k": -1}},
+        )
+        for config in invalid:
+            with self.subTest(config=config), self.assertRaises(ValueError):
+                validate_config(config)
+
     def test_only_selects_one_module(self):
         values = resolve_modules({}, only=["diagnostics.overlap"])
         self.assertTrue(values["diagnostics.overlap"])

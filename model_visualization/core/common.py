@@ -5,10 +5,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import html
 import json
 import math
 import os
 import re
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,9 +24,29 @@ import numpy as np
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
 
+def write_image(path: Path, image: np.ndarray) -> Path:
+    """Encode completely before replacing an existing image."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=path.suffix, delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        if not cv2.imwrite(str(temporary), image):
+            raise OSError(f"图像编码失败：{path}")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
+
+
 def safe_name(value: Any, fallback: str = "item") -> str:
-    text = re.sub(r"[^0-9A-Za-z_.-]+", "_", str(value or fallback)).strip("._")
+    text = "".join(char if (char.isalnum() or char in "_.-") else "_" for char in str(value or fallback)).strip("._")
     return text or fallback
+
+
+def image_output_name(image_id: str) -> str:
+    """Create a readable, collision-resistant directory name for one image ID."""
+    digest = hashlib.sha1(str(image_id).encode("utf-8")).hexdigest()[:10]
+    return f"{safe_name(image_id)}_{digest}"
 
 
 def resolve_device(value: Any):
@@ -43,12 +66,20 @@ def parse_size(value: Any) -> tuple[int, int]:
     if isinstance(value, (list, tuple)):
         if len(value) != 2:
             raise ValueError("input.size 必须是 [height, width]")
-        return int(value[0]), int(value[1])
-    text = str(value or "832").lower().replace(" ", "")
+        size = int(value[0]), int(value[1])
+        if min(size) <= 0:
+            raise ValueError("input.size 的高和宽必须大于 0")
+        return size
+    text = str("832" if value is None or value == "" else value).lower().replace(" ", "")
     if "x" in text:
         h, w = text.split("x", 1)
-        return int(h), int(w)
+        size = int(h), int(w)
+        if min(size) <= 0:
+            raise ValueError("input.size 的高和宽必须大于 0")
+        return size
     number = int(text)
+    if number <= 0:
+        raise ValueError("input.size 必须大于 0")
     return number, number
 
 
@@ -59,7 +90,7 @@ def _resolve(value: Any, base: Path) -> Optional[Path]:
     return path.resolve() if path.is_absolute() else (base / path).resolve()
 
 
-def load_config(path: str | Path | None = None) -> dict[str, Any]:
+def load_config(path: str | Path | None = None, *, allow_missing_source: bool = False) -> dict[str, Any]:
     import yaml
 
     config_path = Path(path) if path else Path(__file__).resolve().parents[1] / "config" / "pycharm_run.yaml"
@@ -93,8 +124,10 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
 
     input_values = dict(config.get("input") or {})
     source = _resolve(input_values.get("source"), root)
-    if source is None and str(config.get("mode", "visualize")).lower() != "list_layers":
+    if source is None and not allow_missing_source and str(config.get("mode", "visualize")).lower() != "list_layers":
         raise ValueError("请在 input.source 中填写图片或图片目录")
+    dataset_root = _resolve(input_values.get("dataset_root"), root)
+    input_values["dataset_root"] = str(dataset_root) if dataset_root is not None else None
     input_values["source"] = str(source) if source is not None else None
     input_values["size"] = list(parse_size(input_values.get("size", [832, 832])))
     if input_values.get("max_images") is not None:
@@ -105,6 +138,15 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     detection.setdefault("conf", 0.001)
     detection.setdefault("iou", 0.70)
     detection.setdefault("max_det", 300)
+    detection["conf"] = float(detection["conf"])
+    detection["iou"] = float(detection["iou"])
+    detection["max_det"] = int(detection["max_det"])
+    if not math.isfinite(detection["conf"]) or not 0.0 <= detection["conf"] <= 1.0:
+        raise ValueError("detection.conf 必须是 0 到 1 之间的有限数值")
+    if not math.isfinite(detection["iou"]) or not 0.0 <= detection["iou"] <= 1.0:
+        raise ValueError("detection.iou 必须是 0 到 1 之间的有限数值")
+    if detection["max_det"] <= 0:
+        raise ValueError("detection.max_det 必须大于 0")
     config["detection"] = detection
 
     run = dict(config.get("run") or {})
@@ -199,7 +241,13 @@ def image_tensor(image_bgr: np.ndarray, device: Any, precision: str):
     rgb = image_bgr[..., ::-1].copy()
     tensor = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().div_(255.0)
     target_device = torch.device(device)
-    target_dtype = torch.float16 if str(precision).lower() in {"fp16", "half"} and target_device.type == "cuda" else torch.float32
+    precision_text = str(precision).lower()
+    if precision_text in {"bf16", "bfloat16"} and target_device.type == "cuda":
+        target_dtype = torch.bfloat16
+    elif precision_text in {"fp16", "half"} and target_device.type == "cuda":
+        target_dtype = torch.float16
+    else:
+        target_dtype = torch.float32
     return tensor.to(device=target_device, dtype=target_dtype)
 
 
@@ -290,11 +338,14 @@ def append_html_index(run_dir: Path, records: list[Mapping[str, Any]]) -> None:
     """写不依赖外部资源的简单离线索引。"""
     cards = []
     for record in records:
-        image = str(record.get("image", ""))
-        links = " ".join(f'<a href="{x}">{x}</a>' for x in record.get("links", []))
+        image = html.escape(str(record.get("image", "")))
+        links = " ".join(
+            f'<a href="{html.escape(str(x), quote=True)}">{html.escape(str(x))}</a>'
+            for x in record.get("links", [])
+        )
         cards.append(f"<article><h2>{image}</h2><p>{links}</p></article>")
-    html = "<!doctype html><meta charset='utf-8'><title>vtools 可视化报告</title><style>body{font-family:sans-serif}article{border-bottom:1px solid #ddd;padding:1em}a{margin-right:1em}</style>" + "".join(cards)
-    (run_dir / "index.html").write_text(html, encoding="utf-8")
+    html_text = "<!doctype html><meta charset='utf-8'><title>vtools 可视化报告</title><style>body{font-family:sans-serif}article{border-bottom:1px solid #ddd;padding:1em}a{margin-right:1em}</style>" + "".join(cards)
+    (run_dir / "index.html").write_text(html_text, encoding="utf-8")
 
 
 __all__ = [
@@ -313,7 +364,9 @@ __all__ = [
     "resolve_device",
     "restore_map",
     "safe_name",
+    "image_output_name",
     "write_csv",
+    "write_image",
     "write_json",
     "write_runtime_state",
 ]

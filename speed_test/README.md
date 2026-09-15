@@ -1,5 +1,18 @@
 # 通用 PyTorch 视觉模型测速
 
+## 入口
+
+```bash
+python speed_test/run_all.py --help
+python speed_test/run_all.py --config speed_test/benchmark_config.yaml
+python speed_test/benchmark_pytorch.py --config speed_test/benchmark_config.yaml
+python speed_test/benchmark_tensorrt.py --config speed_test/benchmark_config.yaml
+python speed_test/inspect_checkpoint.py --config speed_test/benchmark_config.yaml --raw-only
+python speed_test/check_consistency.py --config speed_test/benchmark_config.yaml
+```
+
+`run_all.py` 是一键入口，单项脚本用于只运行某个阶段；PyCharm 可直接运行对应脚本。
+
 
 
 by:小尛ovo

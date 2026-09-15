@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="vtools 模块化功能入口")
-    parser.add_argument("--tool", choices=["diagnostics", "pytorch", "tensorrt", "consistency", "visualization", "compression"], default="diagnostics")
+    parser.add_argument("--tool", choices=["diagnostics", "pytorch", "tensorrt", "consistency", "visualization", "compression"], default=None)
     parser.add_argument("--config", type=Path, help="对应子项目配置；省略时使用默认 PyCharm 配置")
     parser.add_argument("--only", action="append")
     parser.add_argument("--enable", action="append")
@@ -43,29 +43,45 @@ def main() -> int:
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
     selected_config = args.config.expanduser().resolve() if args.config else None
+    tool = args.tool
+    tools_config = None
     if selected_config and selected_config.name == "tools.yaml":
         try:
             import yaml  # type: ignore
-            values = yaml.safe_load(selected_config.read_text(encoding="utf-8")) or {}
-            key = {"diagnostics": "diagnostics_config", "pytorch": "speed_config", "tensorrt": "speed_config", "consistency": "speed_config", "visualization": "visualization_config", "compression": "compression_config"}[args.tool]
-            candidate = values.get(key)
-            if candidate:
-                selected_config = (ROOT / str(candidate)).resolve()
-        except (ImportError, OSError, ValueError):
-            pass
-    if args.tool == "diagnostics":
+            tools_config = yaml.safe_load(selected_config.read_text(encoding="utf-8")) or {}
+            if not isinstance(tools_config, dict):
+                raise ValueError("tools.yaml 顶层必须是对象")
+        except Exception as exc:
+            print(f"错误：无法读取 tools.yaml：{exc}", file=sys.stderr)
+            return 2
+        if tool is None:
+            tool = str(tools_config.get("tool", "diagnostics"))
+            if tool not in {"diagnostics", "pytorch", "tensorrt", "consistency", "visualization", "compression"}:
+                print(f"错误：tools.yaml 中的 tool 无效：{tool}", file=sys.stderr)
+                return 2
+    tool = tool or "diagnostics"
+    if tools_config is not None:
+        key = {"diagnostics": "diagnostics_config", "pytorch": "speed_config", "tensorrt": "speed_config", "consistency": "speed_config", "visualization": "visualization_config", "compression": "compression_config"}[tool]
+        candidate = tools_config.get(key)
+        if candidate:
+            candidate_path = Path(str(candidate)).expanduser()
+            # config/tools.yaml documents child configs relative to repository root.
+            selected_config = (ROOT / candidate_path).resolve() if not candidate_path.is_absolute() else candidate_path.resolve()
+        else:
+            selected_config = None
+    if tool == "diagnostics":
         module_name = "model_diagnostics.run_model_diagnostics"
         default_config = ROOT / "model_diagnostics" / "config" / "pycharm_run.yaml"
-    elif args.tool == "pytorch":
+    elif tool == "pytorch":
         module_name = "speed_test.backends.pytorch_vision_speed_benchmark_v2"
         default_config = ROOT / "speed_test" / "benchmark_config.yaml"
-    elif args.tool == "tensorrt":
+    elif tool == "tensorrt":
         module_name = "speed_test.backends.pytorch_vision_tensorrt_benchmark_v2"
         default_config = ROOT / "speed_test" / "benchmark_config.yaml"
-    elif args.tool == "consistency":
+    elif tool == "consistency":
         module_name = "speed_test.checks.vision_consistency"
         default_config = ROOT / "speed_test" / "benchmark_config.yaml"
-    elif args.tool == "visualization":
+    elif tool == "visualization":
         module_name = "model_visualization.run_visualization"
         default_config = ROOT / "model_visualization" / "config" / "pycharm_run.yaml"
     else:
@@ -73,33 +89,27 @@ def main() -> int:
         default_config = ROOT / "model_compression" / "config" / "pycharm_run.yaml"
     old_argv = sys.argv[:]
     sys.argv = [module_name, "--config", str(selected_config or default_config)]
-    if args.tool == "diagnostics" and args.predictions:
+    if tool == "diagnostics" and args.predictions:
         sys.argv.extend(["--predictions", str(args.predictions)])
-    if args.tool == "diagnostics" and args.weights:
+    if tool == "diagnostics" and args.weights:
         sys.argv.extend(["--weights", str(args.weights)])
-    if args.tool == "diagnostics" and args.data:
+    if tool == "diagnostics" and args.data:
         sys.argv.extend(["--data", str(args.data)])
-    if args.tool == "diagnostics" and args.device:
+    if tool == "diagnostics" and args.device:
         sys.argv.extend(["--device", args.device])
-    if args.tool == "visualization":
+    if tool == "visualization":
         for flag in ("weights", "source", "mode", "device"):
             value = getattr(args, flag)
             if value:
                 sys.argv.extend([f"--{flag}", str(value)])
-    if args.tool in {"pytorch", "tensorrt", "consistency"}:
+    if tool in {"pytorch", "tensorrt", "consistency"}:
         if args.weights:
             sys.argv.extend(["--model", str(args.weights)])
         if args.source:
             sys.argv.extend(["--source", str(args.source)])
         if args.device:
             sys.argv.extend(["--device", args.device])
-        if args.structured_scale is not None:
-            sys.argv.extend(["--structured-scale", args.structured_scale])
-        if args.structured_epochs is not None:
-            sys.argv.extend(["--structured-epochs", str(args.structured_epochs)])
-        if args.structured_initial_weights is not None:
-            sys.argv.extend(["--structured-initial-weights", str(args.structured_initial_weights)])
-    if args.tool == "compression":
+    if tool == "compression":
         if args.data:
             sys.argv.extend(["--data", str(args.data)])
         if args.task:
@@ -120,9 +130,9 @@ def main() -> int:
             sys.argv.extend(["--structured-epochs", str(args.structured_epochs)])
         if args.structured_initial_weights is not None:
             sys.argv.extend(["--structured-initial-weights", str(args.structured_initial_weights)])
-    if args.list_modules and args.tool != "visualization":
+    if args.list_modules and tool != "visualization":
         sys.argv.append("--list-modules")
-    if args.list_modules and args.tool == "visualization":
+    if args.list_modules and tool == "visualization":
         print("visualization.features\nvisualization.cam\nvisualization.stage_trace")
         return 0
     for flag in ("only", "enable", "disable"):
@@ -130,7 +140,14 @@ def main() -> int:
             sys.argv.extend([f"--{flag}", value])
     try:
         result = importlib.import_module(module_name).main()
-        return int(result) if isinstance(result, int) else 0
+        if isinstance(result, int):
+            return result
+        if isinstance(result, dict):
+            return 0 if str(result.get("status", "succeeded")).lower() in {"succeeded", "passed", "ok"} else 1
+        if isinstance(result, list):
+            accepted = {"succeeded", "passed", "ok", "skipped"}
+            return 1 if any(isinstance(row, dict) and "status" in row and str(row.get("status", "")).lower() not in accepted for row in result) else 0
+        return 0
     except (ValueError, RuntimeError, TypeError, FileNotFoundError, ImportError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 2

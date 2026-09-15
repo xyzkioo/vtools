@@ -1,5 +1,15 @@
 # 数据目录
 
+## 入口
+
+本目录只说明输入格式，不提供独立执行脚本。请从仓库根目录运行：
+
+```bash
+python model_diagnostics/run_model_diagnostics.py --config model_diagnostics/config/pycharm_run.yaml
+```
+
+输入路径在配置中的 `dataset`、`mode_a` 字段设置。
+
 把验证集数据和预测结果放在这里，或在 `config/pycharm_run.yaml` 中填写相对/绝对路径。推荐直接使用 Ultralytics 的 `data.yaml`，配置为 `dataset.data` + `dataset.split`；程序会根据 `path`、`val` 和标准 `images/`、`labels/` 目录自动读取数据。
 
 推荐的 Ultralytics 数据集结构：

@@ -270,12 +270,10 @@ def _generate_predictions(
 
 
 def _run_engine(engine: Any, argv: list[str]) -> int:
-    old_argv = sys.argv
-    try:
-        sys.argv = argv
-        return int(engine.main())
-    finally:
-        sys.argv = old_argv
+    # The engine accepts an explicit argv list, so nested runs do not mutate
+    # process-global ``sys.argv`` or interfere with another model in the same
+    # parent process.
+    return int(engine.main(argv[1:]))
 
 
 def _run_one_model(
@@ -303,8 +301,6 @@ def _run_one_model(
     gt_format = str(dataset.get("gt_format", "ultralytics" if data_yaml_path else "auto"))
     split = str(dataset.get("split", "val"))
     pred_format = str(model_entry.get("pred_format", dataset.get("pred_format", "auto")))
-    gt_dataset = engine.load_ground_truth(gt_path, gt_format, images_dir, split=split, base_dir=project_root)
-
     model_name = _safe_name(model_entry.get("name"), "model")
     model_dir = run_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -319,7 +315,15 @@ def _run_one_model(
         prediction_value = model_entry.get("predictions", dataset.get("predictions"))
     prediction_path = _resolve(prediction_value, project_root)
     if prediction_path is None:
+        try:
+            from diagnostics.modules import resolve_modules
+        except ImportError:
+            from model_diagnostics.diagnostics.modules import resolve_modules
+        generation_enabled = bool(resolve_modules(settings, only=cli_args.only, enable=cli_args.enable, disable=cli_args.disable).get("predict.generate", False))
+        if not generation_enabled:
+            raise ValueError("没有现成 predictions 文件时，必须显式启用 modules.predict.generate")
         prediction_path = model_dir / "predictions_adapter.json"
+        gt_dataset = engine.load_ground_truth(gt_path, gt_format, images_dir, split=split, base_dir=project_root)
         _generate_predictions(settings, model_entry, gt_dataset, project_root, images_dir, prediction_path)
     elif not prediction_path.exists():
         raise FileNotFoundError(f"找不到 predictions 文件：{prediction_path}")
@@ -343,13 +347,16 @@ def _run_one_model(
         argv.extend(["--raw-pred", str(raw_path)])
     if images_dir is not None:
         argv.extend(["--images-dir", str(images_dir)])
+    argv.extend(["--base-dir", str(project_root)])
     for value in cli_args.only or []:
         argv.extend(["--only", value])
     for value in cli_args.enable or []:
         argv.extend(["--enable", value])
     for value in cli_args.disable or []:
         argv.extend(["--disable", value])
-    _run_engine(engine, argv)
+    exit_code = _run_engine(engine, argv)
+    if exit_code != 0:
+        raise RuntimeError(f"诊断引擎失败，退出码={exit_code}")
 
     metadata = {
         "name": str(model_entry.get("name", model_name)),
@@ -373,6 +380,7 @@ def main() -> int:
     parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
     parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
     parser.add_argument("--predictions", type=Path, help="直接使用已有预测文件，覆盖模式 B/C 的推理")
+    parser.add_argument("--run-dir", type=Path, help="指定一个尚不存在的输出目录")
     parser.add_argument("--weights", type=Path, help="直接使用模型权重，覆盖 mode_b/mode_c.weights")
     parser.add_argument("--data", type=Path, help="直接使用数据集 YAML，覆盖 dataset.data")
     parser.add_argument("--device", help="临时覆盖 benchmark.device：auto、cpu、cuda:0 或 0")
@@ -392,6 +400,11 @@ def main() -> int:
         return 0
     config_path = cli_args.config.expanduser().resolve()
     settings = _read_run_config(config_path)
+    if cli_args.predictions is not None and str(settings.get("mode", "")).strip().upper() == "A":
+        mode_a = dict(settings.get("mode_a") or {})
+        mode_a["predictions"] = str(cli_args.predictions.expanduser().resolve())
+        settings = dict(settings)
+        settings["mode_a"] = mode_a
     project_root = _project_root(settings)
     _add_python_paths(settings, project_root)
 
@@ -445,7 +458,13 @@ def main() -> int:
     ):
         raise ValueError("B/C 模式没有模型权重；请填写 mode_b/mode_c.weights 或使用 --weights/--predictions")
 
-    run_dir = _next_run_dir(settings, project_root)
+    if cli_args.run_dir is not None:
+        run_dir = cli_args.run_dir.expanduser().resolve()
+        if run_dir.exists():
+            raise FileExistsError(f"运行目录已存在，为避免覆盖结果请换一个路径：{run_dir}")
+        run_dir.mkdir(parents=True, exist_ok=False)
+    else:
+        run_dir = _next_run_dir(settings, project_root)
     failures: list[str] = []
     completed: list[Path] = []
     for index, model_entry in enumerate(models):

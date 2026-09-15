@@ -1,5 +1,14 @@
 # 通用目标检测诊断工具
 
+## 入口
+
+```bash
+python model_diagnostics/run_model_diagnostics.py
+python model_diagnostics/run_model_diagnostics.py --help
+```
+
+默认读取 `model_diagnostics/config/pycharm_run.yaml`；已有预测文件的底层引擎命令见本文“命令行运行”一节。
+
 这套代码只关心目标检测质量与错误来源，不计算参数量、FLOPs、显存和延迟。核心评估不强制导入 Ultralytics，也不假设模型有 NMS、P2/P3、anchor 或特定输出头；只有使用 `adapter: ultralytics` 或 `.ndjson` 官方转换时才需要它。YOLO、DETR、Faster R-CNN 和自定义 PyTorch/ONNX 模型都可以通过统一预测格式或 vtools 风格 adapter 接入。
 
 ## 最短使用路径

@@ -1,5 +1,17 @@
 # 各种转化脚本
 
+## 入口
+
+从仓库根目录按用途运行：
+
+```bash
+python transform_tools/ndjson_to_yolo.py --help
+python transform_tools/py2kmodel.py --help
+python transform_tools/PY2KM_validate.py --help
+```
+
+其中 `ndjson_to_yolo.py` 用于数据集转换，`py2kmodel.py` 用于生成 K230 `.kmodel`，`PY2KM_validate.py` 用于 ONNX 与 `.kmodel` 输出校验。
+
 模型有时会有不兼容的情况，这里有一些用于转换的代码
 
 ## 文件说明
@@ -140,6 +152,10 @@ IMAGE_PATH = "/path/to/test.jpg"
 TARGET_SIZE = 320
 NORMALIZE = True
 ```
+
+两个脚本的 `--help` 不要求预先安装模型运行依赖；实际执行相应阶段时才需要
+Ultralytics、ONNX/ONNX Runtime、nncase 等包。转换会按文件名排序选择校准图片，
+并在 Kmodel 完整生成后原子替换目标文件，失败不会破坏已有 Kmodel。
 
 校准图片的 `letterbox`、填充色 `(128,128,128)`、RGB/CHW 顺序和 `/255` 归一化
 必须与实际板端预处理保持一致，否则即使模型文件生成成功，校验结果也没有参考

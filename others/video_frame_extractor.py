@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -53,6 +54,8 @@ def natural_key(path: Path) -> list[object]:
 
 def collect_videos(input_path: Path, recursive: bool) -> list[Path]:
     if input_path.is_file():
+        if input_path.suffix.lower() not in VIDEO_EXTENSIONS:
+            raise ValueError(f"不支持的视频格式：{input_path.suffix or '无扩展名'}")
         return [input_path]
     if not input_path.is_dir():
         raise ValueError(f"输入路径不存在或不是文件/目录：{input_path}")
@@ -77,11 +80,16 @@ def validate_config(every_n: int, start_frame: int, end_frame: int | None, exten
 
 
 def build_output_dir(video: Path, input_path: Path, output_dir: Path | None, multiple: bool) -> Path:
+    stem = f"{video.stem}_{video.suffix.lstrip('.')}" if video.suffix else video.stem
     if output_dir is None:
         # 单个视频默认输出到 video_frames；批量时按视频名分目录，避免文件互相覆盖。
-        root = video.parent / f"{video.stem}_frames"
+        root = video.parent / f"{stem}_frames"
     elif multiple:
-        root = output_dir / video.stem
+        try:
+            relative_parent = video.relative_to(input_path).parent if input_path.is_dir() else Path()
+        except ValueError:
+            relative_parent = Path()
+        root = output_dir / relative_parent / stem
     else:
         root = output_dir
     return root
@@ -105,14 +113,25 @@ def extract_video(
 
     capture = cv2.VideoCapture(str(video))
     if not capture.isOpened():
+        capture.release()
         raise ValueError(f"无法打开视频，可能格式不受支持或文件损坏：{video}")
 
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not overwrite and total_frames > 0:
+        last_frame = total_frames - 1 if end_frame is None else min(end_frame, total_frames - 1)
+        collisions = [
+            output_dir / f"frame_{index:08d}{extension}"
+            for index in range(start_frame, last_frame + 1, every_n)
+            if (output_dir / f"frame_{index:08d}{extension}").exists()
+        ]
+        if collisions:
+            capture.release()
+            raise FileExistsError(f"输出文件已存在（可加 --overwrite 覆盖）：{collisions[0]}")
     saved = 0
     frame_index = 0
     try:
+        output_dir.mkdir(parents=True, exist_ok=True)
         while True:
             ok, frame = capture.read()
             if not ok:
@@ -128,14 +147,22 @@ def extract_video(
                     params = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
                 else:
                     params = [cv2.IMWRITE_PNG_COMPRESSION, png_compression]
-                if not cv2.imwrite(str(output_path), frame, params):
-                    raise IOError(f"保存帧失败：{output_path}")
+                with tempfile.NamedTemporaryFile(dir=output_dir, suffix=extension, delete=False) as handle:
+                    temporary = Path(handle.name)
+                try:
+                    if not cv2.imwrite(str(temporary), frame, params):
+                        raise IOError(f"保存帧失败：{output_path}")
+                    temporary.replace(output_path)
+                finally:
+                    temporary.unlink(missing_ok=True)
                 saved += 1
             if end_frame is not None and frame_index >= end_frame:
                 break
             frame_index += 1
     finally:
         capture.release()
+    if saved == 0 and total_frames > start_frame:
+        raise IOError(f"视频未能解码出目标帧：{video}")
     return ExtractionResult(video, saved, output_dir, fps, total_frames)
 
 
@@ -143,7 +170,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="将视频保存为图片帧，支持每帧或每隔 N 帧保存一帧")
     parser.add_argument("--input", "-i", help="视频文件或视频目录")
     parser.add_argument("--output-dir", "-o", help="输出目录；批量处理时会按视频名建立子目录")
-    parser.add_argument("--every-n", type=int, help="每隔 N 帧保存一帧，默认 1（保存每一帧）")
+    parser.add_argument("--every-n", type=int, help="每隔 N 帧保存一帧，默认 8")
     parser.add_argument("--start-frame", type=int, help="起始帧编号，默认 0")
     parser.add_argument("--end-frame", type=int, help="结束帧编号（包含），默认直到视频结束")
     parser.add_argument("--recursive", action="store_true", help="递归搜索输入目录中的视频")

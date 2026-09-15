@@ -1,5 +1,14 @@
 # 图片数据集文件名转换工具
 
+## 入口
+
+```bash
+python others/filename_transform/image_filename_converter.py --help
+python others/filename_transform/image_filename_converter.py --dir /path/to/images
+```
+
+也可以修改脚本顶部的 `PYCHARM_CONFIG` 后在 PyCharm 直接运行；默认只预览，使用 `--apply` 才会执行改名。
+
 这个工具可以批量修改图片文件名，并同步维护常见数据集标注：
 
 - 普通图片文件夹：只修改图片文件名。

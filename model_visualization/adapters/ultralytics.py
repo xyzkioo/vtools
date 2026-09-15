@@ -19,6 +19,7 @@ from ..core.common import (
     letterbox,
     safe_name,
     write_csv,
+    write_image,
     write_json,
 )
 
@@ -259,9 +260,12 @@ class UltralyticsAdapter:
         transform_meta: Any = None,
         run_dir: Optional[Path] = None,
         image_stem: str = "image",
+        image_id: str | None = None,
     ) -> dict[str, Any]:
         """Trace raw candidates to the final rows while preserving exact indices."""
         import torch
+
+        image_id = image_stem if image_id is None else image_id
 
         head = self.head
         if head is None:
@@ -313,7 +317,9 @@ class UltralyticsAdapter:
         raw_rows = []
         for index in range(int(raw_scores.shape[0])):
             source = self._source_info(index, features, head)
-            raw_rows.append(self._row(image_stem, branch, "raw_candidate", index, boxes_xyxy[index].float().cpu().tolist(), float(raw_scores[index].item()), int(raw_labels[index].item()), source, transform_meta))
+            row = self._row(image_id, branch, "raw_candidate", index, boxes_xyxy[index].float().cpu().tolist(), float(raw_scores[index].item()), int(raw_labels[index].item()), source, transform_meta)
+            row["class_scores"] = probabilities[index].float().cpu().tolist()
+            raw_rows.append(row)
 
         final_rows: list[dict[str, Any]] = []
         topk_rows: list[dict[str, Any]] = []
@@ -326,11 +332,14 @@ class UltralyticsAdapter:
                 raw_index = int(top_indices[0, rank].item())
                 label = int(top_labels[0, rank, 0].item())
                 source = self._source_info(raw_index, features, head)
-                row = self._row(image_stem, branch, "head_topk", raw_index, boxes_xyxy[raw_index].float().cpu().tolist(), score, label, source, transform_meta, rank)
+                row = self._row(image_id, branch, "head_topk", raw_index, boxes_xyxy[raw_index].float().cpu().tolist(), score, label, source, transform_meta, rank)
                 topk_rows.append(row)
-        except Exception:
+        except Exception as error:
             # Older/custom heads may not expose get_topk_index; final NMS can
             # still be traced for one-to-many outputs.
+            if end2end:
+                return {"status": "unsupported", "reason": f"topk_failed:{type(error).__name__}:{error}", "branch": branch}
+            topk_rows.clear()
             top_scores = top_labels = top_indices = None
         if end2end:
             for row in topk_rows:
@@ -361,7 +370,7 @@ class UltralyticsAdapter:
                     score = float(item[4].item())
                     label = int(item[5].item())
                     source = self._source_info(raw_index, features, head)
-                    final_rows.append(self._row(image_stem, branch, "final", raw_index, item[:4].float().cpu().tolist(), score, label, source, transform_meta, rank))
+                    final_rows.append(self._row(image_id, branch, "final", raw_index, item[:4].float().cpu().tolist(), score, label, source, transform_meta, rank))
                     final_raw_indices.append(raw_index)
             except Exception as error:
                 return {"status": "unsupported", "reason": f"nms_failed:{type(error).__name__}:{error}", "branch": branch}
@@ -383,16 +392,28 @@ class UltralyticsAdapter:
             else:
                 row["filter_reason"] = "removed_by_topk"
 
-        target_kind = str(_mapping(_mapping(config.get("cam")).get("target")).get("kind", "raw_candidate"))
+        target_config = _mapping(_mapping(config.get("cam")).get("target"))
+        target_kind = str(target_config.get("kind", "raw_candidate"))
+        target_class_id = target_config.get("class_id")
+        raw_rows_for_target = raw_rows
         target_index = None
-        if target_kind == "final_detection" and final_raw_indices:
-            target_index = final_raw_indices[0]
-        elif raw_rows:
-            target_index = max(raw_rows, key=lambda row: float(row["score"]))["raw_index"]
+        final_rows_for_target = (
+            [row for row in final_rows if target_class_id is None or int(row.get("class_id", -1)) == int(target_class_id)]
+        )
+        if target_kind == "final_detection" and final_rows_for_target:
+            target_index = int(final_rows_for_target[0]["raw_index"])
+        elif target_kind != "final_detection" and raw_rows_for_target:
+            if target_class_id is not None:
+                target_index = max(
+                    raw_rows_for_target,
+                    key=lambda row: float((row.get("class_scores") or [0.0])[int(target_class_id)] if int(target_class_id) < len(row.get("class_scores") or []) else 0.0),
+                )["raw_index"]
+            else:
+                target_index = max(raw_rows_for_target, key=lambda row: float(row["score"]))["raw_index"]
         summary_rows = [
-            {"image_id": image_stem, "branch": branch, "stage": "raw_candidate", "count": len(raw_rows), "conf_threshold": conf, "iou_threshold": iou},
-            {"image_id": image_stem, "branch": branch, "stage": "head_topk", "count": len(topk_rows), "conf_threshold": conf, "iou_threshold": iou},
-            {"image_id": image_stem, "branch": branch, "stage": "final", "count": len(final_rows), "conf_threshold": conf, "iou_threshold": iou},
+            {"image_id": image_id, "branch": branch, "stage": "raw_candidate", "count": len(raw_rows), "conf_threshold": conf, "iou_threshold": iou},
+            {"image_id": image_id, "branch": branch, "stage": "head_topk", "count": len(topk_rows), "conf_threshold": conf, "iou_threshold": iou},
+            {"image_id": image_id, "branch": branch, "stage": "final", "count": len(final_rows), "conf_threshold": conf, "iou_threshold": iou},
         ]
         result: dict[str, Any] = {
             "status": "ok",
@@ -405,12 +426,12 @@ class UltralyticsAdapter:
             "target": {"kind": target_kind, "candidate_index": target_index},
             "links": [],
             "canonical_raw_record": {
-                "image_id": image_stem,
+                "image_id": image_id,
                 "file_name": getattr(transform_meta, "source_path", image_stem),
                 "predictions": raw_rows,
             },
             "canonical_final_record": {
-                "image_id": image_stem,
+                "image_id": image_id,
                 "file_name": getattr(transform_meta, "source_path", image_stem),
                 "predictions": final_rows,
             },
@@ -424,9 +445,9 @@ class UltralyticsAdapter:
             events_path = stage_root / "stage_events.jsonl"
             summary_path = stage_root / "stage_summary.csv"
             candidates_path = stage_root / "candidates.jsonl"
-            write_json(raw_path, {"image_id": image_stem, "branch": branch, "candidates": raw_rows})
-            write_json(topk_path, {"image_id": image_stem, "branch": branch, "detections": topk_rows})
-            write_json(final_path, {"image_id": image_stem, "branch": branch, "predictions": final_rows})
+            write_json(raw_path, {"image_id": image_id, "branch": branch, "candidates": raw_rows})
+            write_json(topk_path, {"image_id": image_id, "branch": branch, "detections": topk_rows})
+            write_json(final_path, {"image_id": image_id, "branch": branch, "predictions": final_rows})
             write_csv(summary_path, summary_rows)
             with events_path.open("w", encoding="utf-8") as handle:
                 for event in summary_rows:
@@ -463,11 +484,13 @@ class UltralyticsAdapter:
                     x1, y1, x2, y2 = [int(round(value)) for value in row["bbox"]]
                     cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 180, 255), 1)
                 for row in final_rows:
+                    if float(row["score"]) < display_conf:
+                        continue
                     x1, y1, x2, y2 = [int(round(value)) for value in row["bbox"]]
                     cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 220, 0), 2)
                     cv2.putText(overlay, f"{row['class_id']}:{row['score']:.2f}", (x1, max(12, y1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 0), 1, cv2.LINE_AA)
                 overlay_path = stage_root / "stages_overlay.jpg"
-                cv2.imwrite(str(overlay_path), overlay)
+                write_image(overlay_path, overlay)
                 result["links"].append(str(overlay_path.relative_to(run_dir)))
         return result
 

@@ -13,10 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
 
-import cv2
 import numpy as np
 
-from .common import blend_map, colorize, finite_stats, safe_name, write_csv
+from .common import blend_map, colorize, finite_stats, safe_name, write_csv, write_image
 
 
 @dataclass
@@ -113,7 +112,9 @@ class ActivationCapture:
 def _channel_indices(array: np.ndarray, values: Mapping[str, Any]) -> list[int]:
     channels = dict(values or {})
     mode = str(channels.get("mode", "first")).lower()
-    count = max(1, int(channels.get("count", 16)))
+    count = int(channels.get("count", 16))
+    if count < 1:
+        raise ValueError("features.channels.count 必须大于 0")
     total = int(array.shape[0])
     if mode == "explicit":
         indices = [int(index) for index in channels.get("indices", [])]
@@ -121,6 +122,8 @@ def _channel_indices(array: np.ndarray, values: Mapping[str, Any]) -> list[int]:
     if mode == "variance":
         scores = np.nan_to_num(array.reshape(total, -1).var(axis=1), nan=-np.inf)
         return np.argsort(-scores)[: min(count, total)].astype(int).tolist()
+    if mode != "first":
+        raise ValueError("features.channels.mode 必须是 first、variance 或 explicit")
     return list(range(min(count, total)))
 
 
@@ -130,7 +133,9 @@ def _aggregate(array: np.ndarray, mode: str) -> np.ndarray:
         return np.nanmean(array, axis=0)
     if text == "max":
         return np.nanmax(array, axis=0)
-    return np.nanmean(np.abs(array), axis=0)
+    if text == "mean_abs":
+        return np.nanmean(np.abs(array), axis=0)
+    raise ValueError("features.aggregation 必须是 mean_abs、mean 或 max")
 
 
 def render_features(
@@ -169,7 +174,7 @@ def render_features(
             channel_map = array[channel]
             path = feature_root / f"{base}_c{channel}.png"
             path.parent.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(str(path), colorize(channel_map))
+            write_image(path, colorize(channel_map))
             links.append(str(path.relative_to(run_dir)))
             row = {
                 "image": image_stem,
@@ -185,7 +190,7 @@ def render_features(
         aggregate = _aggregate(array, aggregate_mode)
         aggregate_path = activation_root / f"{base}_aggregate.png"
         aggregate_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(aggregate_path), colorize(aggregate))
+        write_image(aggregate_path, colorize(aggregate))
         links.append(str(aggregate_path.relative_to(run_dir)))
         aggregate_row = {
             "image": image_stem,
@@ -200,7 +205,7 @@ def render_features(
         stats_rows.append(aggregate_row)
         if overlay:
             overlay_path = activation_root / f"{base}_overlay.jpg"
-            cv2.imwrite(str(overlay_path), blend_map(image_bgr, aggregate, transform_meta))
+            write_image(overlay_path, blend_map(image_bgr, aggregate, transform_meta))
             links.append(str(overlay_path.relative_to(run_dir)))
         if save_arrays:
             array_path = array_root / f"{base}.npz"
@@ -254,7 +259,14 @@ def select_yolo_target(
         if scores.ndim != 3:
             raise ValueError(f"YOLO scores 应为 [B,C,N]，实际为 {tuple(scores.shape)}")
         class_id = spec.get("class_id")
+        selection = str(spec.get("selection", "highest_score")).lower()
+        if selection not in {"highest_score", "class_highest", "index"}:
+            raise ValueError("CAM target.selection 必须是 highest_score、class_highest 或 index")
+        if selection == "class_highest" and class_id is None:
+            raise ValueError("CAM target.selection=class_highest 时必须填写 target.class_id")
         explicit_index = candidate_index if candidate_index is not None else spec.get("index")
+        if explicit_index is None and selection == "index":
+            raise ValueError("CAM target.selection=index 时必须填写 target.index")
         if explicit_index is None:
             probabilities = scores[0].sigmoid()
             if class_id is None:
@@ -262,6 +274,8 @@ def select_yolo_target(
                 class_index = flat_index // probabilities.shape[1]
                 anchor_index = flat_index % probabilities.shape[1]
             else:
+                if not 0 <= int(class_id) < probabilities.shape[0]:
+                    raise IndexError(f"类别索引越界：{class_id}，类别数={probabilities.shape[0]}")
                 class_index = int(class_id)
                 anchor_index = int(probabilities[class_index].argmax().item())
         else:

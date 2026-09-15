@@ -20,7 +20,7 @@ from checks.vision_consistency_metrics import (
 from checks.vision_consistency import _sources, save_reports
 from core.vision_benchmark_config import load_config
 from run_all import _invoke, _merge_results, main as run_all_main
-from core.vision_run_manager import prepare_run_directory
+from core.vision_run_manager import apply_run_directory, prepare_run_directory, resolve_cli_path
 from core.vision_runtime import _with_library_dir
 
 
@@ -246,6 +246,21 @@ class WorkflowTests(unittest.TestCase):
             reused = prepare_run_directory(child, allocated)
             self.assertEqual(reused, allocated)
             self.assertEqual(Path(child["pytorch"]["output"]), allocated / "pytorch.csv")
+
+    def test_relative_outputs_cannot_escape_run_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = {
+                "_config_path": str(root / "config.yaml"),
+                "_raw_config": {"pytorch": {"output": "../../outside.csv"}},
+                "project": {"root": str(root)},
+                "run": {"enabled": True, "root": str(root / "runs")},
+                "pytorch": {"output": str(root / "outside.csv")},
+            }
+            with self.assertRaisesRegex(ValueError, "跳出运行目录"):
+                apply_run_directory(config, root / "runs" / "run1")
+            with self.assertRaisesRegex(ValueError, "跳出运行目录"):
+                resolve_cli_path("../outside.csv", root / "runs" / "run1", root)
 
     def test_false_success_regression(self):
         rows = [{"backend": "tensorrt", "status": "failed", "error": "ABI error"}]

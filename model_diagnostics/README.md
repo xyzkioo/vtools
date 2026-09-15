@@ -1,5 +1,15 @@
 # 通用目标检测诊断工具
 
+## 入口
+
+```bash
+python model_diagnostics/run_model_diagnostics.py
+python model_diagnostics/run_model_diagnostics.py --help
+python run_tools.py --tool diagnostics --config model_diagnostics/config/pycharm_run.yaml
+```
+
+默认读取 `model_diagnostics/config/pycharm_run.yaml`；PyCharm 直接运行 `run_model_diagnostics.py` 等价。
+
 本项目只评估目标检测质量与错误来源，不计算参数量、FLOPs、显存和延迟。适配器接口与 [vtools 的 `speed_test` adapter](https://github.com/xyzkioo/vtools/tree/main/speed_test/adapters) 对齐，因此可以复制模型适配器，再修改 YAML 完成测试；使用已有预测文件的核心诊断不依赖 Ultralytics，模式 B 或 NDJSON 转换才需要它。
 
 当前诊断入口按模块执行：`diagnostics.missed`、`diagnostics.classification`、

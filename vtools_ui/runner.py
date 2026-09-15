@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import re
 import signal
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,17 @@ class ToolRunner(QObject):
         self._stopping = False
         self.last_run_dir: Path | None = None
         self._run_dir_buffer = ""
+        self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        self.process.setProcessEnvironment(self._child_environment())
+
+    @staticmethod
+    def _child_environment() -> QProcessEnvironment:
+        """Force line-buffered, UTF-8 output so the log pane stays readable."""
+
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert("PYTHONUNBUFFERED", "1")
+        environment.insert("PYTHONIOENCODING", "utf-8")
+        return environment
 
     def set_python_executable(self, executable: Path) -> None:
         self.python_executable = executable.expanduser().resolve()
@@ -86,6 +99,7 @@ class ToolRunner(QObject):
         self._stopping = False
         self.last_run_dir = None
         self._run_dir_buffer = ""
+        self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self.output.emit(f"$ {self._format_command(args)}")
         self.output.emit(f"开始执行：{spec.title}\n")
         self.process.setWorkingDirectory(str(self.project_root))
@@ -143,6 +157,7 @@ class ToolRunner(QObject):
         # During the short Starting state Qt may not have published a PID yet.
         # Never pass 0 to os.kill (on Unix that means the whole process group).
         pid = int(self.process.processId())
+        known_descendants = self._descendants(pid) if pid > 0 and os.name != "nt" else []
         if os.name == "nt":
             if pid > 0:
                 subprocess.run(
@@ -174,12 +189,25 @@ class ToolRunner(QObject):
             else:
                 if pid > 0:
                     self._signal_unix_tree(pid, signal.SIGKILL)
+                    for child_pid in known_descendants:
+                        try:
+                            os.kill(child_pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
                 self.process.kill()
+        # QProcess may report that the parent exited while a worker remains
+        # alive.  Always clean up the descendants observed before stopping;
+        # only those PIDs are targeted, so unrelated processes are untouched.
+        if os.name != "nt":
+            for child_pid in known_descendants:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
-    def _read_output(self) -> None:
-        data = bytes(self.process.readAllStandardOutput()).decode(
-            "utf-8", errors="replace"
-        )
+    def _read_output(self, *, final: bool = False) -> None:
+        raw = bytes(self.process.readAllStandardOutput())
+        data = self._decoder.decode(raw, final) if (raw or final) else ""
         if data:
             self._capture_run_dir(data)
             self.output.emit(data)
@@ -220,10 +248,15 @@ class ToolRunner(QObject):
     def _process_error(self, error: QProcess.ProcessError) -> None:
         if error == QProcess.ProcessError.FailedToStart:
             self.output.emit("无法启动 Python 进程，请检查当前环境。")
+            self.state_changed.emit("启动失败")
+            # QProcess 在启动失败时不会发出 finished()；这里补发，保持任务
+            # 记录、按钮状态和失败提示与其他失败路径一致。
+            self.finished.emit(127, self._task_name, False)
+            return
         self.state_changed.emit("启动失败")
 
     def _process_finished(self, exit_code: int, _status: QProcess.ExitStatus) -> None:
-        self._read_output()
+        self._read_output(final=True)
         was_stopped = self._stopping
         status = "已停止" if was_stopped else ("成功" if exit_code == 0 else f"失败（退出码 {exit_code}）")
         self.state_changed.emit(status)
@@ -252,6 +285,8 @@ def append_history(
     if path.exists():
         try:
             records = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(records, list):
+                records = []
         except (OSError, ValueError):
             records = []
     records.insert(
@@ -263,4 +298,13 @@ def append_history(
             "config": str(config) if config else "默认配置",
         },
     )
-    path.write_text(json.dumps(records[: max(1, int(limit))], ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = json.dumps(records[: max(1, int(limit))], ensure_ascii=False, indent=2)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)

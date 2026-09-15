@@ -26,30 +26,25 @@ dataset:
   train: ''
   val: ''
   input_size:
-  - 640
-  - 640
+  - 832
+  - 832
 compression:
   sparsity: 0.3
   exclude: []
   structured:
-    # scale 保持当前稳定的 YOLO s→n 缩放；torch_pruning 为依赖感知物理通道剪枝
-    method: scale
-    target_scale: n
-    # 留空时自动查找项目 weights/yolo26n.pt；也可填写绝对路径
+    method: torch_pruning
+    target_scale: m
     initial_weights: ''
     finetune_epochs: 80
-    # 与当前 best.pt 的训练配置保持一致
     train_input_size: 1024
     batch_size: 2
     learning_rate: 0.001
-    optimizer: AdamW
+    optimizer: auto
     benchmark_warmup: 5
     benchmark_repeats: 20
-    # 精度下降超过 0.05 时不把压缩模型登记为可用版本
     quality_gate: true
     max_map50_95_drop: 0.05
-    # torch_pruning 方法使用的通道剪枝参数
-    channel_sparsity: 0.10
+    channel_sparsity: 0.1
     channel_round: 8
     max_pruned_layers: 6
     stage_selection: all
@@ -73,7 +68,7 @@ modules:
   branch.create: false
   model.parameters: true
   baseline.evaluate: true
-  compression.quantize.dynamic_int8: true
+  compression.quantize.dynamic_int8: false
   compression.prune.unstructured: true
   compression.prune.structured: false
   distillation.classification: false

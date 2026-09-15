@@ -97,6 +97,12 @@ def load_model(model_config: Mapping[str, Any], *, device: Any = "auto"):
         return model.to(target_device), adapter
 
     if not weights:
+        factory = model_config.get("factory")
+        if factory:
+            model = load_factory(str(factory), model_config)
+            if not hasattr(model, "to"):
+                raise TypeError("model.factory 返回的对象不是 PyTorch 模型")
+            return model.to(target_device), None
         raise ValueError("model.weights 不能为空；分支元数据操作可不加载模型")
     path = Path(str(weights)).expanduser().resolve()
     if not path.is_file():
@@ -105,14 +111,21 @@ def load_model(model_config: Mapping[str, Any], *, device: Any = "auto"):
         payload = torch.load(path, map_location=target_device, weights_only=False)
     except TypeError:  # torch < 2.0
         payload = torch.load(path, map_location=target_device)
+    force_factory = bool(model_config.get("force_factory")) and bool(model_config.get("factory"))
     if isinstance(payload, torch.nn.Module):
-        return payload.to(target_device), None
+        if not force_factory:
+            return payload.to(target_device), None
+        model = load_factory(str(model_config["factory"]), model_config)
+        model.load_state_dict(payload.state_dict(), strict=bool(model_config.get("strict", True)))
+        return model.to(target_device), None
     if isinstance(payload, Mapping):
         for key in ("model", "ema", "module"):
             candidate = payload.get(key)
-            if isinstance(candidate, torch.nn.Module):
+            if isinstance(candidate, torch.nn.Module) and not force_factory:
                 return candidate.to(target_device), None
         state_dict = payload.get("state_dict", payload)
+        if force_factory and isinstance(payload.get("model"), torch.nn.Module):
+            state_dict = payload["model"].state_dict()
         if isinstance(state_dict, Mapping):
             factory = model_config.get("factory")
             if not factory:
