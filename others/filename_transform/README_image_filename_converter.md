@@ -7,7 +7,7 @@ python others/filename_transform/image_filename_converter.py --help
 python others/filename_transform/image_filename_converter.py --dir /path/to/images
 ```
 
-也可以修改脚本顶部的 `PYCHARM_CONFIG` 后在 PyCharm 直接运行；默认只预览，使用 `--apply` 才会执行改名。
+默认只预览，使用 `--apply` 才会执行改名。
 
 这个工具可以批量修改图片文件名，并同步维护常见数据集标注：
 
@@ -15,41 +15,8 @@ python others/filename_transform/image_filename_converter.py --dir /path/to/imag
 - YOLO：同步修改对应的 `labels/**/*.txt` 文件。
 - COCO：同步修改 JSON 中 `images[].file_name`，不改变 `image_id` 和标注内容。
 - 支持子文件夹、自然排序、编号模板、预览模式和 CSV 改名清单。
-- 支持直接在 PyCharm 中点击运行，不需要命令行参数。
 
 只使用 Python 标准库，不需要额外安装依赖。
-
-## 在 PyCharm 中运行
-
-打开 `image_filename_converter.py`，修改文件顶部的 `PYCHARM_CONFIG`：
-
-```python
-PYCHARM_CONFIG = {
-    "input_dir": r"/home/用户名/datasets/flower/images",
-    "dataset_format": "yolo",       # images、yolo、coco、auto
-    "labels_dir": r"/home/用户名/datasets/flower/labels",
-    "coco_json": r"",
-    "recursive": True,
-    "template": "{prefix}{index:04d}{suffix}",
-    "prefix": "flower_",
-    "suffix": "",
-    "start": 1,
-    "digits": None,
-    "lowercase_ext": False,
-    "allow_unreferenced": False,
-    "apply": False,
-    "yes": False,
-}
-```
-
-建议第一次运行保持 `"apply": False`，先查看预览结果。确认无误后改成：
-
-```python
-"apply": True,
-"yes": True,
-```
-
-然后在 PyCharm 中直接点击运行按钮即可。
 
 ## YOLO 数据集
 
@@ -102,21 +69,6 @@ coco_dataset/
 │   └── val/000002.jpg
 └── annotations/
     └── instances_train.json
-```
-
-PyCharm 配置：
-
-```python
-PYCHARM_CONFIG = {
-    "input_dir": r"/path/to/coco_dataset/images",
-    "dataset_format": "coco",
-    "coco_json": r"/path/to/coco_dataset/annotations/instances_train.json",
-    "recursive": True,
-    "prefix": "flower_",
-    "digits": 6,
-    "apply": False,
-    "yes": False,
-}
 ```
 
 工具会同步更新：

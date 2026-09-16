@@ -9,8 +9,6 @@ python env_test/check_install.py --source ./ultralytics-cn
 python env_test/check_install.py --help
 ```
 
-也可以在 PyCharm 直接运行 `check_install.py`。
-
 仓库中有两种容易混淆的东西：
 
 - **项目目录名**：当前是 `ultralytics-cn`，可以改成别的名字；
@@ -48,7 +46,7 @@ conda activate yolo
 python -m pip install -e ./ultralytics-cn
 ```
 
-`-e` 是可编辑安装。源码修改后，重新启动 Python 或 PyCharm 运行即可生效。
+`-e` 是可编辑安装。源码修改后，重新启动 Python 进程即可生效。
 
 如果这个环境的依赖已经完整，不想让 pip 改动已有的 PyTorch、NumPy 或 CUDA 组合，可以使用：
 
@@ -115,8 +113,6 @@ cd /path/to/vtools
 python -m pip install -e ./ultralytics-cn
 python env_test/check_install.py --source ./ultralytics-cn
 ```
-
-如果你是在 PyCharm 中运行，检查 PyCharm 使用的解释器是否与终端中的 `sys.executable` 相同。修改解释器后重新启动运行配置。
 
 ## 五、检查自己的权重
 
@@ -237,10 +233,6 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 ### 4. YAML 构建失败或自定义层找不到
 
 先确认源码来源检查通过，再确认自定义模块已在 `ultralytics/nn/modules/` 中实现，并在 `nn/modules/__init__.py` 和 `nn/tasks.py` 中正确导出/导入。最后用 `--yaml` 指向实际 YAML。
-
-### 5. 终端通过、PyCharm 失败
-
-这是两个运行配置使用了不同 Python 的典型表现。分别在终端和 PyCharm 打印 `sys.executable`，并将 PyCharm 解释器设置为已经通过检验的 Conda 环境。
 
 ## 九、通过标准
 

@@ -6,8 +6,7 @@
 2. YOLO 数据集：同步修改 images/ 与 labels/ 中的同名 .txt 文件。
 3. COCO 数据集：同步修改 COCO JSON 的 images[].file_name。
 
-默认只预览；只有配置 apply=True 或传入 --apply 才会真正修改文件。
-本文件顶部的 PYCHARM_CONFIG 可直接在 PyCharm 中修改后运行，不需要命令行参数。
+默认只预览；只有传入 --apply 才会真正修改文件。
 """
 
 from __future__ import annotations
@@ -25,40 +24,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
-
-
-# ============================================================================
-# PyCharm 直接运行配置：在这里修改后，点击 PyCharm 的运行按钮即可。
-# dataset_format 可选："images"、"yolo"、"coco"、"auto"
-#
-# YOLO 示例：
-#   input_dir: /home/用户名/datasets/flower/images
-#   dataset_format: "yolo"
-#   labels_dir: /home/用户名/datasets/flower/labels
-#
-# COCO 示例：
-#   input_dir: /home/用户名/datasets/coco/images
-#   dataset_format: "coco"
-#   coco_json: /home/用户名/datasets/coco/annotations/instances_train.json
-# ============================================================================
-PYCHARM_CONFIG: dict[str, Any] = {
-    "input_dir": r"",
-    "dataset_format": "images",
-    "labels_dir": r"",
-    "coco_json": r"",
-    "recursive": True,
-    "include_hidden": False,
-    "extensions": "jpg,jpeg,png,bmp,gif,tif,tiff,webp,heic,avif",
-    "template": "08-{index:02d}",
-    "prefix": "",
-    "suffix": "",
-    "start": 1,
-    "digits": None,  # 例如填写 5，生成 00001、00002；填写 None 才使用 template
-    "lowercase_ext": False,
-    "allow_unreferenced": False,  # COCO 中未被 JSON 引用的图片是否也允许改名
-    "apply": False,  # True=真正执行；False=只预览
-    "yes": False,  # True=执行时跳过 yes 确认
-}
 
 
 DEFAULT_EXTENSIONS = {
@@ -373,61 +338,55 @@ def print_plan(plan: list[RenameItem], limit: int = 40) -> None:
         print(f"  ... 其余 {len(plan) - limit} 项省略，可用 --plan 导出完整清单。")
 
 
-def config_or_arg(args: argparse.Namespace, name: str) -> Any:
-    value = getattr(args, name)
-    config_name = "input_dir" if name == "dir" else name
-    return PYCHARM_CONFIG[config_name] if value is None else value
-
-
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="批量修改图片、YOLO 标签或 COCO JSON 中的文件名。")
-    parser.add_argument("--dir", type=Path, default=None, help="图片目录；YOLO 也可填写数据集根目录")
-    parser.add_argument("--dataset-format", choices=["images", "yolo", "coco", "auto"], default=None, help="数据集格式")
-    parser.add_argument("--labels-dir", default=None, help="YOLO 标签目录；不填时自动识别同级 labels")
+    parser.add_argument("--dir", type=Path, required=True, help="图片目录；YOLO 也可填写数据集根目录")
+    parser.add_argument("--dataset-format", choices=["images", "yolo", "coco", "auto"], default="images", help="数据集格式")
+    parser.add_argument("--labels-dir", default="", help="YOLO 标签目录；不填时自动识别同级 labels")
     parser.add_argument("--coco-json", type=Path, default=None, help="COCO 标注 JSON 文件")
-    parser.add_argument("--recursive", dest="recursive", action="store_true", default=None, help="递归处理子目录")
+    parser.add_argument("--recursive", dest="recursive", action="store_true", default=True, help="递归处理子目录")
     parser.add_argument("--no-recursive", dest="recursive", action="store_false", help="不处理子目录")
-    parser.add_argument("--include-hidden", dest="include_hidden", action="store_true", default=None, help="包含隐藏路径")
-    parser.add_argument("--extensions", default=None, help="图片扩展名，逗号分隔，例如 jpg,png,webp")
-    parser.add_argument("--template", default=None, help="模板，例如 {index:04d}_{stem}")
-    parser.add_argument("--prefix", default=None, help="模板中的 {prefix}")
-    parser.add_argument("--suffix", default=None, help="模板中的 {suffix}")
-    parser.add_argument("--start", type=int, default=None, help="编号起始值")
+    parser.add_argument("--include-hidden", dest="include_hidden", action="store_true", default=False, help="包含隐藏路径")
+    parser.add_argument("--extensions", default=",".join(item.lstrip(".") for item in sorted(DEFAULT_EXTENSIONS)), help="图片扩展名，逗号分隔")
+    parser.add_argument("--template", default="08-{index:02d}", help="模板，例如 {index:04d}_{stem}")
+    parser.add_argument("--prefix", default="", help="模板中的 {prefix}")
+    parser.add_argument("--suffix", default="", help="模板中的 {suffix}")
+    parser.add_argument("--start", type=int, default=1, help="编号起始值")
     parser.add_argument("--digits", type=int, default=None, help="编号位数，例如 4 生成 0001")
-    parser.add_argument("--lowercase-ext", dest="lowercase_ext", action="store_true", default=None, help="扩展名统一为小写")
-    parser.add_argument("--allow-unreferenced", dest="allow_unreferenced", action="store_true", default=None, help="允许 COCO 中未引用的图片继续改名")
+    parser.add_argument("--lowercase-ext", dest="lowercase_ext", action="store_true", default=False, help="扩展名统一为小写")
+    parser.add_argument("--allow-unreferenced", dest="allow_unreferenced", action="store_true", default=False, help="允许 COCO 中未引用的图片继续改名")
     parser.add_argument("--plan", type=Path, default=None, help="导出 CSV 改名清单")
-    parser.add_argument("--apply", dest="apply", action="store_true", default=None, help="真正执行修改")
+    parser.add_argument("--apply", dest="apply", action="store_true", default=False, help="真正执行修改")
     parser.add_argument("--dry-run", dest="apply", action="store_false", help="强制只预览")
-    parser.add_argument("--yes", dest="yes", action="store_true", default=None, help="跳过执行确认")
+    parser.add_argument("--yes", dest="yes", action="store_true", default=False, help="跳过执行确认")
     return parser
 
 
 def main() -> int:
     args = create_parser().parse_args()
     try:
-        raw_dir = config_or_arg(args, "dir")
+        raw_dir = args.dir
         if not raw_dir:
-            raise ValueError("请先在文件顶部 PYCHARM_CONFIG['input_dir'] 填写数据集路径，或使用 --dir")
+            raise ValueError("必须使用 --dir 指定数据集路径")
         directory = Path(raw_dir).expanduser().resolve()
         if not directory.is_dir():
             raise NotADirectoryError(f"文件夹不存在：{directory}")
 
-        dataset_format = config_or_arg(args, "dataset_format").lower()
-        labels_dir = config_or_arg(args, "labels_dir")
-        coco_json_value = config_or_arg(args, "coco_json")
-        recursive = config_or_arg(args, "recursive")
-        include_hidden = config_or_arg(args, "include_hidden")
-        extensions = parse_extensions(config_or_arg(args, "extensions"))
-        template = config_or_arg(args, "template")
-        prefix = config_or_arg(args, "prefix")
-        suffix = config_or_arg(args, "suffix")
-        start = config_or_arg(args, "start")
-        digits = config_or_arg(args, "digits")
-        lowercase_ext = config_or_arg(args, "lowercase_ext")
-        allow_unreferenced = config_or_arg(args, "allow_unreferenced")
-        apply = config_or_arg(args, "apply")
-        yes = config_or_arg(args, "yes")
+        dataset_format = args.dataset_format.lower()
+        labels_dir = args.labels_dir
+        coco_json_value = args.coco_json
+        recursive = args.recursive
+        include_hidden = args.include_hidden
+        extensions = parse_extensions(args.extensions)
+        template = args.template
+        prefix = args.prefix
+        suffix = args.suffix
+        start = args.start
+        digits = args.digits
+        lowercase_ext = args.lowercase_ext
+        allow_unreferenced = args.allow_unreferenced
+        apply = args.apply
+        yes = args.yes
 
         if dataset_format == "auto":
             if coco_json_value:
@@ -501,7 +460,7 @@ def main() -> int:
 
         changed = sum(item.old != item.new for item in all_plan)
         if not apply:
-            print("当前为预览模式。确认无误后，在 PyCharm 配置 apply=True，或命令末尾加 --apply。")
+            print("当前为预览模式。确认无误后，命令末尾加 --apply。")
             return 0
         if changed == 0 and not coco_updates:
             print("没有需要修改的文件名或标注记录。")

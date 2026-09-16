@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -32,14 +31,8 @@ def prepare_run_directory(config: Mapping[str, Any], requested: str | Path | Non
     else:
         target = root / str(run["name"])
         target.mkdir(parents=True, exist_ok=False)
-    info = {
-        "run_dir": str(target),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "config": str(config.get("_config_path", "")),
-    }
-    info_path = target / "run_info.json"
-    if not info_path.exists():
-        info_path.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+    for category in ("structured_pruning", "unstructured_pruning", "distillation", "quantization", "multi_processing"):
+        (target / "artifacts" / category).mkdir(parents=True, exist_ok=True)
     return target
 
 

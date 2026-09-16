@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PyCharm entry point for the generic object-detection diagnostics.
+"""CLI backend for generic object-detection diagnostics.
 
 The YAML entry point uses one explicit mode at a time:
 
@@ -22,14 +22,14 @@ from typing import Any, Mapping, Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-RUN_CONFIG = PROJECT_ROOT / "config" / "pycharm_run.yaml"
+RUN_CONFIG = PROJECT_ROOT / "config" / "config.yaml"
 
 
 def _read_run_config(path: Path) -> Mapping[str, Any]:
     try:
         import yaml  # type: ignore
     except ImportError as exc:
-        raise RuntimeError("读取 PyCharm YAML 配置需要 PyYAML，请执行: pip install pyyaml") from exc
+        raise RuntimeError("读取 YAML 配置需要 PyYAML，请执行: pip install pyyaml") from exc
     with path.open("r", encoding="utf-8") as handle:
         value = yaml.safe_load(handle)
     if not isinstance(value, Mapping):
@@ -166,15 +166,13 @@ def _mode_entry(
     *,
     weights_override: Path | None = None,
     predictions_override: bool = False,
-) -> Optional[Mapping[str, Any]]:
+) -> Mapping[str, Any]:
     """Translate the simple A/B/C YAML layout into one internal model entry.
 
-    The old ``models: [...]`` list remains supported below for backwards
-    compatibility, but new configurations should set ``mode`` and use exactly
-    one of ``mode_a``, ``mode_b`` or ``mode_c``.
+    Every run uses exactly one of ``mode_a``, ``mode_b`` or ``mode_c``.
     """
     if "mode" not in settings:
-        return None
+        raise ValueError("配置必须填写 mode: A、B 或 C")
     mode = str(settings.get("mode", "")).strip().upper()
     if mode not in {"A", "B", "C"}:
         raise ValueError("mode 必须是 A、B 或 C")
@@ -203,8 +201,7 @@ def _mode_entry(
             "weights": weights,
             "adapter": "ultralytics",
             "task": section.get("task", "detect"),
-            # B/C always generate predictions from the model; an old global
-            # dataset.predictions value must not silently bypass inference.
+            # B/C always generate predictions from the model.
             "predictions": None,
         }
 
@@ -284,8 +281,8 @@ def _run_one_model(
     config_path: Path,
     cli_args: argparse.Namespace,
 ) -> Path:
-    # Import after project_root is known so the entry point works from PyCharm,
-    # a terminal, or a run configuration with an unrelated working directory.
+    # Import after project_root is known so configured adapter paths work from
+    # the repository root or an unrelated working directory.
     try:
         from diagnostics import engine
     except ImportError:
@@ -305,14 +302,13 @@ def _run_one_model(
     model_dir = run_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    # New A/B/C entries explicitly control the prediction source.  Preserve
-    # the old dataset.predictions fallback only for legacy models entries.
+    # A/B/C entries explicitly control the prediction source.
     if cli_args.predictions is not None:
         prediction_value = str(cli_args.predictions)
     elif model_entry.get("mode") in {"B", "C"}:
         prediction_value = None
     else:
-        prediction_value = model_entry.get("predictions", dataset.get("predictions"))
+        prediction_value = model_entry.get("predictions")
     prediction_path = _resolve(prediction_value, project_root)
     if prediction_path is None:
         try:
@@ -360,7 +356,7 @@ def _run_one_model(
 
     metadata = {
         "name": str(model_entry.get("name", model_name)),
-        "mode": str(model_entry.get("mode", "legacy")),
+        "mode": str(model_entry["mode"]),
         "weights": str(_resolve(model_entry.get("weights"), project_root) or ""),
         "adapter": str(model_entry.get("adapter", "")),
         "task": str(model_entry.get("task", "detect")),
@@ -374,8 +370,8 @@ def _run_one_model(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="通用目标检测诊断（PyCharm/终端共用入口）")
-    parser.add_argument("--config", type=Path, default=RUN_CONFIG, help="诊断 YAML/JSON 配置，默认使用 config/pycharm_run.yaml")
+    parser = argparse.ArgumentParser(description="通用目标检测诊断")
+    parser.add_argument("--config", type=Path, default=RUN_CONFIG, help="诊断 YAML/JSON 配置，默认使用 config/config.yaml")
     parser.add_argument("--only", action="append", help="只运行指定模块 ID，可重复或用逗号分隔")
     parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
     parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
@@ -400,6 +396,11 @@ def main() -> int:
         return 0
     config_path = cli_args.config.expanduser().resolve()
     settings = _read_run_config(config_path)
+    if "models" in settings:
+        raise ValueError("已移除旧版配置字段 models；请使用 mode: A、B 或 C")
+    dataset_settings = _mapping(settings.get("dataset"), "dataset")
+    if "predictions" in dataset_settings:
+        raise ValueError("已移除旧版配置字段 dataset.predictions；请使用 mode_a.predictions")
     if cli_args.predictions is not None and str(settings.get("mode", "")).strip().upper() == "A":
         mode_a = dict(settings.get("mode_a") or {})
         mode_a["predictions"] = str(cli_args.predictions.expanduser().resolve())
@@ -413,19 +414,7 @@ def main() -> int:
         weights_override=cli_args.weights,
         predictions_override=cli_args.predictions is not None,
     )
-    if selected_mode is not None:
-        models: list[Mapping[str, Any]] = [selected_mode]
-    else:
-        models_value = settings.get("models")
-        if models_value is None:
-            dataset = _mapping(settings.get("dataset"), "dataset")
-            models = [{"name": "provided_predictions", "predictions": dataset.get("predictions")}]
-        elif isinstance(models_value, list):
-            models = [item for item in models_value if isinstance(item, Mapping) and item.get("enabled", True)]
-        else:
-            raise ValueError("配置节 models 必须是列表；新配置请使用 mode: A、B 或 C")
-    if not models:
-        raise ValueError("没有可运行的模型；请检查 mode 或 models 配置")
+    models: list[Mapping[str, Any]] = [selected_mode]
 
     if cli_args.weights:
         if any(str(model.get("mode", "")).upper() == "A" for model in models):

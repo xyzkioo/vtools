@@ -26,15 +26,15 @@ vtools 是一个以 Python 和 YAML 为核心的视觉模型工具集，包含�
 | --- | --- | --- |
 | 桌面工作台 | `python -m vtools_ui` | `vtools_ui/README.md` |
 | 统一命令行 | `python run_tools.py --tool ...` | `config/tools.yaml` |
-| 检测诊断 | `python model_diagnostics/run_model_diagnostics.py` | `model_diagnostics/config/pycharm_run.yaml` |
-| 模型可视化 | `python model_visualization/run_visualization.py` | `model_visualization/config/pycharm_run.yaml` |
+| 检测诊断 | `python model_diagnostics/run_model_diagnostics.py` | `model_diagnostics/config/config.yaml` |
+| 模型可视化 | `python model_visualization/run_visualization.py` | `model_visualization/config/config.yaml` |
 | 一键测速 | `python speed_test/run_all.py` | `speed_test/benchmark_config.yaml` |
 | PyTorch/TensorRT 单项测速 | `speed_test/benchmark_pytorch.py`、`speed_test/benchmark_tensorrt.py` | 同上 |
 | 一致性检查 | `python speed_test/check_consistency.py` | 同上 |
 | checkpoint 检查 | `python speed_test/inspect_checkpoint.py` | 同上 |
-| 模型压缩 | `python model_compression/run_model_compression.py` | `model_compression/config/pycharm_run.yaml` |
+| 模型压缩 | `python model_compression/run_model_compression.py` | `model_compression/config/config.yaml` |
 | 环境检验 | `python env_test/check_install.py` | `env_test/README.md` |
-| 图片/视频/文件名工具 | `others/image_resize.py`、`others/video_frame_extractor.py`、`others/filename_transform/image_filename_converter.py` | 各自 README |
+| 图片/视频/文件名工具 | `others/image_resize/image_resize.py`、`others/video_frame_extractor/video_frame_extractor.py`、`others/filename_transform/image_filename_converter.py` | 各自 README |
 | 数据和 K230 转换 | `transform_tools/ndjson_to_yolo.py`、`py2kmodel.py`、`PY2KM_validate.py` | `transform_tools/REQUIREMENT.md` |
 
 使用入口前先运行 `python <入口> --help`（桌面 UI 除外）。不要假设 `run_tools.py` 的工具名；当前有效值以其 parser 为准：`diagnostics`、`pytorch`、`tensorrt`、`consistency`、`visualization`、`compression`。

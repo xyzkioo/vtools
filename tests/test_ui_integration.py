@@ -53,7 +53,7 @@ class UIIntegration(unittest.TestCase):
     def test_classification_config_preserves_task(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'classification.yaml'
-            path.write_text('model:\n  task: classify\noperation: quantize\n')
+            path.write_text('model:\n  task: classify\nmodules:\n  compression.quantize.dynamic_int8: true\n')
             page = ToolPage(ToolSpec('compression', 'test', '', 'compression', path))
             calls = []
             page.run_requested.connect(lambda *args: calls.append(args))

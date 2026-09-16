@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
-from others import image_resize
+from others.image_resize import image_resize
 
 
 class ResizeSafety(unittest.TestCase):

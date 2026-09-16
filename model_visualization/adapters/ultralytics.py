@@ -71,7 +71,8 @@ class UltralyticsAdapter:
             if callable(fuse_method):
                 fuse_method()
         requested_precision = self.precision
-        cam_enabled = bool(_mapping(self.config.get("cam")).get("enabled", False))
+        modules = self.config.get("modules") if isinstance(self.config.get("modules"), Mapping) else {}
+        cam_enabled = bool(modules.get("visualization.cam", False))
         effective_precision = "fp32"
         if cam_enabled:
             # CAM requires stable FP32 gradients.  The requested precision is

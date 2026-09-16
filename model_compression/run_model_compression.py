@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""模型压缩工具入口：基线、分支、量化、剪枝、蒸馏和对比共用一套配置。"""
+"""模型压缩工具入口：每次运行自包含，不依赖跨运行注册表。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import shutil
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -28,7 +29,7 @@ try:  # 支持 ``python model_compression/run_model_compression.py``
     )
     from .core.module_selection import COMPRESSION_MODULES, resolve_compression_modules
     from .core.metrics import compare_to_baseline
-    from .core.registry import ModelRegistry, artifact_info, environment_info
+    from .core.registry import artifact_info, environment_info
     from .core.run_manager import prepare_run_directory, write_json
     from .modules.distillation import train_distillation
     from .modules.pruning import prune_unstructured
@@ -38,7 +39,7 @@ except ImportError:  # pragma: no cover - compatibility with unusual launchers
     from model_compression.core.model_runtime import benchmark_model_call, build_dataloaders, evaluate_classification, load_model, parameter_metrics, save_model, resolve_device
     from model_compression.core.module_selection import COMPRESSION_MODULES, resolve_compression_modules
     from model_compression.core.metrics import compare_to_baseline
-    from model_compression.core.registry import ModelRegistry, artifact_info, environment_info
+    from model_compression.core.registry import artifact_info, environment_info
     from model_compression.core.run_manager import prepare_run_directory, write_json
     from model_compression.modules.distillation import train_distillation
     from model_compression.modules.pruning import prune_unstructured
@@ -47,7 +48,7 @@ except ImportError:  # pragma: no cover - compatibility with unusual launchers
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="模型压缩、实验分支与知识蒸馏")
-    parser.add_argument("--config", type=Path, default=None, help="YAML 配置；省略时读取 config/pycharm_run.yaml")
+    parser.add_argument("--config", type=Path, default=None, help="YAML 配置；省略时读取 config/config.yaml")
     parser.add_argument("--run-dir", default=None, help="复用或指定运行目录")
     parser.add_argument("--only", action="append", help="只运行指定模块，可重复或逗号分隔")
     parser.add_argument("--enable", action="append", help="临时启用模块")
@@ -107,7 +108,100 @@ def _write_effective_config(config: Mapping[str, Any], run_dir: Path | None) -> 
     write_json(run_dir / "effective_config.json", {key: value for key, value in config.items() if not key.startswith("_")})
 
 
-def _ensure_branch(registry: ModelRegistry, config: Mapping[str, Any]) -> dict[str, Any]:
+class _RunRegistry:
+    """运行期间的内存状态兼容层。
+
+    旧实现把每次模块调用都写入 ``store/registry.json``。连续模块只需要
+    当前模型路径和本次运行内的轻量血缘，因此这里保留旧调用方需要的接口，
+    但所有状态仅存在于当前进程，绝不创建跨运行文件。
+    """
+
+    def __init__(self) -> None:
+        self.data: dict[str, Any] = {
+            "branches": {},
+            "versions": {},
+            "relations": [],
+            "runs": [],
+        }
+        self._counter = 0
+
+    def save(self) -> None:
+        return None
+
+    def ensure_branch(self, name: str, *, from_version: str | None = None, description: str = "") -> dict[str, Any]:
+        branch_name = str(name or "main").strip() or "main"
+        existing = self.data["branches"].get(branch_name)
+        if existing is not None:
+            return dict(existing)
+        if from_version:
+            raise ValueError("已移除跨运行 branch.from_version；请将模型产物路径填写到 model.weights。")
+        branch = {"name": branch_name, "description": description, "head_version_id": None}
+        self.data["branches"][branch_name] = branch
+        return dict(branch)
+
+    def get_branch(self, name: str) -> dict[str, Any]:
+        return dict(self.data["branches"].setdefault(str(name or "main"), {
+            "name": str(name or "main"), "description": "", "head_version_id": None,
+        }))
+
+    def add_version(self, *, name: str, artifact: str | Path, parent_version_id: str | None,
+                    run_id: str, method: str, metadata: Mapping[str, Any] | None = None,
+                    teacher_version_id: str | None = None,
+                    student_init_version_id: str | None = None) -> dict[str, Any]:
+        self._counter += 1
+        version_id = f"run-{run_id}-{self._counter}"
+        record = {
+            "id": version_id,
+            "name": name,
+            "artifact": artifact_info(artifact),
+            "parent_version_id": parent_version_id,
+            "teacher_version_id": teacher_version_id,
+            "student_init_version_id": student_init_version_id,
+            "run_id": run_id,
+            "method": method,
+            "metadata": dict(metadata or {}),
+        }
+        self.data["versions"][version_id] = record
+        if parent_version_id:
+            self.data["relations"].append({"source_version_id": parent_version_id, "target_version_id": version_id, "role": "parent"})
+        return dict(record)
+
+    def advance_branch(self, branch_name: str, version_id: str) -> dict[str, Any]:
+        branch = self.get_branch(branch_name)
+        branch["head_version_id"] = version_id
+        self.data["branches"][branch["name"]] = branch
+        return dict(branch)
+
+    def add_run(self, run_id: str, record: Mapping[str, Any]) -> None:
+        self.data["runs"].append({"id": run_id, **dict(record)})
+
+    def resolve_input_version(self, branch_name: str, explicit_weights: str | Path | None) -> tuple[str | None, str | None]:
+        branch = self.get_branch(branch_name)
+        head = branch.get("head_version_id")
+        if head:
+            version = self.data["versions"][str(head)]
+            return str(head), str(version["artifact"]["path"])
+        if explicit_weights:
+            return None, str(Path(str(explicit_weights)).expanduser().resolve())
+        return None, None
+
+    def versions_for_branch(self, branch_name: str) -> list[dict[str, Any]]:
+        current = self.get_branch(branch_name).get("head_version_id")
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        while current:
+            if current in seen:
+                raise ValueError("检测到循环模型血缘")
+            seen.add(str(current))
+            version = self.data["versions"].get(str(current))
+            if version is None:
+                break
+            rows.append(dict(version))
+            current = version.get("parent_version_id")
+        return rows
+
+
+def _ensure_branch(registry: _RunRegistry, config: Mapping[str, Any]) -> dict[str, Any]:
     branch = _section(config, "branch")
     return registry.ensure_branch(
         str(branch.get("name", "main")),
@@ -120,20 +214,8 @@ def _branch_name(config: Mapping[str, Any]) -> str:
     return str(_section(config, "branch").get("name", "main"))
 
 
-def _validate_initial_branch_input(registry: ModelRegistry, config: Mapping[str, Any]) -> None:
-    """Validate explicit weights once, before a run starts advancing its head.
-
-    ``model.weights`` may point at the branch head or at any ancestor the branch
-    was derived from, because sequential modules keep the original weights in the
-    config (prune -> export).  Weights from outside the branch are rejected here
-    instead of being mixed into the lineage.
-    """
-
-    registry.resolve_input_version(_branch_name(config), _section(config, "model").get("weights"))
-
-
 def _base_version(
-    registry: ModelRegistry,
+    registry: _RunRegistry,
     config: Mapping[str, Any],
     branch: Mapping[str, Any],
     *,
@@ -148,7 +230,7 @@ def _base_version(
     model = _section(config, "model")
     weights = model.get("weights")
     if not weights:
-        raise ValueError("当前分支没有起点；请填写 model.weights 或 branch.from_version")
+        raise ValueError("当前运行没有模型起点；请填写 model.weights 或 --weights")
     record = registry.add_version(
         name=str(model.get("name", "base_model")),
         artifact=str(weights),
@@ -161,7 +243,7 @@ def _base_version(
     return str(record["id"])
 
 
-def _version_artifact(registry: ModelRegistry, version_id: str) -> str:
+def _version_artifact(registry: _RunRegistry, version_id: str) -> str:
     version = registry.data["versions"].get(version_id)
     if not version:
         raise KeyError(f"找不到模型版本：{version_id}")
@@ -171,7 +253,7 @@ def _version_artifact(registry: ModelRegistry, version_id: str) -> str:
     return str(path)
 
 
-def _version_device(registry: ModelRegistry, version_id: str, config: Mapping[str, Any]) -> Any:
+def _version_device(registry: _RunRegistry, version_id: str, config: Mapping[str, Any]) -> Any:
     """动态量化产物固定在 CPU，避免尝试把量化模块迁移到 CUDA。"""
 
     version = registry.data["versions"].get(version_id, {})
@@ -200,7 +282,7 @@ def _artifact_path(run_dir: Path, relative: str) -> Path:
     raise RuntimeError(f"运行目录中的产物过多，无法生成唯一文件名：{target}")
 
 
-def _run_baseline(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
+def _run_baseline(config: Mapping[str, Any], registry: _RunRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
     current_id, current_artifact = registry.resolve_input_version(
         _branch_name(config), _section(config, "model").get("weights")
     )
@@ -223,6 +305,10 @@ def _run_baseline(config: Mapping[str, Any], registry: ModelRegistry, branch: Ma
         metrics["model_file_size_bytes"] = None
     metrics.update({f"benchmark_{key}": value for key, value in benchmark_model_call(model, runtime, device=model_device).items()})
     result = {"module": "baseline.evaluate", "status": "succeeded", "metrics": metrics}
+    try:
+        result["artifact"] = artifact_info(model_config["weights"])
+    except (KeyError, FileNotFoundError):
+        pass
     if not registry.get_branch(_branch_name(config)).get("head_version_id"):
         version = registry.add_version(
             name=str(model_config.get("name", "base_model")),
@@ -241,22 +327,22 @@ def _run_baseline(config: Mapping[str, Any], registry: ModelRegistry, branch: Ma
             current.setdefault("metadata", {}).update(metrics)
             registry.save()
             result["version_id"] = current_id
-    write_json(_result_path(run_dir, "baseline.json"), result)
     return result
 
 
-def _run_parameters(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
+def _run_parameters(config: Mapping[str, Any], registry: _RunRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
     version_id = _base_version(registry, config, branch, run_id=run_id)
-    model, _ = load_model(_model_config(config, weights=_version_artifact(registry, version_id)), device=_version_device(registry, version_id, config))
-    result = {"module": "model.parameters", "status": "succeeded", "version_id": version_id, "metrics": parameter_metrics(model)}
-    write_json(_result_path(run_dir, "model_parameters.json"), result)
+    artifact = _version_artifact(registry, version_id)
+    model, _ = load_model(_model_config(config, weights=artifact), device=_version_device(registry, version_id, config))
+    result = {"module": "model.parameters", "status": "succeeded", "version_id": version_id,
+              "artifact": artifact_info(artifact), "metrics": parameter_metrics(model)}
     return result
 
 
 def _register_transformed(
     *,
     config: Mapping[str, Any],
-    registry: ModelRegistry,
+    registry: _RunRegistry,
     parent_id: str,
     artifact: Path,
     run_id: str,
@@ -278,7 +364,7 @@ def _register_transformed(
     return record
 
 
-def _run_quantize(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
+def _run_quantize(config: Mapping[str, Any], registry: _RunRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
     parent_id = _base_version(registry, config, branch, run_id=run_id)
     model_config = _model_config(config, weights=_version_artifact(registry, parent_id))
     model, adapter = load_model(model_config, device=_version_device(registry, parent_id, config))
@@ -286,15 +372,14 @@ def _run_quantize(config: Mapping[str, Any], registry: ModelRegistry, branch: Ma
     metadata.update({f"benchmark_{key}": value for key, value in benchmark_model_call(transformed, _runtime_config(config), device="cpu").items()})
     _, val_loader = build_dataloaders(_runtime_config(config), adapter)
     metadata.update({f"evaluation_{key}": value for key, value in evaluate_classification(transformed, val_loader, device="cpu").items()})
-    artifact = _artifact_path(run_dir, f"models/{_safe_name(_branch_name(config), 'main')}-dynamic-int8.pt")
+    artifact = _artifact_path(run_dir, f"artifacts/quantization/{_safe_name(_section(config, 'model').get('name'), 'model')}-dynamic-int8.pt")
     save_model(transformed, artifact, adapter=None)
     record = _register_transformed(config=config, registry=registry, parent_id=parent_id, artifact=artifact, run_id=run_id, method="dynamic_int8", metadata=metadata)
     result = {"module": "compression.quantize.dynamic_int8", "status": "succeeded", "version_id": record["id"], "parent_version_id": parent_id, "artifact": artifact_info(artifact), "metadata": metadata}
-    write_json(_result_path(run_dir, "quantization.json"), result)
     return result
 
 
-def _run_prune(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
+def _run_prune(config: Mapping[str, Any], registry: _RunRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
     parent_id = _base_version(registry, config, branch, run_id=run_id)
     model_config = _model_config(config, weights=_version_artifact(registry, parent_id))
     model, adapter = load_model(model_config, device=_version_device(registry, parent_id, config))
@@ -302,15 +387,14 @@ def _run_prune(config: Mapping[str, Any], registry: ModelRegistry, branch: Mappi
     metadata.update({f"benchmark_{key}": value for key, value in benchmark_model_call(transformed, _runtime_config(config), device=_version_device(registry, parent_id, config)).items()})
     _, val_loader = build_dataloaders(_runtime_config(config), adapter)
     metadata.update({f"evaluation_{key}": value for key, value in evaluate_classification(transformed, val_loader, device=_version_device(registry, parent_id, config)).items()})
-    artifact = _artifact_path(run_dir, f"models/{_safe_name(_branch_name(config), 'main')}-pruned.pt")
+    artifact = _artifact_path(run_dir, f"artifacts/unstructured_pruning/{_safe_name(_section(config, 'model').get('name'), 'model')}-unstructured-l1.pt")
     save_model(transformed, artifact, adapter=adapter)
     record = _register_transformed(config=config, registry=registry, parent_id=parent_id, artifact=artifact, run_id=run_id, method="unstructured_l1", metadata=metadata)
     result = {"module": "compression.prune.unstructured", "status": "succeeded", "version_id": record["id"], "parent_version_id": parent_id, "artifact": artifact_info(artifact), "metadata": metadata}
-    write_json(_result_path(run_dir, "pruning.json"), result)
     return result
 
 
-def _run_structured_prune(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
+def _run_structured_prune(config: Mapping[str, Any], registry: _RunRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
     """Classification entry point guard; detection is routed separately."""
 
     raise ValueError("结构化通道裁剪当前只支持 YOLO 检测模型（model.task: detect）。")
@@ -335,7 +419,7 @@ def _distillation_model_config(config: Mapping[str, Any], section_name: str, *, 
     return values
 
 
-def _source_version(registry: ModelRegistry, path: str | Path, *, run_id: str, role: str) -> str:
+def _source_version(registry: _RunRegistry, path: str | Path, *, run_id: str, role: str) -> str:
     info = artifact_info(path)
     for version_id, version in registry.data.get("versions", {}).items():
         if version.get("artifact", {}).get("sha256") == info.get("sha256"):
@@ -347,7 +431,7 @@ def _source_version(registry: ModelRegistry, path: str | Path, *, run_id: str, r
     return str(record["id"])
 
 
-def _run_distillation(config: Mapping[str, Any], registry: ModelRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
+def _run_distillation(config: Mapping[str, Any], registry: _RunRegistry, branch: Mapping[str, Any], run_dir: Path, run_id: str) -> dict[str, Any]:
     parent_id = _base_version(registry, config, branch, run_id=run_id)
     parent_artifact = _version_artifact(registry, parent_id)
     teacher_config = _distillation_model_config(config, "teacher", fallback_weights=parent_artifact)
@@ -361,10 +445,10 @@ def _run_distillation(config: Mapping[str, Any], registry: ModelRegistry, branch
     student_version_id = _source_version(registry, student_source, run_id=run_id, role="student") if student_source else None
     runtime = _runtime_config(config)
     train_loader, val_loader = build_dataloaders(runtime, student_adapter or teacher_adapter)
-    output_dir = run_dir / "distillation"
+    output_dir = run_dir / "artifacts" / "distillation"
     if output_dir.exists() and any(output_dir.iterdir()):
         for index in range(2, 10000):
-            candidate = run_dir / f"distillation-{index}"
+            candidate = run_dir / "artifacts" / "distillation" / f"attempt-{index}"
             if not candidate.exists():
                 output_dir = candidate
                 break
@@ -387,9 +471,13 @@ def _run_distillation(config: Mapping[str, Any], registry: ModelRegistry, branch
         artifact=Path(checkpoint),
         run_id=run_id,
         method="distillation_classification",
-        metadata={"teacher_version_id": teacher_version_id, "student_init_version_id": student_version_id, "training": training},
+        metadata={
+            "teacher_weights": str(teacher_source),
+            "student_weights": str(student_source) if student_source else None,
+            "training": training,
+        },
     )
-    # 注册表的关系字段需要单独保留，避免把教师和学生来源混在普通 parent 中。
+    # 保留运行内存中的关系，供同一次运行的 comparison 使用；不会落盘。
     registry.data["versions"][record["id"]]["teacher_version_id"] = teacher_version_id
     registry.data["versions"][record["id"]]["student_init_version_id"] = student_version_id
     relations = [{"source_version_id": teacher_version_id, "target_version_id": record["id"], "role": "teacher"}]
@@ -397,12 +485,18 @@ def _run_distillation(config: Mapping[str, Any], registry: ModelRegistry, branch
         relations.append({"source_version_id": student_version_id, "target_version_id": record["id"], "role": "student_initialization"})
     registry.data.setdefault("relations", []).extend(relations)
     registry.save()
-    result = {"module": "distillation.classification", "status": "succeeded", "version_id": record["id"], "parent_version_id": parent_id, "training": training}
-    write_json(_result_path(run_dir, "distillation.json"), result)
+    result = {
+        "module": "distillation.classification",
+        "status": "succeeded",
+        "version_id": record["id"],
+        "parent_version_id": parent_id,
+        "artifact": artifact_info(checkpoint),
+        "training": training,
+    }
     return result
 
 
-def _run_comparison(config: Mapping[str, Any], registry: ModelRegistry, run_dir: Path) -> dict[str, Any]:
+def _run_comparison(config: Mapping[str, Any], registry: _RunRegistry, run_dir: Path) -> dict[str, Any]:
     branch = registry.get_branch(_branch_name(config))
     versions = registry.versions_for_branch(_branch_name(config))
     rows = []
@@ -420,18 +514,17 @@ def _run_comparison(config: Mapping[str, Any], registry: ModelRegistry, run_dir:
             if row.get("map50_95") is not None and baseline_row.get("map50_95") is not None:
                 row["map50_95_delta"] = row["map50_95"] - baseline_row["map50_95"]
     result = {"module": "comparison.report", "status": "succeeded", "branch": branch, "versions": rows}
-    write_json(_result_path(run_dir, "comparison.json"), result)
     return result
 
 
-def _run_export(config: Mapping[str, Any], registry: ModelRegistry, run_dir: Path) -> dict[str, Any]:
+def _run_export(config: Mapping[str, Any], registry: _RunRegistry, run_dir: Path) -> dict[str, Any]:
     branch = registry.get_branch(_branch_name(config))
     version_id = branch.get("head_version_id")
     if not version_id:
         raise ValueError("当前分支没有可导出的模型版本")
     source = Path(_version_artifact(registry, str(version_id))).resolve()
     export = _section(config, "export")
-    target = Path(str(export.get("path"))).expanduser().resolve() if export.get("path") else (run_dir / "export" / source.name)
+    target = Path(str(export.get("path"))).expanduser().resolve() if export.get("path") else _artifact_path(run_dir, f"artifacts/multi_processing/{source.stem}-export{source.suffix}")
     target.parent.mkdir(parents=True, exist_ok=True)
     if target != source and target.exists():
         target = _artifact_path(target.parent, target.name)
@@ -454,12 +547,189 @@ def _run_export(config: Mapping[str, Any], registry: ModelRegistry, run_dir: Pat
             verification["sample_inference"] = "succeeded"
         except StopIteration:
             verification["sample_inference"] = "skipped_empty_validation"
-    manifest = {"version_id": version_id, "source": artifact_info(source), "exported": artifact_info(target), "verification": verification}
-    manifest_path = target.parent / f"{target.stem}_manifest.json"
-    write_json(manifest_path, manifest)
-    result = {"module": "artifact.export", "status": "succeeded", "version_id": version_id, "artifact": artifact_info(target), "manifest": str(manifest_path)}
-    write_json(_result_path(run_dir, "export.json"), result)
+    result = {"module": "artifact.export", "status": "succeeded", "version_id": version_id, "artifact": artifact_info(target), "verification": verification}
     return result
+
+
+_SUMMARY_CATEGORIES = {
+    "baseline.evaluate": "baseline",
+    "model.parameters": "baseline",
+    "compression.prune.unstructured": "unstructured_pruning",
+    "compression.prune.structured": "structured_pruning",
+    "distillation.classification": "distillation",
+    "compression.quantize.dynamic_int8": "quantization",
+    "artifact.export": "multi_processing",
+}
+
+_PARAMETER_KEYS = {
+    "parameter_count", "trainable_parameter_count", "zero_parameter_count",
+    "pruned_parameter_count", "requested_sparsity", "actual_sparsity",
+    "sparsity", "structured_method", "target_scale", "architecture_yaml",
+    "finetune_epochs", "finetune", "temperature", "alpha", "epochs",
+    "best_epoch", "teacher_weights", "student_weights", "method",
+}
+
+
+def _relative_path(run_dir: Path, value: Any) -> str:
+    path = Path(str(value)).expanduser()
+    try:
+        return str(path.resolve().relative_to(run_dir.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _normalize_summary_value(value: Any, run_dir: Path, key: str = "") -> Any:
+    if isinstance(value, Mapping):
+        return {str(name): _normalize_summary_value(item, run_dir, str(name)) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_summary_value(item, run_dir, key) for item in value]
+    if isinstance(value, (str, Path)) and any(token in key.lower() for token in ("path", "checkpoint", "yaml", "artifact")):
+        text = str(value)
+        candidate = Path(text).expanduser()
+        if candidate.is_absolute() and (candidate.exists() or run_dir in candidate.parents):
+            return _relative_path(run_dir, candidate)
+    return value
+
+
+def _summary_result(module_id: str, result: Mapping[str, Any], run_dir: Path) -> dict[str, Any]:
+    """将模块内部返回值转换成面向用户的去重摘要。"""
+
+    if module_id == "comparison.report":
+        rows = []
+        for row in result.get("versions", []) if isinstance(result.get("versions"), list) else []:
+            if not isinstance(row, Mapping):
+                continue
+            rows.append({key: value for key, value in row.items()
+                         if key not in {"version_id", "parent_version_id"}})
+        return {"status": str(result.get("status", "unknown")), "metrics": {"rows": rows}}
+    category = _SUMMARY_CATEGORIES.get(module_id)
+    if category is None:
+        return {"status": str(result.get("status", "unknown")), "module": module_id,
+                "reason": result.get("error") or result.get("reason")}
+    record: dict[str, Any] = {"status": str(result.get("status", "unknown")), "module": module_id}
+    if result.get("method"):
+        record["method"] = result["method"]
+    raw: dict[str, Any] = {}
+    for key in ("metrics", "metadata", "training"):
+        value = result.get(key)
+        if isinstance(value, Mapping):
+            raw.update(value)
+    # These nested snapshots duplicate the baseline metrics. Keep deltas and
+    # gate decisions, while the baseline category remains the single source.
+    raw.pop("before_pruning", None)
+    raw.pop("before_structured", None)
+    raw.pop("before_unstructured_pruning", None)
+    raw.pop("before_structured_pruning", None)
+    raw.pop("environment", None)
+    for key in ("version_id", "parent_version_id", "branch", "sha256",
+                "teacher_version_id", "student_init_version_id"):
+        raw.pop(key, None)
+    parameters: dict[str, Any] = {}
+    metrics: dict[str, Any] = {}
+    for key, value in raw.items():
+        text = str(key)
+        if (text in _PARAMETER_KEYS or text.endswith("_parameters")):
+            parameters[text] = _normalize_summary_value(value, run_dir, text)
+        else:
+            metrics[text] = _normalize_summary_value(value, run_dir, text)
+    if parameters:
+        record["parameters"] = parameters
+    if metrics:
+        record["metrics"] = metrics
+    artifact = result.get("artifact")
+    if isinstance(artifact, Mapping) and artifact.get("path"):
+        record["artifact"] = _relative_path(run_dir, artifact["path"])
+        metrics.setdefault("file_size_bytes", artifact.get("size_bytes"))
+    elif isinstance(artifact, (str, Path)):
+        record["artifact"] = _relative_path(run_dir, artifact)
+    if result.get("verification") is not None:
+        record["verification"] = result["verification"]
+    if result.get("reason"):
+        record["reason"] = result["reason"]
+    if result.get("error"):
+        record["error"] = result["error"]
+    record.setdefault("parameters", {})
+    record.setdefault("metrics", {})
+    return record
+
+
+def _build_summary(config: Mapping[str, Any], run_dir: Path, run_id: str,
+                   selected: Mapping[str, bool], results: list[dict[str, Any]],
+                   failures: list[str], started_at: str) -> dict[str, Any]:
+    model = _section(config, "model")
+    source_weights = model.get("weights")
+    summary: dict[str, Any] = {
+        "run_id": run_id,
+        "started_at": started_at,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "status": "failed" if failures else "succeeded",
+        "model": {
+            "name": model.get("name", "model"),
+            "task": model.get("task", "classify"),
+            "adapter": model.get("adapter", "torch"),
+            "source_weights": str(source_weights) if source_weights else None,
+            "environment": environment_info(),
+        },
+        "executed_modules": [key for key, enabled in selected.items() if enabled],
+        "errors": list(failures),
+    }
+    category_results: dict[str, list[dict[str, Any]]] = {}
+    module_status: dict[str, str] = {}
+    for result in results:
+        module_id = str(result.get("module", ""))
+        module_status[module_id] = str(result.get("status", "unknown"))
+        item = _summary_result(module_id, result, run_dir)
+        category = _SUMMARY_CATEGORIES.get(module_id)
+        if category:
+            category_results.setdefault(category, []).append(item)
+        elif module_id == "comparison.report":
+            summary["comparison"] = item
+    summary["module_status"] = module_status
+    for category, items in category_results.items():
+        if category == "baseline":
+            merged: dict[str, Any] = {"status": "succeeded" if all(item.get("status") == "succeeded" for item in items) else "failed",
+                                      "module": "baseline.evaluate"}
+            for item in items:
+                for field in ("parameters", "metrics"):
+                    if isinstance(item.get(field), Mapping):
+                        merged.setdefault(field, {}).update(item[field])
+                if item.get("artifact") and "artifact" not in merged:
+                    merged["artifact"] = item["artifact"]
+                if item.get("verification") is not None:
+                    merged["verification"] = item["verification"]
+            summary[category] = merged
+        elif len(items) == 1:
+            summary[category] = items[0]
+        else:
+            summary[category] = {"status": "succeeded" if all(item.get("status") == "succeeded" for item in items) else "failed",
+                                 "steps": items}
+
+    processing_items = [item for result in results
+                        if result.get("module") in _SUMMARY_CATEGORIES
+                        and result.get("module") not in {"baseline.evaluate", "model.parameters"}
+                        and result.get("status") == "succeeded"]
+    if len(processing_items) >= 2:
+        final = processing_items[-1]
+        final_artifact = final.get("artifact")
+        multi: dict[str, Any] = {
+            "status": "succeeded",
+            "parameters": {"steps": [str(result.get("module")) for result in results
+                                        if result.get("module") in _SUMMARY_CATEGORIES
+                                        and result.get("module") not in {"baseline.evaluate", "model.parameters"}]},
+            "metrics": {"final_stage": final.get("module")},
+        }
+        if final_artifact:
+            source = (run_dir / str(final_artifact)).resolve()
+            if source.is_file():
+                target = _artifact_path(run_dir, f"artifacts/multi_processing/{source.stem}-final{source.suffix}")
+                if source != target:
+                    shutil.copy2(source, target)
+                multi["artifact"] = _relative_path(run_dir, target)
+            else:
+                multi["status"] = "failed"
+                multi["error"] = f"最终阶段产物不存在：{source}"
+        summary["multi_processing"] = multi
+    return summary
 
 
 def main() -> int:
@@ -511,19 +781,25 @@ def main() -> int:
     if run_dir is None:
         run_dir = Path(_section(config, "project").get("root", Path.cwd())) / "model_compression" / "runs" / "adhoc"
         run_dir.mkdir(parents=True, exist_ok=True)
+        for category in ("structured_pruning", "unstructured_pruning", "distillation", "quantization", "multi_processing"):
+            (run_dir / "artifacts" / category).mkdir(parents=True, exist_ok=True)
     _write_effective_config(config, run_dir)
-    storage = _section(config, "storage")
-    registry = ModelRegistry(storage.get("registry", Path(run_dir) / "registry.json"))
+    registry = _RunRegistry()
     branch = _ensure_branch(registry, config)
     config = dict(config)
-    config["_run_start_head_id"] = branch.get("head_version_id")
-    _validate_initial_branch_input(registry, config)
+    started_at = datetime.now(timezone.utc).isoformat()
     run_id = str(run_dir.name or uuid.uuid4().hex[:8])
     registry.add_run(run_id, {"status": "running", "branch": _branch_name(config), "modules": selected})
     results: list[dict[str, Any]] = []
     failures: list[str] = []
+    failed_dependencies: set[str] = set()
+    transform_modules = {
+        "compression.quantize.dynamic_int8", "compression.prune.unstructured",
+        "compression.prune.structured", "distillation.classification",
+        "artifact.export", "comparison.report",
+    }
     operations = (
-        ("branch.create", lambda: {"module": "branch.create", "status": "succeeded", "branch": registry.get_branch(_branch_name(config))}),
+        ("branch.create", lambda: {"module": "branch.create", "status": "skipped", "reason": "运行目录已自包含，不再维护跨运行分支"}),
         ("model.parameters", lambda: _run_parameters(config, registry, branch, run_dir, run_id)),
         ("baseline.evaluate", lambda: _run_baseline(config, registry, branch, run_dir, run_id)),
         ("compression.quantize.dynamic_int8", lambda: _run_quantize(config, registry, branch, run_dir, run_id)),
@@ -536,6 +812,11 @@ def main() -> int:
     for module_id, function in operations:
         if not selected.get(module_id, False):
             continue
+        if module_id in transform_modules and ("baseline.evaluate" in failed_dependencies or failed_dependencies & transform_modules):
+            reason = "前置模块失败，已跳过依赖阶段"
+            results.append({"module": module_id, "status": "skipped", "reason": reason})
+            print(f"[{module_id}] 跳过：{reason}")
+            continue
         try:
             from model_compression.core.detection import is_detection, run_detection_operation
             if is_detection(config) and module_id not in {"branch.create", "comparison.report"}:
@@ -543,20 +824,22 @@ def main() -> int:
             else:
                 result = function()
             results.append(result)
-            print(f"[{module_id}] 完成")
+            print(f"[{module_id}] {'跳过' if result.get('status') == 'skipped' else '完成'}")
         except Exception as error:  # noqa: BLE001 - 单个实验失败也要留下可读报告
             message = f"{type(error).__name__}: {error}"
             failures.append(f"{module_id}: {message}")
-            results.append({"module": module_id, "status": "failed", "error": message})
+            failed_dependencies.add(module_id)
+            failed_result: dict[str, Any] = {"module": module_id, "status": "failed", "error": message}
+            category = _SUMMARY_CATEGORIES.get(module_id)
+            if category:
+                candidates = sorted((run_dir / "artifacts" / category).glob("*.pt"), key=lambda path: path.stat().st_mtime)
+                if candidates:
+                    failed_result["artifact"] = artifact_info(candidates[-1])
+            results.append(failed_result)
             print(f"[{module_id}] 失败：{message}")
-    summary = {"run_id": run_id, "status": "failed" if failures else "succeeded", "branch": _branch_name(config), "results": results, "errors": failures}
+    summary = _build_summary(config, run_dir, run_id, selected, results, failures, started_at)
     write_json(_result_path(run_dir, "summary.json"), summary)
-    try:
-        write_json(_result_path(run_dir, "lineage.json"), {"branch": registry.get_branch(_branch_name(config)), "versions": registry.versions_for_branch(_branch_name(config))})
-    except (KeyError, ValueError):
-        # 空分支也要保留 summary；lineage 只在已有版本时生成。
-        pass
-    registry.add_run(run_id, {"status": summary["status"], "branch": _branch_name(config), "summary": str(run_dir / "summary.json")})
+    registry.add_run(run_id, {"status": summary["status"], "summary": str(run_dir / "summary.json")})
     print(f"本次运行目录：{run_dir.resolve()}")
     return 1 if failures else 0
 

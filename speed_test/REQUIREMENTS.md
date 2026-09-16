@@ -109,7 +109,7 @@ TensorRT 11 使用强类型网络；FP16/BF16 的实际类型主要由导出 ONN
 
 ## 3. 推荐安装方式
 
-建议新建独立 Conda 环境，避免系统 Python、PyCharm 解释器和其他项目互相污染：
+建议新建独立 Conda 环境，避免系统 Python 和其他项目互相污染：
 
 ```bash
 conda create -n vision-benchmark python=3.10 -y
@@ -164,7 +164,7 @@ conda install -n yolo -c conda-forge libstdcxx-ng libgcc-ng
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 ```
 
-本工具包的入口还会在 Linux/PyCharm 中自动检查 `sys.prefix/lib`，必要时重新
+本工具包的入口还会在 Linux 中自动检查 `sys.prefix/lib`，必要时重新
 启动当前 Python，并把该目录放到 `LD_LIBRARY_PATH` 前面。自动处理只能解决动态
 库搜索顺序问题；如果 Conda 环境里没有 `libstdc++.so.6`，仍需先安装上面的包。
 

@@ -7,7 +7,7 @@ python -m pip install -r vtools_ui/requirements.txt
 python -m vtools_ui
 ```
 
-UI 当前没有单独的命令行帮助页；启动后通过界面选择工具和配置。也可以在 PyCharm 直接运行 `vtools_ui/__main__.py`。
+启动后通过界面选择工具和配置；模型类工具的 YAML 是唯一参数来源。
 
 这是 vtools 的第一版跨平台桌面 UI。它使用 PySide6/Qt Widgets，Windows 和 Ubuntu 都可以运行；模型推理、测速和诊断在独立子进程中执行，界面不会被长任务阻塞。
 
@@ -43,7 +43,7 @@ sudo apt install -y libxcb-cursor0
 如果窗口仍显示旧布局，请先关闭旧窗口，再从仓库根目录重新启动。PySide6 窗口不会自动热更新；下面的检查应当打印当前仓库里的 `vtools_ui` 路径：
 
 ```bash
-cd /home/xyzkioo/PycharmProjects/vtools
+cd /path/to/vtools
 conda activate yolo
 python -c "import vtools_ui; print(vtools_ui.__file__)"
 python -m vtools_ui

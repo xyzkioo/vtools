@@ -34,7 +34,7 @@
 
 - 功能：测速与目标检测诊断的 test 内部模块开关；差图清单、图片/HTML 输出和检测框重叠分析；可视化的特征图/CAM/阶段追踪开关；诊断默认不重复计算 Ultralytics 的 mAP/AP 与阈值扫描。
 - 新增文件：`docs/specs/modular-tests-and-diagnostics.md`、`model_diagnostics/diagnostics/modules.py`、`model_diagnostics/diagnostics/overlap.py`、`model_diagnostics/diagnostics/bad_cases.py`、`speed_test/core/module_selection.py`、`run_tools.py`、`config/tools.yaml`。
-- 修改文件：诊断引擎和 PyCharm/终端入口、PyTorch/TensorRT 测速入口、一致性检查、相关配置与 README。
+- 修改文件：诊断引擎和桌面 UI/终端入口、PyTorch/TensorRT 测速入口、一致性检查、相关配置与 README。
 - 配置变化：新增 `modules`；支持 `--only`、`--enable`、`--disable`、`--list-modules`；诊断 YAML 移除 AP 阈值旧参数，speed_test 移除 `test_model_call/test_pipeline/test_pytorch` 独立开关，统一由 `modules` 控制。重叠分析支持 IoU、交集占较小框比例、规则和类别范围配置。
 - 验证方式：`python -m compileall -q model_diagnostics speed_test`；在 `speed_test/` 中运行 `python -m unittest discover -s tests -v`（43 项，1 项按环境跳过），在仓库根目录运行 `python -m unittest discover -s model_diagnostics/tests -v`（5 项）；各入口的 `--list-modules`；使用 canonical GT/预测进行重叠和差图离线冒烟。
 - 已知限制：`validation.ultralytics` 仅作为预留开关，具体验证仍由 Ultralytics 原生入口执行；图片绘制需要 Pillow；TensorRT 模块仍需要 CUDA/TensorRT 环境。
@@ -59,11 +59,11 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `model_visualization/run_visualization.py` | 命令行和 PyCharm 运行入口 |
+| `model_visualization/run_visualization.py` | 命令行后端入口 |
 | `model_visualization/adapters/ultralytics.py` | Ultralytics/YOLO 模型适配、特征捕获和检测阶段追踪 |
 | `model_visualization/core/capture.py` | 激活值捕获、特征图、GradCAM/LayerCAM |
 | `model_visualization/core/common.py` | 配置读取、图片预处理、绘图、统计和 HTML 索引 |
-| `model_visualization/config/pycharm_run.yaml` | PyCharm/YAML 配置模板 |
+| `model_visualization/config/config.yaml` | YAML 配置模板 |
 | `model_visualization/requirements.txt` | 可视化功能的额外依赖 |
 | `model_visualization/README.md` | 使用说明和输出文件说明 |
 
@@ -120,19 +120,19 @@
 本次更新采用普通文件覆盖方式：
 
 ```bash
-cd ~/PycharmProjects/vtools
+cd /path/to/vtools
 unzip -o ~/下载/vtools-visualization-complete.zip
 ```
 
 如果已经完成复制，只需要确认本文件放在：
 
 ```text
-~/PycharmProjects/vtools/VERSION.md
+/path/to/vtools/VERSION.md
 ```
 
 ## 运行前配置
 
-编辑：`model_visualization/config/pycharm_run.yaml`
+编辑：`model_visualization/config/config.yaml`
 
 至少修改：
 
@@ -152,7 +152,7 @@ stage_trace:
 ## 验证
 
 ```bash
-cd ~/PycharmProjects/vtools
+cd /path/to/vtools
 python -m compileall -q model_visualization speed_test/core
 ```
 
@@ -160,7 +160,7 @@ python -m compileall -q model_visualization speed_test/core
 
 ```bash
 python model_visualization/run_visualization.py \
-  --config model_visualization/config/pycharm_run.yaml
+  --config model_visualization/config/config.yaml
 ```
 
 结果默认位于：

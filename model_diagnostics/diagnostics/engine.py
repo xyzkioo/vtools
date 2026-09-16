@@ -4,7 +4,7 @@ Framework-independent diagnostics for object detection models.
 
 The script evaluates predictions against ground-truth boxes.  It does not
 import Ultralytics (or any other model framework), and it does not estimate
-runtime cost.  The PyCharm entry point separates model use into three modes;
+runtime cost.  The diagnostics runner separates model use into three modes;
 this engine remains the framework-independent evaluation layer:
 
 1. Mode A passes an existing prediction file.

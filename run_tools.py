@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""跨子项目入口；PyCharm 和终端都可调用。"""
+"""供桌面工作台调用的跨子项目调度器。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="vtools 模块化功能入口")
     parser.add_argument("--tool", choices=["diagnostics", "pytorch", "tensorrt", "consistency", "visualization", "compression"], default=None)
-    parser.add_argument("--config", type=Path, help="对应子项目配置；省略时使用默认 PyCharm 配置")
+    parser.add_argument("--config", type=Path, help="对应子项目配置；省略时使用默认配置")
     parser.add_argument("--only", action="append")
     parser.add_argument("--enable", action="append")
     parser.add_argument("--disable", action="append")
@@ -71,7 +71,7 @@ def main() -> int:
             selected_config = None
     if tool == "diagnostics":
         module_name = "model_diagnostics.run_model_diagnostics"
-        default_config = ROOT / "model_diagnostics" / "config" / "pycharm_run.yaml"
+        default_config = ROOT / "model_diagnostics" / "config" / "config.yaml"
     elif tool == "pytorch":
         module_name = "speed_test.backends.pytorch_vision_speed_benchmark_v2"
         default_config = ROOT / "speed_test" / "benchmark_config.yaml"
@@ -83,10 +83,10 @@ def main() -> int:
         default_config = ROOT / "speed_test" / "benchmark_config.yaml"
     elif tool == "visualization":
         module_name = "model_visualization.run_visualization"
-        default_config = ROOT / "model_visualization" / "config" / "pycharm_run.yaml"
+        default_config = ROOT / "model_visualization" / "config" / "config.yaml"
     else:
         module_name = "model_compression.run_model_compression"
-        default_config = ROOT / "model_compression" / "config" / "pycharm_run.yaml"
+        default_config = ROOT / "model_compression" / "config" / "config.yaml"
     old_argv = sys.argv[:]
     sys.argv = [module_name, "--config", str(selected_config or default_config)]
     if tool == "diagnostics" and args.predictions:

@@ -28,8 +28,8 @@ index.html
 阶段追踪需要配置：
 
 ```yaml
-stage_trace:
-  enabled: true
+modules:
+  visualization.stage_trace: true
 ```
 
 ### 1. `stage_summary.csv`
@@ -167,8 +167,9 @@ layers:
 启用：
 
 ```yaml
+modules:
+  visualization.cam: true
 cam:
-  enabled: true
   method: layercam
 ```
 
@@ -221,12 +222,10 @@ stage_trace:
 ### 第一次运行：只看结构和候选数量
 
 ```yaml
-features:
-  enabled: true
-cam:
-  enabled: false
-stage_trace:
-  enabled: true
+modules:
+  visualization.features: true
+  visualization.cam: false
+  visualization.stage_trace: true
 ```
 
 先看 `index.html`、`stage_summary.csv`、`raw_candidates.json` 和 `final_detections.json`。
@@ -238,8 +237,9 @@ stage_trace:
 ### 第三次运行：只对少量目标做 CAM
 
 ```yaml
+modules:
+  visualization.cam: true
 cam:
-  enabled: true
   max_targets: 1
 ```
 

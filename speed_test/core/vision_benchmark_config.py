@@ -78,6 +78,14 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
         raw = yaml.safe_load(file) or {}
     if not isinstance(raw, dict):
         raise TypeError("配置文件顶层必须是字典")
+    removed = []
+    for section, key in (("run_all", "run_pytorch"), ("run_all", "run_tensorrt"), ("run_all", "run_consistency"),
+                         ("pytorch", "enabled"), ("tensorrt", "enabled"), ("consistency", "enabled")):
+        value = raw.get(section)
+        if isinstance(value, dict) and key in value:
+            removed.append(f"{section}.{key}")
+    if removed:
+        raise ValueError(f"已移除旧版阶段开关：{', '.join(removed)}；请使用 modules")
 
     config = dict(raw)
     # 保留一份未规范化的 YAML 值。运行目录管理器需要据此区分

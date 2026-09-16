@@ -11,7 +11,7 @@ python speed_test/inspect_checkpoint.py --config speed_test/benchmark_config.yam
 python speed_test/check_consistency.py --config speed_test/benchmark_config.yaml
 ```
 
-`run_all.py` 是一键入口，单项脚本用于只运行某个阶段；PyCharm 可直接运行对应脚本。
+`run_all.py` 是一键入口，单项脚本用于只运行某个阶段。
 
 
 
@@ -22,13 +22,12 @@ by:小尛ovo
 
 1. 修改 `benchmark_config.yaml` 中的项目根目录、模型权重和输入图片。
 2. 可先运行 `inspect_checkpoint.py` 检查 `.pt` 是否能恢复模型架构。
-3. 在 PyCharm 直接运行 `run_all.py`。
+3. 从桌面 UI 选择“一键测速”，或在终端运行 `run_all.py`。
 4. 查看终端打印的 `runs-profile/runN` 目录；每次运行都会使用新的编号，
    其中包含本次的 PyTorch/TensorRT/一致性 CSV 或 JSON 结果。
 
 新增：直接运行 `check_consistency.py` 检查已有 ONNX/engine 与 PyTorch 的输出。
-`run_all.py` 会结合 `modules.consistency.tensor`、`modules.consistency.detection`、
-`consistency.enabled` 和 `run_all.run_consistency` 决定是否执行一致性阶段。
+`run_all.py` 根据 `modules.consistency.tensor` 和 `modules.consistency.detection` 决定是否执行一致性阶段。
 读取同一份输入，不重复测速；报告为 `consistency.csv` 和 `consistency.json`。
 使用方法、容差、YOLO26 框匹配及自定义 adapter 接入见完整教程第 8 节。
 
@@ -36,7 +35,7 @@ by:小尛ovo
 
 默认 `run.enabled: true`，结果会依次保存到 `runs-profile/run1`、`run2`……；
 ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` 的
-公共缓存。需要补跑到已有目录时，可在 PyCharm 参数中加入
+公共缓存。需要补跑到已有目录时，可在命令行加入
 `--run-dir runs-profile/run2`；设置 `run.enabled: false` 可恢复固定输出路径。
 
 ---
@@ -47,10 +46,10 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 .
 ├── benchmark_config.yaml          # 唯一需要日常修改的配置
 ├── run_all.py                     # 一键入口
-├── benchmark_pytorch.py           # PyCharm：PyTorch
-├── benchmark_tensorrt.py          # PyCharm：TensorRT
-├── check_consistency.py           # PyCharm：一致性检查
-├── inspect_checkpoint.py          # PyCharm：checkpoint 检查
+├── benchmark_pytorch.py           # PyTorch 测速
+├── benchmark_tensorrt.py          # TensorRT 测速
+├── check_consistency.py           # 一致性检查
+├── inspect_checkpoint.py          # checkpoint 检查
 ├── core/                          # 配置、计时、checkpoint、run 管理
 ├── backends/                      # PyTorch/TensorRT 测速实现
 ├── checks/                        # 一致性检查和误差指标
@@ -70,13 +69,13 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 | `core/vision_run_manager.py` | 为每次入口调用创建 `run1`、`run2` 等独立目录 |
 | `core/vision_benchmark_common.py` | 计时、统计、设备、精度和 adapter 核心 |
 | `core/module_selection.py` | 统一解析 YAML 与 `--only/--enable/--disable` 模块开关 |
-| `core/vision_runtime.py` | PyCharm/conda 动态库路径兼容处理 |
+| `core/vision_runtime.py` | conda 动态库路径处理 |
 | `core/vision_checkpoint_inspector.py` | 检查 checkpoint 是否包含可恢复的模型架构 |
-| `benchmark_pytorch.py` | PyCharm 直接运行的 PyTorch 入口 |
-| `benchmark_tensorrt.py` | PyCharm 直接运行的 TensorRT 入口 |
+| `benchmark_pytorch.py` | PyTorch 测速入口 |
+| `benchmark_tensorrt.py` | TensorRT 测速入口 |
 | `run_all.py` | 按配置依次运行 PyTorch 和 TensorRT，并合并汇总 CSV |
 | `inspect_checkpoint.py` | 单独检查 `.pt` 是否包含可恢复架构 |
-| `check_consistency.py` | PyCharm 独立运行 PyTorch/TensorRT 输出一致性检查 |
+| `check_consistency.py` | 独立运行 PyTorch/TensorRT 输出一致性检查 |
 | `checks/vision_consistency.py` | 共用输入、I/O 对齐和 CSV/JSON 报告 |
 | `checks/vision_consistency_metrics.py` | 张量误差与端到端检测框匹配 |
 | `adapters/vision_adapter_template.py` | 非内置模型的 adapter 模板 |
@@ -92,7 +91,7 @@ ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` �
 
 ```yaml
 project:
-  root: /home/你的用户名/PycharmProjects/你的项目
+  root: /path/to/your/project
   ultralytics_repo: ultralytics
 
 models:
@@ -131,12 +130,10 @@ run:
   name: auto
 
 pytorch:
-  enabled: true
   precisions: [fp32, fp16]
   output: runs-profile/vision_speed_v2.csv
 
 tensorrt:
-  enabled: true
   builder: python          # TensorRT Python API；不需要 trtexec
   precision: fp16
   onnx_opset: 18
@@ -191,8 +188,7 @@ runs-profile/engines/    # 公共 TensorRT engine 缓存
 `check_consistency.py` 时，也会各自申请下一个 `runN`。目录通过原子创建，
 即使两个终端同时启动也不会使用同一个编号。
 
-如果需要复用已经创建的目录（例如只补跑某个阶段），在 PyCharm 的
-Parameters 中填写：
+如果需要复用已经创建的目录（例如只补跑某个阶段），在命令行填写：
 
 ```text
 --run-dir runs-profile/run2
@@ -222,35 +218,7 @@ benchmark:
 `fail_on_checkpoint_inspection: true` 会在检查失败时立即停止；默认 `false`
 会先打印诊断信息，再让测速阶段继续执行。
 
-## 2. 在 PyCharm 中运行
-
-建议把工作目录设为本项目目录，然后直接右键运行：
-
-1. `run_all.py`：一键运行两个后端，并在当前 `runN` 中生成汇总 CSV。
-2. `benchmark_pytorch.py`：只运行 PyTorch。
-3. `benchmark_tensorrt.py`：只运行 TensorRT。
-4. `check_consistency.py`：只检查已有 engine 的输出一致性，不重新测速、不构建 engine。
-
-运行结束后，终端会打印本次目录，例如：
-
-```text
-本次运行目录：/home/你的项目/runs-profile/run1
-```
-
-如果只设置了 `pytorch.enabled: true`，该目录中只会出现 PyTorch 报告；被跳过
-的阶段不会生成空的 CSV。
-
-`pytorch.enabled`、`tensorrt.enabled` 以及 `run_all.run_*` 用于控制一键入口；
-单独运行某个入口文件时，表示你明确要求执行该后端。
-
-不需要在 Run/Debug Configuration 中填写参数。若有另一份 YAML，也可以在
-Parameters 中填写：
-
-```text
---config /path/to/another_config.yaml
-```
-
-## 3. adapter 怎么选
+## 2. adapter 怎么选
 
 `adapter` 决定“如何加载权重、如何构造输入、如何调用模型”：
 
@@ -405,13 +373,12 @@ TensorRT engine 与 GPU、CUDA、TensorRT 版本相关，换部署机器后应�
 ### 怎么运行
 
 先保证 `benchmark_tensorrt.py` 能成功生成当前模型的 ONNX 和 engine。
-如果在 PyCharm 中出现 `CXXABI_1.3.15 not found`，入口会在导入 ONNX 前自动
+如果出现 `CXXABI_1.3.15 not found`，入口会在导入 ONNX 前自动
 把当前 Python/conda 环境的 `lib` 放到 `LD_LIBRARY_PATH` 最前面并重启当前
-入口。这样通常不需要手工配置 PyCharm；如果当前环境没有 `libstdc++.so.6`，
+入口。如果当前环境没有 `libstdc++.so.6`，
 仍需先安装 `libstdcxx-ng`/`libgcc-ng`。TensorRT 需要可用的 CUDA GPU。
 
-在 PyCharm 直接右键运行 `check_consistency.py`，无需填写命令行参数。
-也可以在 `run_all.py` 中一键执行：
+可以在 `run_all.py` 中一键执行：
 
 ```yaml
 modules:
@@ -423,7 +390,6 @@ modules:
   consistency.detection: false
 
 consistency:
-  enabled: true
   input_mode: image
   source: null             # 使用 benchmark.image，也可填一张图片或图片目录
   max_images: 10
@@ -438,8 +404,6 @@ consistency:
   output: runs-profile/consistency.csv
   json_output: runs-profile/consistency.json
 
-run_all:
-  run_consistency: true
 ```
 
 这是需要合并到现有 YAML 的配置片段，不要在同一 YAML 中重复添加同名顶层键。
@@ -452,7 +416,7 @@ python check_consistency.py
 python check_consistency.py --config benchmark_config.yaml --source /path/to/images
 ```
 
-独立检查不受 `consistency.enabled` 或 `run_all.run_*` 开关限制。
+独立检查直接执行指定的一致性模块。
 只有全部通过才退出码为 0；warning、failed、error、inconclusive 都返回 1。
 `run_all.py` 会保留这些状态并继续写汇总，不把它们当成“成功”。
 
@@ -568,7 +532,7 @@ def validation_outputs(outputs, output_names):
 `memory.pytorch_peak` 等模块彼此独立；关闭后不会执行
 对应计算或额外前向。
 
-PyCharm 直接运行原有入口即可。终端可以临时选择模块：
+终端可以临时选择模块：
 
 ```bash
 python benchmark_pytorch.py --only speed.pytorch_call

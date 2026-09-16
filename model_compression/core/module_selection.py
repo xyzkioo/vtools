@@ -69,28 +69,7 @@ def resolve_compression_modules(
     else:
         modules.update({key: True for key in enable_values})
         modules.update({key: False for key in disable_values})
-    operation = str(config.get("operation", "all") or "all").strip().lower()
-    if not (only_values or enable_values or disable_values) and operation in OPERATION_MODULES:
-        modules = {key: key == OPERATION_MODULES[operation] for key in modules}
     return modules
 
 
 __all__ = ["COMPRESSION_MODULES", "resolve_compression_modules"]
-
-
-OPERATION_MODULES = {
-    "branch": "branch.create",
-    "baseline": "baseline.evaluate",
-    "parameters": "model.parameters",
-    "quantize": "compression.quantize.dynamic_int8",
-    "quantization": "compression.quantize.dynamic_int8",
-    "dynamic_int8": "compression.quantize.dynamic_int8",
-    "prune": "compression.prune.unstructured",
-    "pruning": "compression.prune.unstructured",
-    "structured_prune": "compression.prune.structured",
-    "structured": "compression.prune.structured",
-    "distill": "distillation.classification",
-    "distillation": "distillation.classification",
-    "compare": "comparison.report",
-    "export": "artifact.export",
-}

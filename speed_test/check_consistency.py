@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""PyCharm 直接运行：读取同目录 YAML，检查 PyTorch/TensorRT 输出一致性。"""
+"""读取同目录 YAML，检查 PyTorch/TensorRT 输出一致性。"""
 
 if __name__ == "__main__":
     # 必须在 checks.vision_consistency 延迟导入 onnx 前准备动态库路径。

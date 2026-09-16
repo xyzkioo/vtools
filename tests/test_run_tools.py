@@ -36,7 +36,7 @@ class UnifiedEntry(unittest.TestCase):
                 patch.object(run_tools.importlib, "import_module", return_value=module):
             self.assertEqual(run_tools.main(), 0)
         child_config = captured[captured.index("--config") + 1]
-        self.assertEqual(Path(child_config), run_tools.ROOT / "model_diagnostics" / "config" / "pycharm_run.yaml")
+        self.assertEqual(Path(child_config), run_tools.ROOT / "model_diagnostics" / "config" / "config.yaml")
 
 
 if __name__ == "__main__":

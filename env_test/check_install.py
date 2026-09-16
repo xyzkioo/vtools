@@ -153,7 +153,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_path(path: Path, base: Path) -> Path:
-    """按调用目录解析路径，避免 PyCharm 的工作目录不同导致误判。"""
+    """按调用目录解析路径，避免启动目录不同导致误判。"""
     if path.is_absolute():
         return path.expanduser().resolve()
     return (base / path).expanduser().resolve()

@@ -7,23 +7,23 @@ python model_diagnostics/run_model_diagnostics.py
 python model_diagnostics/run_model_diagnostics.py --help
 ```
 
-默认读取 `model_diagnostics/config/pycharm_run.yaml`；已有预测文件的底层引擎命令见本文“命令行运行”一节。
+默认读取 `model_diagnostics/config/config.yaml`；已有预测文件的底层引擎命令见本文“命令行运行”一节。
 
 这套代码只关心目标检测质量与错误来源，不计算参数量、FLOPs、显存和延迟。核心评估不强制导入 Ultralytics，也不假设模型有 NMS、P2/P3、anchor 或特定输出头；只有使用 `adapter: ultralytics` 或 `.ndjson` 官方转换时才需要它。YOLO、DETR、Faster R-CNN 和自定义 PyTorch/ONNX 模型都可以通过统一预测格式或 vtools 风格 adapter 接入。
 
 ## 最短使用路径
 
-1. 用 PyCharm 打开 `model_diagnostics` 文件夹。
+1. 从仓库根目录启动桌面工作台或终端入口。
 2. 在仓库根目录安装 `python -m pip install -r model_diagnostics/requirements.txt`。
-3. 打开 `config/pycharm_run.yaml`，填写 `dataset.data`，再选择一个 A/B/C 模式。
+3. 打开 `config/config.yaml`，填写 `dataset.data`，再选择一个 A/B/C 模式。
 4. 直接运行 `run_model_diagnostics.py`。
 5. 在 `runs/runN/<mode_name>/` 查看 `report.md`、`summary.json` 和 CSV 明细。
 
-每次运行会创建新的 `runN`，避免把上一次结果混进本次结果。入口配置只保留一个 `mode` 选择，不再使用容易混淆的 `models[].enabled` 列表。
+每次运行会创建新的 `runN`，避免把上一次结果混进本次结果。入口配置只保留一个 `mode` 选择。
 
 ### 模块开关
 
-`config/pycharm_run.yaml` 的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50 和
+`config/config.yaml` 的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50 和
 阈值曲线交给 Ultralytics 原生 `val`；诊断入口不会重复计算。未列出的模块视为关闭，
 因此可以只打开需要的功能：
 
@@ -233,7 +233,7 @@ COCO GT（`images` + `annotations` + `categories`）、COCO prediction results�
 
 ## 命令行运行
 
-已有预测文件可以绕过 PyCharm 入口：
+已有预测文件可以直接调用底层引擎：
 
 ```bash
 cd model_diagnostics
@@ -250,8 +250,7 @@ python diagnostics/engine.py \
 
 ### 按模块运行
 
-在 `config/pycharm_run.yaml` 的 `modules` 中逐项开关功能。PyCharm 直接运行
-`run_model_diagnostics.py` 与终端使用同一份配置；终端参数可临时覆盖：
+在 `config/config.yaml` 的 `modules` 中逐项开关功能；终端参数可临时覆盖：
 
 ```bash
 python run_model_diagnostics.py --only diagnostics.overlap --predictions runs/predictions.json
@@ -268,7 +267,7 @@ python run_model_diagnostics.py --list-modules
 
 ```text
 model_diagnostics/
-├── run_model_diagnostics.py       # PyCharm 入口
+├── run_model_diagnostics.py       # 诊断运行器
 ├── config/                        # 带注释的 YAML/JSON 配置和 modules 开关
 ├── core/                          # vtools 兼容类型
 ├── diagnostics/                   # 通用评估引擎和 adapter 运行器

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
-from others.video_frame_extractor import collect_videos, extract_video
+from others.video_frame_extractor.video_frame_extractor import collect_videos, extract_video
 
 
 class VideoOutput(unittest.TestCase):

@@ -203,7 +203,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(cfg["modules"]["speed.pytorch_call"])
         self.assertTrue(cfg["modules"]["speed.tensorrt_call"])
         self.assertFalse(cfg["modules"]["speed.pytorch_pipeline"])
-        self.assertTrue(cfg["consistency"]["enabled"])
+        self.assertNotIn("enabled", cfg["consistency"])
         self.assertTrue(Path(cfg["consistency"]["output"]).is_absolute())
         self.assertEqual(cfg["benchmark"]["input_size"], "832x832")
 
@@ -295,8 +295,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(rows[1]["status"], "failed")
 
     def test_failed_tensorrt_skips_consistency(self):
-        config = {"_config_path": "dummy.yaml", "pytorch": {"enabled": False},
-                  "tensorrt": {"enabled": True}, "consistency": {"enabled": True}}
+        config = {"_config_path": "dummy.yaml", "modules": {
+            "speed.tensorrt_call": True,
+            "consistency.tensor": True,
+        }}
         with tempfile.TemporaryDirectory() as directory:
             config["run_all"] = {"summary_output": str(Path(directory) / "summary.csv")}
             with patch("run_all.load_config", return_value=config), patch("sys.argv", ["run_all.py"]), \
@@ -312,9 +314,6 @@ class WorkflowTests(unittest.TestCase):
                 "project": {"root": str(root)},
                 "run": {"enabled": True, "root": str(root / "runs")},
                 "run_all": {"summary_output": str(root / "summary.csv")},
-                "pytorch": {"enabled": True},
-                "tensorrt": {"enabled": True},
-                "consistency": {"enabled": True},
                 "modules": {"speed.pytorch_call": True},
             }
             with patch("run_all.load_config", return_value=config), patch("sys.argv", ["run_all.py", "--only", "speed.pytorch_call"]), \

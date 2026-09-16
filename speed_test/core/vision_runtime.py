@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """运行时动态库兼容处理。
 
-PyCharm 使用 conda 解释器时，可能不会继承 shell 中的
+某些启动方式可能不会继承 shell 中的
 ``LD_LIBRARY_PATH``。某些 ONNX 二进制扩展因此会加载系统的
 ``libstdc++.so.6``，而不是当前 conda 环境中的版本，最终出现
 ``CXXABI_1.3.15 not found``。本模块只依赖 Python 标准库，并在入口
@@ -25,7 +25,7 @@ def _candidate_library_dirs() -> list[Path]:
 
     candidates: list[Path] = []
     # sys.prefix 是当前实际 Python 解释器所在环境，优先于继承来的
-    # CONDA_PREFIX；后者用于终端和 PyCharm 的 conda 环境补充识别。
+    # CONDA_PREFIX；后者用于补充识别当前 conda 环境。
     for value in (sys.prefix, os.environ.get("CONDA_PREFIX")):
         if not value:
             continue
@@ -76,7 +76,7 @@ def ensure_conda_library_path() -> Optional[Path]:
     if already_first:
         return directory
 
-    # 防止 exec 失败或 PyCharm 特殊启动方式导致无限重启。
+    # 防止 exec 失败或特殊启动方式导致无限重启。
     if os.environ.get(_READY_ENV) == "1":
         os.environ.update(_with_library_dir(os.environ, directory))
         return directory
@@ -84,7 +84,7 @@ def ensure_conda_library_path() -> Optional[Path]:
     environment = _with_library_dir(os.environ, directory)
     environment[_READY_ENV] = "1"
     print(
-        f"[环境] PyCharm 未继承 conda 动态库路径，自动使用：{directory}",
+        f"[环境] 当前 Python 未继承 conda 动态库路径，自动使用：{directory}",
         flush=True,
     )
     try:

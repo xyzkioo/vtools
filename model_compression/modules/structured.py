@@ -76,7 +76,7 @@ def build_structured_detector(
     source_yaml_name = Path(str(source_yaml.get("yaml_file", ""))).stem
     family_match = re.match(r"^(.*?)[nslmx]$", source_yaml_name)
     family = family_match.group(1) if family_match else "yolo26"
-    target_path = run_dir / "models" / f"{family}{target_scale}-vtools.yaml"
+    target_path = run_dir / f"{family}{target_scale}-vtools.yaml"
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(yaml.safe_dump(target_yaml, allow_unicode=True, sort_keys=False), encoding="utf-8")
 

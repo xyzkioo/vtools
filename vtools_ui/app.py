@@ -63,10 +63,10 @@ def _path(*parts: str) -> Path:
 
 
 SPECS = [
-    ToolSpec("diagnostics", "检测诊断", "定位漏检、错分类、重复框和定位偏差。", "diagnostics", _path("model_diagnostics", "config", "pycharm_run.yaml")),
-    ToolSpec("visualization", "模型可视化", "查看特征图、CAM 和检测阶段追踪。", "visualization", _path("model_visualization", "config", "pycharm_run.yaml")),
+    ToolSpec("diagnostics", "检测诊断", "定位漏检、错分类、重复框和定位偏差。", "diagnostics", _path("model_diagnostics", "config", "config.yaml")),
+    ToolSpec("visualization", "模型可视化", "查看特征图、CAM 和检测阶段追踪。", "visualization", _path("model_visualization", "config", "config.yaml")),
     ToolSpec("benchmark", "性能测速", "比较 PyTorch / TensorRT 的速度与一致性。", "pytorch", _path("speed_test", "benchmark_config.yaml")),
-    ToolSpec("compression", "模型压缩", "运行量化、剪枝和蒸馏实验。", "compression", _path("model_compression", "config", "pycharm_run.yaml")),
+    ToolSpec("compression", "模型压缩", "运行量化、剪枝和蒸馏实验。", "compression", _path("model_compression", "config", "config.yaml")),
     ToolSpec("transform", "格式转换", "进入 ONNX、K230 等模型转换流程。"),
     ToolSpec("data", "数据工具", "视频抽帧、文件名转换和数据集整理。"),
 ]
@@ -490,7 +490,6 @@ class ConfigEditorDialog(QDialog):
                 self._add_field(form, path, label, "bool", default)
         elif self.tool_key == "compression":
             self._add_section(layout, "模型与数据")
-            self._add_field(form, "operation", "操作", "combo", "all", ["all", "baseline", "quantize", "prune", "distill", "compare", "export"])
             self._add_field(form, "model.weights", "模型权重", default="")
             self._add_field(form, "model.task", "模型任务", "combo", "detect", ["detect", "classify"])
             self._add_field(form, "dataset.data", "YOLO 数据集 YAML", default="")
@@ -1293,7 +1292,7 @@ class UtilityPage(QWidget):
             self._combo(form, "extension", "输出格式", [".jpg", ".png"], ".jpg")
             self._check(form, "recursive", "递归处理目录", False)
             self._check(form, "overwrite", "覆盖已有帧", False)
-            self.specs[key] = ToolSpec(key, "视频抽帧", "将视频保存为图片帧", script=ROOT / "others" / "video_frame_extractor.py")
+            self.specs[key] = ToolSpec(key, "视频抽帧", "将视频保存为图片帧", script=ROOT / "others" / "video_frame_extractor" / "video_frame_extractor.py")
         elif self.category == "data" and key == "resize":
             self._line(form, "input", "图片文件或目录", path_kind="file_or_dir")
             self._line(form, "output", "输出目录", path_kind="dir")
@@ -1303,7 +1302,7 @@ class UtilityPage(QWidget):
             self._combo(form, "format", "输出格式", ["same", "jpg", "png", "webp"], "same")
             self._check(form, "recursive", "递归处理目录", False)
             self._check(form, "overwrite", "覆盖已有图片", False)
-            self.specs[key] = ToolSpec(key, "图片批量缩放", "批量调整图片分辨率", script=ROOT / "others" / "image_resize.py")
+            self.specs[key] = ToolSpec(key, "图片批量缩放", "批量调整图片分辨率", script=ROOT / "others" / "image_resize" / "image_resize.py")
         elif self.category == "data" and key == "filename":
             self._line(form, "dir", "图片 / 数据集目录", path_kind="dir")
             self._combo(form, "dataset", "数据集格式", ["auto", "images", "yolo", "coco"], "auto")

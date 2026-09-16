@@ -1,10 +1,10 @@
 # 通用 PyTorch 视觉模型测速配置
 #
-# 日常只需要修改本文件；代码入口可以直接在 PyCharm 中运行。
+# 日常只需要修改本文件；从图形界面选择测速工具后加载此配置。
 # 所有相对路径都相对于 project.root 解析。
 
 project:
-  # 你的 PyCharm 项目根目录。
+  # vtools 项目根目录。
   root: ../..
 
   # 本地 Ultralytics 源码目录。相对路径会按 project.root 解析。
@@ -94,9 +94,6 @@ modules:
   consistency.detection: false
 
 pytorch:
-  # 是否启用 PyTorch 后端。
-  enabled: true
-
   # CUDA 可选 fp32、fp16、bf16；CPU 会自动跳过 fp16。
   precisions: [fp32, fp16]
 
@@ -105,9 +102,6 @@ pytorch:
   output: runs-profile/vision_speed_v2.csv
 
 tensorrt:
-  # 是否启用 TensorRT 后端。
-  enabled: true
-
   # engine 构建方式：
   # python 使用已安装的 TensorRT Python API（推荐，不需要 trtexec）；
   # trtexec 使用 NVIDIA 命令行工具；auto 优先 trtexec，找不到时回退 python。
@@ -138,8 +132,6 @@ tensorrt:
   output: runs-profile/vision_tensorrt_v2.csv
 
 consistency:
-  # run_all 中是否执行一致性检查；独立运行 check_consistency.py 则始终执行。
-  enabled: true
 
   # image：真实图片；内置支持 Ultralytics detect，其他模型需要 adapter 预处理。
   # adapter：使用 make_validation_inputs / make_inputs 的示例输入，可能为随机张量。
@@ -184,15 +176,5 @@ consistency:
   json_output: runs-profile/consistency.json
 
 run_all:
-  # run_all.py 一键运行时，是否执行 PyTorch 后端。
-  run_pytorch: true
-
-  # run_all.py 一键运行时，是否执行 TensorRT 后端。
-  run_tensorrt: true
-
-  # 在测速之后做正确性检查，只各执行必要的推理，不重复测速。
-  # 本次 TensorRT 阶段失败时会跳过，避免把遗留旧 engine 当作新结果。
-  run_consistency: true
-
   # 两个后端的结果汇总 CSV；启用 run 后会归档到当前 runN。
   summary_output: runs-profile/vision_benchmark_summary.csv

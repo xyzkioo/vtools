@@ -35,11 +35,3 @@ class ExplicitTaskTests(unittest.TestCase):
         from model_compression.core.detection import is_detection
         self.assertFalse(is_detection({'model': {'task': 'classify'}, 'dataset': {'data': 'old_detection.yaml'}}))
         self.assertTrue(is_detection({'model': {'task': 'detect'}}))
-
-    def test_operation_defaults_match_cli_override_precedence(self):
-        from model_compression.core.module_selection import resolve_compression_modules
-        config = {'operation': 'export'}
-        selected = resolve_compression_modules(config)
-        self.assertEqual([key for key, enabled in selected.items() if enabled], ['artifact.export'])
-        selected = resolve_compression_modules(config, only=['baseline.evaluate'])
-        self.assertEqual([key for key, enabled in selected.items() if enabled], ['baseline.evaluate'])

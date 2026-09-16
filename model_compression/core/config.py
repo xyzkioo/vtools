@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "pycharm_run.yaml"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "config.yaml"
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:
@@ -54,6 +54,9 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, Mapping):
         raise TypeError("配置文件顶层必须是 YAML 对象")
+    removed = sorted(set(raw) & {"operation", "models"})
+    if removed:
+        raise ValueError(f"已移除旧版配置字段：{', '.join(removed)}；请使用 model 和 modules")
     config: dict[str, Any] = copy.deepcopy(dict(raw))
     config["_raw_config"] = copy.deepcopy(dict(raw))
     config["_config_path"] = str(config_path)
@@ -64,6 +67,8 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
         project_root = config_path.parent / project_root
     project_root = project_root.resolve()
     project["root"] = str(project_root)
+    if project.get("ultralytics_repo"):
+        project["ultralytics_repo"] = _resolve(project["ultralytics_repo"], project_root)
     if project.get("python_paths") is None:
         project["python_paths"] = []
     if not isinstance(project["python_paths"], (list, tuple)):
@@ -77,16 +82,11 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     run.setdefault("name", "auto")
     config["run"] = run
 
-    storage = _mapping(config.get("storage"), "storage")
-    storage["root"] = _resolve(storage.get("root", "model_compression/store"), project_root)
-    storage["registry"] = _resolve(storage.get("registry", "registry.json"), Path(storage["root"]))
-    config["storage"] = storage
+    # 运行结果自包含在 runs/runN/ 中；旧 storage/branch 键仅为兼容读取，
+    # 不参与运行状态，也不会触发 store/registry 写入。
+    config.pop("storage", None)
 
     model = _mapping(config.get("model"), "model")
-    if not model:
-        models = config.get("models")
-        if isinstance(models, list) and models and isinstance(models[0], Mapping):
-            model = dict(models[0])
     model.setdefault("name", "model")
     model.setdefault("adapter", "torch")
     model.setdefault("task", "classify")
@@ -125,9 +125,8 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     if structured.get("initial_weights") is not None:
         structured["initial_weights"] = _resolve(structured["initial_weights"], project_root)
     config["compression"]["structured"] = structured
-    branch = _mapping(config.get("branch"), "branch")
-    branch.setdefault("name", "main")
-    config["branch"] = branch
+    # 分支和版本指针属于已移除的跨运行注册表，不进入有效配置。
+    config.pop("branch", None)
     return config
 
 
@@ -137,7 +136,7 @@ def apply_python_paths(config: Mapping[str, Any]) -> None:
     import sys
 
     project = _mapping(config.get("project"), "project")
-    paths = [project.get("root"), *project.get("python_paths", [])]
+    paths = [project.get("root"), project.get("ultralytics_repo"), *project.get("python_paths", [])]
     for value in paths:
         if value and Path(str(value)).is_dir() and str(value) not in sys.path:
             sys.path.insert(0, str(value))

@@ -1,28 +1,16 @@
 import os, sys, argparse
 from pathlib import Path
 
-#ONNX vs kmodel 推理一致性校验脚本
-#在 PyCharm 中可直接右键运行；参数优先级: 命令行 > 环境变量 > 下方默认配置
+# ONNX vs kmodel 推理一致性校验脚本
 
 # Respect an SDK path supplied by the user; do not assume a Linux-specific
 # Conda installation on Windows or another Ubuntu machine.
 _site_packages = os.path.join(sys.prefix, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
 os.environ["PATH"] = _site_packages + os.pathsep + os.environ.get("PATH", "")
 
-# ================== 路径与参数配置 ==================
-ONNX_PATH = "best.onnx"                                                  # ONNX 模型路径
-KMODEL_PATH = "best.kmodel"                                              # kmodel 模型路径
-IMAGE_PATH = ""                                                            # 测试图片路径
 TARGET_SIZE = 320                                                        # letterbox 目标尺寸（与 convert.py 保持一致）
 FILL_COLOR = (128, 128, 128)                                             # letterbox 填充色 (R, G, B)
 NORMALIZE = True                                                         # ONNX 输入是否 /255 归一化 (kmodel 始终 uint8)
-
-# 可选: 在 PyCharm Run Configuration 的环境变量中设置以覆盖默认值
-# VALIDATE_ONNX / VALIDATE_KMODEL / VALIDATE_IMAGE / VALIDATE_SIZE / VALIDATE_COLOR / VALIDATE_NORMALIZE
-
-
-def _get(key, default):
-    return os.environ.get(key, default)
 
 
 def letterbox(img, target_size, fill_color):
@@ -137,29 +125,23 @@ def compare(onnx_outputs, kmodel_outputs, cosine_threshold=0.99, mae_threshold=0
 
 def main():
     parser = argparse.ArgumentParser(description="ONNX vs kmodel 推理一致性验证")
-    parser.add_argument("--onnx", help=f"ONNX 模型路径 (默认: {ONNX_PATH})")
-    parser.add_argument("--kmodel", help=f"kmodel 模型路径 (默认: {KMODEL_PATH})")
-    parser.add_argument("--image", help=f"测试图片路径 (默认: {IMAGE_PATH})")
-    parser.add_argument("--size", type=int, help=f"letterbox 目标尺寸 (默认: {TARGET_SIZE})")
-    parser.add_argument("--color", type=int, nargs=3, metavar=("R", "G", "B"), help=f"letterbox 填充色 (默认: {FILL_COLOR})")
-    parser.add_argument("--no-norm", dest="normalize", action="store_false", default=None, help=f"ONNX 输入不做 /255 归一化 (默认: {'归一化' if NORMALIZE else '不归一化'})")
+    parser.add_argument("--onnx", required=True, help="ONNX 模型路径")
+    parser.add_argument("--kmodel", required=True, help="kmodel 模型路径")
+    parser.add_argument("--image", required=True, help="测试图片路径")
+    parser.add_argument("--size", type=int, default=TARGET_SIZE, help=f"letterbox 目标尺寸 (默认: {TARGET_SIZE})")
+    parser.add_argument("--color", type=int, nargs=3, metavar=("R", "G", "B"), default=FILL_COLOR, help=f"letterbox 填充色 (默认: {FILL_COLOR})")
+    parser.add_argument("--no-norm", dest="normalize", action="store_false", default=NORMALIZE, help="ONNX 输入不做 /255 归一化")
     parser.add_argument("--cosine-threshold", type=float, default=0.99)
     parser.add_argument("--mae-threshold", type=float, default=0.05)
 
     args = parser.parse_args()
 
-    onnx_path = args.onnx or _get("VALIDATE_ONNX", ONNX_PATH)
-    kmodel_path = args.kmodel or _get("VALIDATE_KMODEL", KMODEL_PATH)
-    image_path = args.image or _get("VALIDATE_IMAGE", IMAGE_PATH)
-    size = args.size if args.size is not None else int(_get("VALIDATE_SIZE", TARGET_SIZE))
-    color_env = _get("VALIDATE_COLOR", None)
-    fill_color = tuple(args.color) if args.color else (tuple(int(x) for x in color_env.split(",")) if color_env else FILL_COLOR)
-
-    if args.normalize is None:
-        norm_env = _get("VALIDATE_NORMALIZE", None)
-        normalize = norm_env.lower() not in ("0", "false", "no") if norm_env else NORMALIZE
-    else:
-        normalize = args.normalize
+    onnx_path = args.onnx
+    kmodel_path = args.kmodel
+    image_path = args.image
+    size = args.size
+    fill_color = tuple(args.color)
+    normalize = args.normalize
 
     if size < 1:
         parser.error("--size 必须大于 0")

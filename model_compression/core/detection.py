@@ -9,7 +9,6 @@ from typing import Any, Mapping
 
 from .model_runtime import parameter_metrics, resolve_device
 from .registry import artifact_info
-from .run_manager import write_json
 from ..modules.pruning import prune_unstructured
 from ..modules.dependency_pruning import prune_detector_dependency_aware
 from ..modules.structured import build_structured_detector, finetune_structured_detector
@@ -198,26 +197,26 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
         metadata.update(evaluate_detector(detector, config, run_dir, 'baseline_validation'))
     elif module_id == 'compression.prune.unstructured':
         # Always compare on the same validation split, even if baseline was not selected.
-        before = evaluate_detector(detector, config, run_dir, 'before_pruning')
+        before = evaluate_detector(detector, config, run_dir, 'before_unstructured_pruning')
         # Validation may fuse layers; always prune a fresh model loaded from
         # the original checkpoint and evaluate the serialized result later.
         detector = load_detector(weights)
         detector.model, pruning = prune_unstructured(detector.model.float(), config.get('compression', {}))
         metadata.update(pruning)
-        target = _unique_target(run_dir / 'models' / 'yolo-pruned.pt')
+        target = _unique_target(run_dir / 'artifacts' / 'unstructured_pruning' / 'yolo-unstructured-l1.pt')
         target.parent.mkdir(parents=True, exist_ok=True)
         # Avoid exporting an old EMA that would hide the pruned weights on reload.
         detector.ckpt = {key: value for key, value in (detector.ckpt or {}).items()
                          if key not in {'ema', 'optimizer', 'model'}}
         detector.save(str(target))
         reloaded = load_detector(target)
-        metadata.update(evaluate_detector(reloaded, config, run_dir, 'after_pruning'))
-        metadata['before_pruning'] = before
+        metadata.update(evaluate_detector(reloaded, config, run_dir, 'after_unstructured_pruning'))
+        metadata['before_unstructured_pruning'] = before
         metadata['map50_95_delta'] = metadata['evaluation_map50_95'] - before['evaluation_map50_95']
         metadata['note'] = '非结构化剪枝减少非零权重，不保证 PT 文件更小或普通推理更快。'
         weights = target
     elif module_id == 'compression.prune.structured':
-        before = evaluate_detector(detector, config, run_dir, 'before_structured')
+        before = evaluate_detector(detector, config, run_dir, 'before_structured_pruning')
         before_speed = benchmark_detector(detector, config)
         source_file_size = artifact_info(weights)['size_bytes']
         detector = load_detector(weights)
@@ -227,21 +226,23 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
         structured_section = config.get('compression', {}).get('structured', {})
         structured_section = structured_section if isinstance(structured_section, Mapping) else {}
         structured_method = str(structured_section.get('method', 'scale')).strip().lower()
+        structured_dir = run_dir / 'artifacts' / 'structured_pruning'
+        structured_dir.mkdir(parents=True, exist_ok=True)
         if structured_method in {'torch_pruning', 'torch-pruning', 'dependency', 'dependency_aware'}:
             detector.model, structured = prune_detector_dependency_aware(
-                detector.model, config, run_dir
+                detector.model, config, structured_dir
             )
         elif structured_method in {'scale', 'width_scaling', 'yolo_scale'}:
-            detector, structured = build_structured_detector(detector, weights, config.get('compression', {}), run_dir)
+            detector, structured = build_structured_detector(detector, weights, config.get('compression', {}), structured_dir)
         else:
             raise ValueError(
                 '未知结构化剪枝方法：'
                 f'{structured_method}；可选 scale 或 torch_pruning。'
             )
-        detector, finetune = finetune_structured_detector(detector, config, data, run_dir)
+        detector, finetune = finetune_structured_detector(detector, config, data, structured_dir)
         metadata.update(structured)
         metadata.update(finetune)
-        target = _unique_target(run_dir / 'models' / 'yolo-structured.pt')
+        target = _unique_target(structured_dir / 'yolo-structured.pt')
         target.parent.mkdir(parents=True, exist_ok=True)
         expected_signature = _parameter_signature(detector.model)
         _clean_detector_checkpoint(detector)
@@ -253,7 +254,7 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
                 '结构化模型保存后重新加载的参数形状与剪枝结果不一致，疑似旧 EMA 覆盖了新模型；'
                 f'保存前参数量={expected_signature[0]}，加载后参数量={actual_signature[0]}'
             )
-        metadata.update(evaluate_detector(reloaded, config, run_dir, 'after_structured'))
+        metadata.update(evaluate_detector(reloaded, config, run_dir, 'after_structured_pruning'))
         after_speed = benchmark_detector(reloaded, config)
         metadata.update({f'after_{key}': value for key, value in after_speed.items()})
         metadata.update({f'before_{key}': value for key, value in before_speed.items()})
@@ -263,7 +264,7 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
         before_ms = before_speed.get('benchmark_inference_ms_median')
         after_ms = after_speed.get('benchmark_inference_ms_median')
         metadata['benchmark_speedup_ratio'] = (before_ms / after_ms) if before_ms and after_ms else None
-        metadata['before_structured'] = before
+        metadata['before_structured_pruning'] = before
         metadata['map50_95_delta'] = metadata['evaluation_map50_95'] - before['evaluation_map50_95']
         structured_section = config.get('compression', {}).get('structured', {})
         structured_section = structured_section if isinstance(structured_section, Mapping) else {}
@@ -282,7 +283,6 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
             else '结构化缩放真实改变网络通道数；'
         ) + '速度必须按同一设备、输入尺寸和预热条件实测。'
         if quality_gate_enabled and not quality_gate_passed:
-            write_json(run_dir / 'structured_pruning.json', {'module': module_id, 'status': 'failed', 'artifact': artifact_info(target), 'metadata': metadata})
             raise ValueError(
                 '结构化压缩未通过精度门禁：mAP50-95 下降 '
                 f'{-metadata["map50_95_delta"]:.4f}，允许最大下降 {max_drop:.4f}。'
@@ -292,7 +292,7 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
     elif module_id == 'artifact.export':
         import shutil
         source = Path(weights).resolve()
-        target = config.get('export', {}).get('path') or run_dir / 'export' / source.name
+        target = config.get('export', {}).get('path') or run_dir / 'artifacts' / 'multi_processing' / f'{source.stem}-export{source.suffix}'
         target = Path(target).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
         if target != source:
@@ -307,10 +307,10 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
     metadata['model_file_size_bytes'] = artifact_info(weights)['size_bytes']
     if not head:
         baseline_metadata = metadata
-        if 'before_pruning' in metadata:
-            baseline_metadata = dict(metadata['before_pruning'])
-        elif 'before_structured' in metadata:
-            baseline_metadata = dict(metadata['before_structured'])
+        if 'before_unstructured_pruning' in metadata:
+            baseline_metadata = dict(metadata['before_unstructured_pruning'])
+        elif 'before_structured_pruning' in metadata:
+            baseline_metadata = dict(metadata['before_structured_pruning'])
         baseline_metadata['task'] = 'detect'
         original = registry.add_version(name=config.get('model', {}).get('name', 'yolo'),
             artifact=input_weights, parent_version_id=None, run_id=run_id, method='baseline',
@@ -334,20 +334,7 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
         registry.data['versions'][head].setdefault('metadata', {}).update(metadata)
         registry.save()
     if 'export_info' in locals():
-        # 与分类导出保持一致：导出目录旁保留可追溯的 manifest。
-        manifest_path = export_info['target'].parent / f"{export_info['target'].stem}_manifest.json"
-        write_json(manifest_path, {
-            'version_id': head,
-            'source': export_info['source'],
-            'exported': artifact_info(export_info['target']),
-            'verification': {'reload': True, 'validation': 'evaluated', 'task': 'detect'},
-        })
-        metadata['manifest'] = str(manifest_path)
+        metadata['verification'] = {'reload': True, 'validation': 'evaluated', 'task': 'detect'}
     result = {'module': module_id, 'status': 'succeeded', 'version_id': head,
               'artifact': artifact_info(weights), 'metadata': metadata}
-    filename = {'baseline.evaluate': 'baseline', 'model.parameters': 'model_parameters',
-                'compression.prune.unstructured': 'pruning',
-                'compression.prune.structured': 'structured_pruning',
-                'artifact.export': 'export'}[module_id]
-    write_json(run_dir / f'{filename}.json', result)
     return result

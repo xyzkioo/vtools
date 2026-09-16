@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""PyCharm/CLI entry point for feature maps, CAM and detection stage tracing."""
+"""CLI backend for feature maps, CAM and detection stage tracing."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from model_visualization.core.common import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="vtools 模型特征/CAM/检测阶段可视化")
-    parser.add_argument("--config", type=Path, default=None, help="model_visualization/config/pycharm_run.yaml")
+    parser.add_argument("--config", type=Path, default=None, help="model_visualization/config/config.yaml")
     parser.add_argument("--run-dir", type=Path, default=None, help="指定一个不存在的输出目录")
     parser.add_argument("--mode", choices=["list_layers", "visualize"], default=None)
     parser.add_argument("--source", default=None, help="覆盖 input.source")
@@ -53,18 +53,12 @@ def _set_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None
     configured_value = config.get("modules")
     if configured_value is not None and not isinstance(configured_value, Mapping):
         raise ValueError("modules 必须是 module_id: true/false 的对象")
-    configured = configured_value if isinstance(configured_value, Mapping) else None
-    if configured is not None:
-        unknown_config = set(map(str, configured)) - module_ids
-        if unknown_config:
-            raise ValueError(f"未知可视化模块：{', '.join(sorted(unknown_config))}")
-        states = {key: bool(configured.get(key, False)) for key in module_ids}
-    else:
-        states = {
-            "visualization.features": bool(config.get("features", {}).get("enabled", True)),
-            "visualization.cam": bool(config.get("cam", {}).get("enabled", False)),
-            "visualization.stage_trace": bool(config.get("stage_trace", {}).get("enabled", False)),
-        }
+    if not isinstance(configured_value, Mapping):
+        raise ValueError("配置必须包含 modules: module_id: true/false")
+    unknown_config = set(map(str, configured_value)) - module_ids
+    if unknown_config:
+        raise ValueError(f"未知可视化模块：{', '.join(sorted(unknown_config))}")
+    states = {key: bool(configured_value.get(key, False)) for key in module_ids}
     only = {item.strip() for value in args.only or [] for item in str(value).split(",") if item.strip()}
     enable = {item.strip() for value in args.enable or [] for item in str(value).split(",") if item.strip()}
     disable = {item.strip() for value in args.disable or [] for item in str(value).split(",") if item.strip()}
@@ -84,9 +78,6 @@ def _set_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None
         for key in disable:
             states[key] = False
     config["modules"] = states
-    config.setdefault("features", {})["enabled"] = states["visualization.features"]
-    config.setdefault("cam", {})["enabled"] = states["visualization.cam"]
-    config.setdefault("stage_trace", {})["enabled"] = states["visualization.stage_trace"]
     if args.mode:
         config["mode"] = args.mode
     project_root = Path(str(config["project"]["root"]))
@@ -256,6 +247,7 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
     feature_values = config.get("features") if isinstance(config.get("features"), Mapping) else {}
     cam_values = config.get("cam") if isinstance(config.get("cam"), Mapping) else {}
     stage_values = config.get("stage_trace") if isinstance(config.get("stage_trace"), Mapping) else {}
+    module_states = config["modules"]
     records: list[dict[str, Any]] = []
     canonical_raw_records: list[Mapping[str, Any]] = []
     canonical_final_records: list[Mapping[str, Any]] = []
@@ -272,11 +264,11 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
             with torch.no_grad():
                 first_output = adapter.forward(tensor)
             entries = capture.snapshot()
-            if bool(feature_values.get("enabled", True)):
+            if module_states["visualization.features"]:
                 _stats, feature_links = render_features(entries, image_bgr, transform_meta, run_dir, stem, feature_values)
                 links.extend(feature_links)
         stage_info: dict[str, Any] = {}
-        if bool(stage_values.get("enabled", False)):
+        if module_states["visualization.stage_trace"]:
             stage_info = adapter.trace_stage(
                 tensor,
                 config,
@@ -296,7 +288,7 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
                     record = dict(stage_info["canonical_final_record"])
                     record["image_id"] = image_id
                     canonical_final_records.append(record)
-        if bool(cam_values.get("enabled", False)):
+        if module_states["visualization.cam"]:
             target_values = cam_values.get("target") if isinstance(cam_values.get("target"), Mapping) else {}
             selection = str(target_values.get("selection", "highest_score")).lower()
             if selection not in {"highest_score", "class_highest", "index"}:
@@ -362,7 +354,7 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
         records.append({"image": str(image_path), "links": sorted(set(links))})
         print(f"[{len(records)}/{len(images)}] {image_path.name} -> {len(links)} 个输出")
 
-    if bool(stage_values.get("enabled", False)) and bool(stage_values.get("export_canonical", True)):
+    if module_states["visualization.stage_trace"] and bool(stage_values.get("export_canonical", True)):
         canonical_root = run_dir / "canonical"
         raw_canonical_path = canonical_root / "raw_predictions.json"
         final_canonical_path = canonical_root / "final_predictions.json"
@@ -387,8 +379,8 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
         "images": records,
         "layers": module_names,
         "preset": preset,
-        "stage_trace": bool(stage_values.get("enabled", False)),
-        "cam": bool(cam_values.get("enabled", False)),
+        "stage_trace": module_states["visualization.stage_trace"],
+        "cam": module_states["visualization.cam"],
     })
     write_runtime_state(
         run_dir / "runtime_state.json",
@@ -397,8 +389,8 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
             "precision": (config.get("model") or {}).get("precision", "fp32"),
             "fuse": bool((config.get("model") or {}).get("fuse", False)),
             "layers": module_names,
-            "stage_trace": bool(stage_values.get("enabled", False)),
-            "cam": bool(cam_values.get("enabled", False)),
+            "stage_trace": module_states["visualization.stage_trace"],
+            "cam": module_states["visualization.cam"],
         },
         effective={**adapter.runtime_state, "layers": module_names, "preset": preset},
         source={

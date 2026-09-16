@@ -3,12 +3,12 @@
 ## 入口
 
 ```bash
-python model_visualization/run_visualization.py --config model_visualization/config/pycharm_run.yaml
+python model_visualization/run_visualization.py --config model_visualization/config/config.yaml
 python model_visualization/run_visualization.py --list-modules
-python run_tools.py --tool visualization --config model_visualization/config/pycharm_run.yaml
+python run_tools.py --tool visualization --config model_visualization/config/config.yaml
 ```
 
-默认读取 `model_visualization/config/pycharm_run.yaml`；PyCharm 直接运行 `run_visualization.py` 等价。
+默认读取 `model_visualization/config/config.yaml`。
 
 这个目录只负责“看模型内部发生了什么”，不重复 Ultralytics 已有的训练曲线、验证指标和普通预测保存。
 首版适配本仓库的 Ultralytics/YOLO26 检测模型，其他 PyTorch 模型可按 `adapters/ultralytics.py` 的边界扩展。
@@ -20,7 +20,7 @@ python run_tools.py --tool visualization --config model_visualization/config/pyc
 ```bash
 python -m pip install -r model_visualization/requirements.txt
 python -m pip install -e ./ultralytics-cn
-python model_visualization/run_visualization.py --config model_visualization/config/pycharm_run.yaml
+python model_visualization/run_visualization.py --config model_visualization/config/config.yaml
 ```
 
 配置中至少替换：
@@ -34,7 +34,7 @@ input:
 
 每次运行创建一个新的 `model_visualization/runs/runN/`，打开其中的 `index.html` 查看图片和链接。
 
-特征图、CAM 和检测阶段追踪统一由配置中的 `modules` 控制，PyCharm 直接运行与终端等价：
+特征图、CAM 和检测阶段追踪统一由配置中的 `modules` 控制：
 
 ```bash
 python model_visualization/run_visualization.py --only visualization.features
@@ -53,8 +53,7 @@ YOLO26 默认选择 `one2one` 分支。选择 `one2many` 时，final 阶段调�
 ## 配置边界
 
 - 日常只修改 `modules.visualization.features`、`modules.visualization.cam` 和
-  `modules.visualization.stage_trace`；`features.enabled`、`cam.enabled`、
-  `stage_trace.enabled` 只是兼容字段，入口会与模块开关同步。
+  `modules.visualization.stage_trace`。
 - `input.size` 当前使用固定尺寸 letterbox；记录了原图尺寸、缩放比例和 padding，叠加图会还原到原图坐标。
 - `features.channels` 支持 `first`、`variance`、`explicit`；默认每层保存前 16 个通道和一个 `mean_abs` 聚合图。
 - `cam.target.kind` 支持 `raw_candidate`、`final_detection`；`index` 是检测头的精确 anchor 索引，不是绘图排序后的序号。

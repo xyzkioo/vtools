@@ -117,8 +117,6 @@ def main() -> int:
     run_dir = prepare_run_directory(config, args.run_dir)
     config_path = str(config["_config_path"])
     run_values = config.get("run_all", {})
-    pytorch_values = config.get("pytorch", {})
-    tensorrt_values = config.get("tensorrt", {})
     selected_modules = resolve_speed_modules(config, only=args.only, enable=args.enable, disable=args.disable)
     # ``--only`` is an exclusive plan: route each selected module to the
     # backend that owns it, so a PyTorch module is not accidentally measured
@@ -152,16 +150,16 @@ def main() -> int:
         if value:
             module_args.extend([f"--{flag}", str(value)])
 
-    if run_pytorch_stage and bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
+    if run_pytorch_stage:
         state, rows = _invoke("pytorch", "backends.pytorch_vision_speed_benchmark_v2", config_path, run_dir, module_args)
         stage_status.append(state)
         current_rows.extend(rows)
     else:
-        print("[跳过] 本次模块选择不需要 PyTorch 阶段，或 run_all.run_pytorch/pytorch.enabled 为 false")
+        print("[跳过] 本次模块选择不需要 PyTorch 阶段")
 
-    if run_tensorrt_stage and bool(run_values.get("run_tensorrt", True)) and bool(tensorrt_values.get("enabled", True)):
+    if run_tensorrt_stage:
         trt_module_args = list(module_args)
-        if not (args.only or args.enable or args.disable) and run_pytorch_stage and bool(run_values.get("run_pytorch", True)) and bool(pytorch_values.get("enabled", True)):
+        if not (args.only or args.enable or args.disable) and run_pytorch_stage:
             # PyTorch stage already owns these modules in a one-click run.
             # Pass explicit disables to TensorRT so each module runs once.
             trt_module_args.extend(["--disable", "speed.pytorch_call"])
@@ -171,12 +169,12 @@ def main() -> int:
         current_rows.extend(rows)
         tensorrt_failed = state["status"] != "succeeded"
     else:
-        print("[跳过] 本次模块选择不需要 TensorRT 阶段，或 run_all.run_tensorrt/tensorrt.enabled 为 false")
+        print("[跳过] 本次模块选择不需要 TensorRT 阶段")
 
-    run_consistency_stage = (not only_values and "modules" not in config) or any(
+    run_consistency_stage = any(
         selected_modules.get(key) for key in ("consistency.tensor", "consistency.detection")
     )
-    if run_consistency_stage and bool(run_values.get("run_consistency", True)) and bool(config.get("consistency", {}).get("enabled", False)):
+    if run_consistency_stage:
         if tensorrt_failed:
             # 不在本次转换失败之后悄悄验证磁盘里遗留的旧 engine。
             reason = "本次 TensorRT 阶段失败，一致性未执行；修复后重跑，或单独检查指定的已有 engine"
@@ -186,7 +184,7 @@ def main() -> int:
             state, _ = _invoke("consistency", "checks.vision_consistency", config_path, run_dir, module_args)
             stage_status.append(state)
     else:
-        print("[跳过] run_all.run_consistency 或 consistency.enabled 为 false")
+        print("[跳过] 本次模块选择不需要一致性检查")
 
     summary = Path(
         run_values.get("summary_output", "runs-profile/vision_benchmark_summary.csv")
@@ -200,8 +198,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # PyCharm 可能没有继承终端中的 LD_LIBRARY_PATH；在导入 ONNX 前
-    # 自动切换到当前 conda 环境的 libstdc++，避免一致性阶段出现 CXXABI 错误。
+    # 在导入 ONNX 前补充当前 conda 环境的动态库路径。
     from core.vision_runtime import ensure_conda_library_path
 
     ensure_conda_library_path()

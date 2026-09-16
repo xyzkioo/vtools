@@ -28,7 +28,7 @@
 必需输入：
 
 - `model.weights`：本地 Ultralytics 可加载的检测 `.pt` 权重。
-- `model.task: detect`：独立检测分支；加载后检查 `YOLO(...).task == "detect"`。
+- `model.task: detect`：独立检测任务；加载后检查 `YOLO(...).task == "detect"`。
 - `dataset.data`：包含类别名称和数据划分的 YOLO YAML。
 - `evaluation.split`：默认 `val`；同一次压缩前后必须使用相同划分与参数。
 
@@ -67,7 +67,7 @@ names:
 
 ```bash
 python run_tools.py --tool compression \
-  --config model_compression/config/pycharm_run.yaml \
+  --config model_compression/config/config.yaml \
   --task detect \
   --weights /absolute/path/to/best.pt \
   --data /absolute/path/to/data.yaml \
@@ -128,8 +128,7 @@ flowchart TD
 | `model_compression/modules/pruning.py` | `prune_unstructured()` | 复用全局 L1 剪枝与实际稀疏度统计 |
 | `model_compression/modules/structured.py` | `build_structured_detector()`、`finetune_structured_detector()` | 按 Ultralytics `scales` 重建较小检测网络、迁移匹配权重并可选微调 |
 | `model_compression/modules/dependency_pruning.py` | `prune_detector_dependency_aware()` | 建立 `torch-pruning.DependencyGraph`，物理删除阶段通道并同步依赖层 |
-| `model_compression/core/registry.py` | `ModelRegistry.add_version()`、`advance_branch()` | 记录来源与产物版本，通过验证后推进分支 |
-| `model_compression/core/run_manager.py` | `prepare_run_directory()`、`write_json()` | 独立运行目录、报告落盘 |
+| `model_compression/core/run_manager.py` | `prepare_run_directory()`、`write_json()` | 独立运行目录和汇总报告落盘 |
 | `model_compression/run_model_compression.py` | `_run_comparison()` | 检测指标差值与产物对比 |
 
 `core/detection.py` 已实现检测分派；结构化路径仍需在目标硬件和正式数据集上完成最终精度/延迟验收。
@@ -214,7 +213,7 @@ compression:
     max_map50_95_drop: 0.05
 ```
 
-`initial_weights` 可填写目标规模对应的预训练权重，例如 `yolo26n.pt`，这样可以把目标网络的骨干权重先迁移过来；留空时会在仓库或源模型项目的 `weights/` 目录自动寻找对应文件，找不到才从源模型按形状匹配。`finetune_epochs: 0` 只构建、保存和测速，适合先检查结构；正式使用建议使用与原模型相近的训练预算（当前示例为 80 轮）并重新验证。默认精度门禁要求 mAP50-95 下降不超过 0.05，未通过时不会把产物推进到模型注册表；可将 `quality_gate: false` 用于保留纯实验结果。运行目录会写入 `models/structured-<scale>.yaml`、`models/yolo-structured.pt` 和 `structured_pruning.json`，报告包含源/目标参数量、参数下降比例、初始化权重迁移数量、压缩前后 mAP 以及同设备同输入尺寸的中位延迟和 P95 延迟。
+`initial_weights` 可填写目标规模对应的预训练权重，例如 `yolo26n.pt`，这样可以把目标网络的骨干权重先迁移过来；留空时会在仓库或源模型项目的 `weights/` 目录自动寻找对应文件，找不到才从源模型按形状匹配。`finetune_epochs: 0` 只构建、保存和测速，适合先检查结构；正式使用建议使用与原模型相近的训练预算（当前示例为 80 轮）并重新验证。默认精度门禁要求 mAP50-95 下降不超过 0.05，未通过时将结果标记为失败且不能作为后续阶段输入；可将 `quality_gate: false` 用于保留纯实验结果。产物统一写入 `artifacts/structured_pruning/`，报告包含源/目标参数量、参数下降比例、初始化权重迁移数量、压缩前后 mAP 以及同设备同输入尺寸的中位延迟和 P95 延迟。
 
 当前仓库配置是针对 `train-goodn10/best.pt` 的第一套平衡参数：训练尺寸沿用原模型的 1024，batch size 为 2，优化器显式设为 AdamW，避免 Ultralytics 的 `optimizer=auto` 忽略学习率。换用其他模型时，应从该模型自己的训练配置重新设置这些值。
 
@@ -250,7 +249,6 @@ TensorRT 路径需要匹配的 NVIDIA GPU、CUDA、TensorRT；Windows/Ubuntu UI 
 
 ```yaml
 schema_version: 1
-operation: all
 project:
   root: ../..
   python_paths: []
@@ -258,9 +256,6 @@ run:
   enabled: true
   root: ./model_compression/runs
   name: auto
-storage:
-  root: ./model_compression/store
-  registry: registry.json
 model:
   name: yolo_detector
   task: detect
@@ -270,9 +265,6 @@ model:
 dataset:
   data: /absolute/path/to/data.yaml
   input_size: [640, 640]
-branch:
-  name: yolo-pruning-experiment
-  from_version: null
 compression:
   sparsity: 0.30
   exclude: []
@@ -302,7 +294,7 @@ modules:
   artifact.export: false
 ```
 
-`task: detect` 路由优先于历史默认 `adapter: torch`，不经过分类评估。用户更换权重但分支已有其他模型来源时，必须选择新分支或明确恢复已有版本，禁止静默忽略新权重。
+`task: detect` 路由优先于历史默认 `adapter: torch`，不经过分类评估。每次运行只使用当前配置显式提供的权重；要处理其他模型，启动新的 runN 并传入新的 `model.weights`。
 
 ## 7. 输出与异常契约
 
@@ -311,26 +303,28 @@ modules:
 ```text
 runN/
   effective_config.json
-  run_info.json
-  baseline.json
-  pruning.json
-  comparison.json
   summary.json
-  lineage.json
-  models/yolo-pruned.pt
-  models/yolo-structured.pt
-  models/structured-<scale>.yaml
-  structured_pruning.json
-  baseline_validation/    # 验证图表和检测样例
-  before_pruning/
-  after_pruning/
+  baseline_validation/             # 验证图表和检测样例
+  before_unstructured_pruning/
+  after_unstructured_pruning/
+  before_structured_pruning/
+  after_structured_pruning/
+  artifacts/
+    structured_pruning/
+      yolo-structured.pt
+      structured-<scale>-vtools.yaml
+    unstructured_pruning/
+      yolo-unstructured-l1.pt
+    distillation/
+    quantization/
+    multi_processing/
 ```
 
-报告字段至少包括：来源/产物路径和 SHA256、Ultralytics/PyTorch 版本及源码位置、数据 YAML 与验证参数、mAP50、mAP50-95、Precision、Recall、剪枝比例/实际零值比例、文件大小、重载结果、模块错误。
+报告字段至少包括：公共模型信息、数据 YAML 与验证参数、mAP50、mAP50-95、Precision、Recall、剪枝比例/实际零值比例、文件大小、重载结果、模块错误。产物路径使用相对于 runN 的路径；完整配置和环境信息只在 `effective_config.json` 或 summary 的公共模型段保留，不重复写入每个阶段。
 
 mAP 使用 0–1 数值，精度差值为 `after - before`。报告分别列出稀疏度、文件缩小比例和实测速度，未知值为空。速度测试只有在同设备、同输入和同计时口径下可比较。
 
-退出码 0 表示所有所选模块完成；任意模块失败返回非零并保存具体原因。基线失败不得继续执行依赖其结果的变换。压缩后重载/验证失败时保留调试文件，但不推进模型版本指针。
+退出码 0 表示所有所选模块完成；任意模块失败返回非零并保存具体原因。基线失败不得继续执行依赖其结果的变换。压缩后重载/验证失败时保留调试文件，但不得把失败产物作为后续阶段输入。跨运行继续处理时，将上一运行 summary 中的相对 artifact 路径与该 runN 目录拼成实际路径，再传入 `model.weights`。
 
 UI 的结果页只预览图片。数据报告保存在磁盘；任务结束提示状态和目录，失败额外显示本次错误，不能读取上一次任务的错误作为原因。
 
@@ -344,7 +338,7 @@ P0 验收：
 4. 剪枝前后使用同一数据和验证参数，输出四项检测指标；基线与直接调用 YOLO.val 一致。
 5. 原始权重校验和不变；稀疏度符合设定；保存的 checkpoint 可在新进程加载，至少完成一次有标签验证。
 6. 压缩后出现精度下降也如实报告；不以“文件成功写出”替代验证。
-7. 换权重不复用错误分支；失败不推进 head；重复运行不覆盖产物。
+7. 换权重启动新的 runN；失败不作为后续阶段输入；重复运行不覆盖产物。
 8. 分类原有测试继续通过；Ubuntu 实测，Windows 至少完成路径/子进程兼容检查并单独记录未实测项。
 
-截至本文编写：检测入口、基线/非结构化剪枝/结构化缩放/导出分派、UI 任务切换和 `data.yaml` 输入已接入；结构化路径支持按 YAML 规模重建网络、可选微调、保存重载、mAP 对比和固定输入测速；注册表并发合并、唯一产物和失败退出码已接入。真实 GPU/TensorRT、完整训练和 Windows 端到端验收仍需在对应环境执行，不能由本地无依赖单元测试代替。
+截至本文编写：检测入口、基线/非结构化剪枝/结构化缩放/导出分派、UI 任务切换和 `data.yaml` 输入已接入；结构化路径支持按 YAML 规模重建网络、可选微调、保存重载、mAP 对比和固定输入测速；独立运行目录、扁平 summary、唯一产物和失败退出码已接入。真实 GPU/TensorRT、完整训练和 Windows 端到端验收仍需在对应环境执行，不能由本地无依赖单元测试代替。

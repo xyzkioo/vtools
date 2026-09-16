@@ -93,13 +93,18 @@ def _resolve(value: Any, base: Path) -> Optional[Path]:
 def load_config(path: str | Path | None = None, *, allow_missing_source: bool = False) -> dict[str, Any]:
     import yaml
 
-    config_path = Path(path) if path else Path(__file__).resolve().parents[1] / "config" / "pycharm_run.yaml"
+    config_path = Path(path) if path else Path(__file__).resolve().parents[1] / "config" / "config.yaml"
     config_path = config_path.expanduser().resolve()
     if not config_path.is_file():
         raise FileNotFoundError(f"找不到可视化配置：{config_path}")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, Mapping):
         raise ValueError("可视化配置顶层必须是 YAML 对象")
+    for section in ("features", "cam", "stage_trace"):
+        if isinstance(raw.get(section), Mapping) and "enabled" in raw[section]:
+            raise ValueError(f"已移除旧版配置字段：{section}.enabled；请使用 modules.visualization.{section}")
+    if not isinstance(raw.get("modules"), Mapping):
+        raise ValueError("可视化配置必须包含 modules: module_id: true/false")
     config: dict[str, Any] = json.loads(json.dumps(raw))
     config["_config_path"] = str(config_path)
     project = dict(config.get("project") or {})

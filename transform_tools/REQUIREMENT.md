@@ -102,7 +102,7 @@ dotnet --version
 ~/miniconda3/lib/dotnet
 ```
 
-如果你的 .NET 实际安装在其他位置，请在 PyCharm 的 Run Configuration 或终端中
+如果你的 .NET 实际安装在其他位置，请在终端中
 设置正确的 `DOTNET_ROOT`，例如 `/usr/share/dotnet`。不要把不存在的目录写入
 `DOTNET_ROOT`，否则可能出现 `Failed to initialize hostfxr`。
 

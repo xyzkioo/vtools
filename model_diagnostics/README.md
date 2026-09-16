@@ -5,10 +5,10 @@
 ```bash
 python model_diagnostics/run_model_diagnostics.py
 python model_diagnostics/run_model_diagnostics.py --help
-python run_tools.py --tool diagnostics --config model_diagnostics/config/pycharm_run.yaml
+python run_tools.py --tool diagnostics --config model_diagnostics/config/config.yaml
 ```
 
-默认读取 `model_diagnostics/config/pycharm_run.yaml`；PyCharm 直接运行 `run_model_diagnostics.py` 等价。
+默认读取 `model_diagnostics/config/config.yaml`。
 
 本项目只评估目标检测质量与错误来源，不计算参数量、FLOPs、显存和延迟。适配器接口与 [vtools 的 `speed_test` adapter](https://github.com/xyzkioo/vtools/tree/main/speed_test/adapters) 对齐，因此可以复制模型适配器，再修改 YAML 完成测试；使用已有预测文件的核心诊断不依赖 Ultralytics，模式 B 或 NDJSON 转换才需要它。
 
@@ -17,7 +17,7 @@ python run_tools.py --tool diagnostics --config model_diagnostics/config/pycharm
 `diagnostics.overlap` 和 `output.bad_cases/images/html` 都可独立开关。mAP、AP50、
 阈值扫描等常规评估交给 Ultralytics 原生验证，诊断流程不会重复计算。
 
-## PyCharm 直接运行
+## 使用前检查
 
 建议先检查运行环境：
 
@@ -34,12 +34,7 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 
 环境检查脚本会检查 PyTorch、CUDA 和 `YOLO` 的训练、推理、验证接口。
 
-然后：
-
-1. 用 PyCharm 打开 `model_diagnostics` 文件夹。
-2. 修改带中文注释的 `config/pycharm_run.yaml`。
-3. 直接运行同目录的 `run_model_diagnostics.py`。
-4. 每次结果写入 `runs/runN/<mode_name>/`，不会覆盖上一次运行。
+然后修改带中文注释的 `config/config.yaml`，从桌面 UI 选择“检测诊断”，或在仓库根目录执行运行器。每次结果写入 `runs/runN/<mode_name>/`，不会覆盖上一次运行。
 
 入口配置使用 A/B/C 三种互斥模式，不再需要 `models[].enabled`：
 
@@ -55,7 +50,7 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 
 ### 配置模块开关
 
-`config/pycharm_run.yaml` 中的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50
+`config/config.yaml` 中的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50
 和阈值曲线由 Ultralytics 原生 `val` 提供，诊断入口不会重复计算；只有显式打开
 `diagnostics.threshold_sweep` 等模块时才会执行对应分析。
 
@@ -69,7 +64,7 @@ modules:
   output.html: false
 ```
 
-PyCharm 直接运行 `run_model_diagnostics.py` 即可；终端也可以临时覆盖同一组开关：
+终端也可以临时覆盖同一组开关：
 
 ```bash
 python model_diagnostics/run_model_diagnostics.py --only diagnostics.overlap
