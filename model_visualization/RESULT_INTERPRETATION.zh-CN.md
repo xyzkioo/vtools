@@ -19,7 +19,7 @@ index.html
 
 - `runtime_state.json`：实际使用的模型、设备、精度和源码路径；
 - `config_used.yaml` 或 `config_used.json`：本次运行真正使用的配置；
-- `image_metadata.json`：原图尺寸、输入尺寸、缩放比例和 padding。
+- `images/<短ID>/image_meta.json`：原图尺寸、输入尺寸、缩放比例和 padding，同时保留完整 `image_id` 与原始路径。
 
 如果模型路径、图片路径、设备或输入尺寸不对，后面的热力图没有分析价值。
 
@@ -199,10 +199,12 @@ stage_trace:
   export_canonical: true
 ```
 
-会生成：
+会按图片生成：
 
-- `canonical/raw_predictions.json`：筛选前预测；
-- `canonical/final_predictions.json`：最终预测。
+- `canonical/raw_<短ID>.json`：该图片的筛选前预测；
+- `canonical/final_<短ID>.json`：该图片的最终预测。
+
+`<短ID>` 形如 `img_a1b2c3d4e5f6`。JSON 的 `image_id`、`file_name`、`metadata.source_image_path` 保留完整图片标识和原始路径，`run_metadata.json` 与 `index.html` 也保存同一映射。不会再生成跨图片的 `raw_predictions.json` 或 `final_predictions.json`。
 
 这些文件可以直接作为 `model_diagnostics` 的预测输入，用于继续分析 Precision、Recall、误检和漏检。
 
@@ -211,7 +213,7 @@ stage_trace:
 ```text
 可视化阶段追踪
   -> 找到候选在哪一层、哪一步消失
-  -> canonical/final_predictions.json
+  -> canonical/final_<短ID>.json
   -> 检测诊断统计整体指标
 ```
 

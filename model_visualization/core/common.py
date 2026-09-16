@@ -44,9 +44,13 @@ def safe_name(value: Any, fallback: str = "item") -> str:
 
 
 def image_output_name(image_id: str) -> str:
-    """Create a readable, collision-resistant directory name for one image ID."""
-    digest = hashlib.sha1(str(image_id).encode("utf-8")).hexdigest()[:10]
-    return f"{safe_name(image_id)}_{digest}"
+    """Create a short, collision-resistant ID for one image.
+
+    The complete logical ID and source path are stored in per-image metadata;
+    output paths use only this short ID.
+    """
+    digest = hashlib.sha1(str(image_id).encode("utf-8")).hexdigest()[:12]
+    return f"img_{digest}"
 
 
 def resolve_device(value: Any):
@@ -343,12 +347,18 @@ def append_html_index(run_dir: Path, records: list[Mapping[str, Any]]) -> None:
     """写不依赖外部资源的简单离线索引。"""
     cards = []
     for record in records:
-        image = html.escape(str(record.get("image", "")))
+        image_id = html.escape(str(record.get("image_id", record.get("image", ""))))
+        source = html.escape(str(record.get("source_image_path", record.get("image", ""))))
+        output_id = html.escape(str(record.get("output_id", "")))
         links = " ".join(
             f'<a href="{html.escape(str(x), quote=True)}">{html.escape(str(x))}</a>'
             for x in record.get("links", [])
         )
-        cards.append(f"<article><h2>{image}</h2><p>{links}</p></article>")
+        cards.append(
+            f"<article><h2>{image_id}</h2>"
+            f"<p>输出标识：{output_id}<br>原始路径：{source}</p>"
+            f"<p>{links}</p></article>"
+        )
     html_text = "<!doctype html><meta charset='utf-8'><title>vtools 可视化报告</title><style>body{font-family:sans-serif}article{border-bottom:1px solid #ddd;padding:1em}a{margin-right:1em}</style>" + "".join(cards)
     (run_dir / "index.html").write_text(html_text, encoding="utf-8")
 

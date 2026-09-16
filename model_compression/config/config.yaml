@@ -1,0 +1,67 @@
+schema_version: 1
+project:
+  root: ../..
+  python_paths: []
+run:
+  enabled: true
+  root: ./model_compression/runs
+  name: auto
+model:
+  name: base_model
+  adapter: torch
+  weights: ''
+  factory: null
+  task: detect
+  device: auto
+dataset:
+  data: ''
+  train: ''
+  val: ''
+  input_size:
+  - 832
+  - 832
+compression:
+  sparsity: 0.3
+  exclude: []
+  structured:
+    method: torch_pruning
+    target_scale: m
+    initial_weights: ''
+    finetune_epochs: 80
+    train_input_size: 1024
+    batch_size: 2
+    learning_rate: 0.001
+    optimizer: auto
+    benchmark_warmup: 5
+    benchmark_repeats: 20
+    quality_gate: true
+    max_map50_95_drop: 0.05
+    channel_sparsity: 0.1
+    channel_round: 8
+    max_pruned_layers: 6
+    stage_selection: all
+    importance_norm: 2
+    pruning_input_size: 640
+distillation:
+  teacher_weights: ''
+  student_weights: ''
+  student_factory: null
+  temperature: 4.0
+  alpha: 0.5
+  epochs: 1
+  batch_size: 16
+  learning_rate: 0.001
+  seed: 0
+evaluation:
+  split: val
+export:
+  path: null
+modules:
+  model.parameters: true
+  baseline.evaluate: true
+  compression.quantize.dynamic_int8: false
+  compression.prune.unstructured: true
+  compression.prune.structured: false
+  distillation.classification: false
+  comparison.report: false
+  artifact.export: false

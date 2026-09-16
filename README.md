@@ -291,7 +291,9 @@ modules:
 | `features/`、`activations/` | 指定通道图、聚合激活图和原图叠加图；`layers.modules` 可改成任意模块名 |
 | `cams/` | 开启 `modules.visualization.cam` 后生成 Grad-CAM/LayerCAM；解释前向固定使用 FP32 |
 | `stage_trace/` | 开启 `modules.visualization.stage_trace` 后保存 raw candidate、head top-k、final、事件 JSONL、P 层/网格索引和 overlay |
-| `canonical/` | raw/final 的 canonical JSON，可直接交给 `model_diagnostics` 做阶段对照 |
+| `canonical/` | 按图片保存的 `raw_<短ID>.json` 和 `final_<短ID>.json`，可直接交给 `model_diagnostics` 做阶段对照；不再生成全量汇总 JSON |
+
+可视化输出目录使用短图片 ID（如 `img_a1b2c3d4e5f6`）作为文件夹和文件名。每个单图 JSON、`run_metadata.json` 和 `index.html` 同时保留完整 `image_id` 与原始图片路径，方便从短路径追溯回输入图片。
 
 阶段追踪只使用检测头自己的索引：每个候选会记录 `raw_index`、`source_level`（如 P3/P4/P5）、`source_index`、stride 和网格坐标；YOLO26 的 `one2one` 分支按 top-k 与置信度形成 final，`one2many` 分支沿用 Ultralytics NMS 并保留 `return_idxs=True` 的精确索引。不会用近似 IoU 推断候选来源。首版目标是检测任务，其他模型需要实现同等 adapter 接口。
 

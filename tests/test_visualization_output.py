@@ -6,7 +6,7 @@ from unittest.mock import patch
 import numpy as np
 
 from model_visualization.core.capture import _aggregate, _channel_indices
-from model_visualization.core.common import append_html_index, load_config, parse_size, write_image
+from model_visualization.core.common import append_html_index, image_output_name, load_config, parse_size, write_image
 
 
 class VisualizationOutput(unittest.TestCase):
@@ -61,6 +61,13 @@ class VisualizationOutput(unittest.TestCase):
             self.assertNotIn("<script>", text)
             self.assertNotIn('onmouseover="bad', text)
             self.assertIn("&lt;script&gt;", text)
+
+    def test_image_output_name_is_short_and_stable(self):
+        image_id = "val/images/a_very_long_original_image_name_with_nested_directories.jpg"
+        output_id = image_output_name(image_id)
+        self.assertRegex(output_id, r"^img_[0-9a-f]{12}$")
+        self.assertEqual(output_id, image_output_name(image_id))
+        self.assertNotIn("a_very_long", output_id)
 
 
 if __name__ == "__main__":

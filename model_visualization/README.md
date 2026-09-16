@@ -48,7 +48,9 @@ python model_visualization/run_visualization.py --list-modules
 2. **CAM**：设置 `modules.visualization.cam: true`，`cam.method` 可选 `gradcam` 或 `layercam`。CAM 前向固定用 FP32；它需要梯度，运行会明显慢于普通特征图。
 3. **阶段追踪**：设置 `modules.visualization.stage_trace: true`，保存 `raw_candidates.json`、`head_topk.json`、`candidates.jsonl`、`stage_summary.csv`、`stage_events.jsonl`、`final_detections.json` 和可选 `raw_arrays.npz`。每个 raw 候选都带有 `raw_index`、`source_level`、stride、网格坐标、`in_head_topk`、`in_final` 和 `filter_reason`。
 
-YOLO26 默认选择 `one2one` 分支。选择 `one2many` 时，final 阶段调用 Ultralytics 的 NMS 并使用其 `return_idxs=True` 索引；不会通过 IoU 反推候选来源。`canonical/` 下的 raw/final JSON 可以直接作为 `model_diagnostics` 的预测输入。
+YOLO26 默认选择 `one2one` 分支。选择 `one2many` 时，final 阶段调用 Ultralytics 的 NMS 并使用其 `return_idxs=True` 索引；不会通过 IoU 反推候选来源。`canonical/` 下按图片保存的 `raw_<短ID>.json` 和 `final_<短ID>.json` 可以直接作为 `model_diagnostics` 的预测输入；不再生成 `raw_predictions.json` 或 `final_predictions.json` 全量汇总文件。
+
+所有图片相关输出都使用短 ID（如 `img_a1b2c3d4e5f6`）命名。完整逻辑 `image_id`、原始图片路径和短 ID 会写入单图 JSON、`run_metadata.json` 和 `index.html`，因此短路径仍可追溯。
 
 ## 配置边界
 

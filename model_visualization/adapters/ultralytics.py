@@ -440,15 +440,21 @@ class UltralyticsAdapter:
         if run_dir is not None:
             stage_root = run_dir / "stage_trace" / safe_name(image_stem)
             stage_root.mkdir(parents=True, exist_ok=True)
+            image_metadata = {
+                "output_id": image_stem,
+                "image_id": image_id,
+                "source_image_path": str(getattr(transform_meta, "source_path", "")),
+                "branch": branch,
+            }
             raw_path = stage_root / "raw_candidates.json"
             topk_path = stage_root / "head_topk.json"
             final_path = stage_root / "final_detections.json"
             events_path = stage_root / "stage_events.jsonl"
             summary_path = stage_root / "stage_summary.csv"
             candidates_path = stage_root / "candidates.jsonl"
-            write_json(raw_path, {"image_id": image_id, "branch": branch, "candidates": raw_rows})
-            write_json(topk_path, {"image_id": image_id, "branch": branch, "detections": topk_rows})
-            write_json(final_path, {"image_id": image_id, "branch": branch, "predictions": final_rows})
+            write_json(raw_path, {**image_metadata, "candidates": raw_rows})
+            write_json(topk_path, {**image_metadata, "detections": topk_rows})
+            write_json(final_path, {**image_metadata, "predictions": final_rows})
             write_csv(summary_path, summary_rows)
             with events_path.open("w", encoding="utf-8") as handle:
                 for event in summary_rows:
@@ -471,10 +477,10 @@ class UltralyticsAdapter:
             if bool(stage_values.get("export_canonical", True)):
                 canonical_root = run_dir / "canonical"
                 canonical_root.mkdir(parents=True, exist_ok=True)
-                raw_canonical = canonical_root / f"raw_predictions_{safe_name(image_stem)}.json"
-                final_canonical = canonical_root / f"final_predictions_{safe_name(image_stem)}.json"
-                write_json(raw_canonical, {"records": [result["canonical_raw_record"]], "metadata": {"stage": "raw_candidate", "branch": branch}})
-                write_json(final_canonical, {"records": [result["canonical_final_record"]], "metadata": {"stage": "final", "branch": branch}})
+                raw_canonical = canonical_root / f"raw_{safe_name(image_stem)}.json"
+                final_canonical = canonical_root / f"final_{safe_name(image_stem)}.json"
+                write_json(raw_canonical, {"records": [result["canonical_raw_record"]], "metadata": {**image_metadata, "stage": "raw_candidate"}})
+                write_json(final_canonical, {"records": [result["canonical_final_record"]], "metadata": {**image_metadata, "stage": "final"}})
                 result["links"].extend(str(path.relative_to(run_dir)) for path in (raw_canonical, final_canonical))
             if image_bgr is not None:
                 overlay = image_bgr.copy()

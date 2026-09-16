@@ -141,6 +141,7 @@ def _cam_outputs(
     run_dir: Path,
     config: Mapping[str, Any],
     candidate_index: int | None,
+    image_id: str,
     branch: str | None = None,
     target_rank: int | None = None,
 ) -> list[str]:
@@ -171,6 +172,9 @@ def _cam_outputs(
             "reason": "no_final_detection",
             "target_kind": "final_detection",
             "candidate_index": None,
+            "output_id": image_stem,
+            "image_id": image_id,
+            "source_image_path": str(getattr(transform_meta, "source_path", "")),
             "layers": [],
         })
         return [str(metadata_path.relative_to(run_dir))]
@@ -201,6 +205,9 @@ def _cam_outputs(
     if candidate_index is not None:
         metadata["candidate_index"] = candidate_index
     metadata["layers"] = list(maps)
+    metadata["output_id"] = image_stem
+    metadata["image_id"] = image_id
+    metadata["source_image_path"] = str(getattr(transform_meta, "source_path", ""))
     metadata_path = cam_root / "cam_meta.json"
     write_json(metadata_path, metadata)
     links.append(str(metadata_path.relative_to(run_dir)))
@@ -246,11 +253,8 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
         output_module_names = module_names
     feature_values = config.get("features") if isinstance(config.get("features"), Mapping) else {}
     cam_values = config.get("cam") if isinstance(config.get("cam"), Mapping) else {}
-    stage_values = config.get("stage_trace") if isinstance(config.get("stage_trace"), Mapping) else {}
     module_states = config["modules"]
     records: list[dict[str, Any]] = []
-    canonical_raw_records: list[Mapping[str, Any]] = []
-    canonical_final_records: list[Mapping[str, Any]] = []
     dataset_root = Path(input_values["dataset_root"]) if input_values.get("dataset_root") else None
     for image_path in images:
         image_id = _logical_image_id(image_path, source_root, dataset_root)
@@ -279,15 +283,6 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
                 image_id=image_id,
             )
             links.extend(stage_info.get("links", []))
-            if stage_info.get("status") == "ok":
-                if isinstance(stage_info.get("canonical_raw_record"), Mapping):
-                    record = dict(stage_info["canonical_raw_record"])
-                    record["image_id"] = image_id
-                    canonical_raw_records.append(record)
-                if isinstance(stage_info.get("canonical_final_record"), Mapping):
-                    record = dict(stage_info["canonical_final_record"])
-                    record["image_id"] = image_id
-                    canonical_final_records.append(record)
         if module_states["visualization.cam"]:
             target_values = cam_values.get("target") if isinstance(cam_values.get("target"), Mapping) else {}
             selection = str(target_values.get("selection", "highest_score")).lower()
@@ -341,40 +336,29 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
             if target_values.get("kind", "raw_candidate") == "final_detection" and cam_stage_info.get("status") != "ok":
                 candidates = [None]
             for rank, candidate_index in enumerate(candidates, 1):
-                links.extend(_cam_outputs(adapter, tensor, image_bgr, transform_meta, stem, run_dir, config, candidate_index, cam_stage_info.get("branch"), rank if len(candidates) > 1 else None))
+                links.extend(_cam_outputs(adapter, tensor, image_bgr, transform_meta, stem, run_dir, config, candidate_index, image_id, cam_stage_info.get("branch"), rank if len(candidates) > 1 else None))
         image_meta_path = run_dir / "images" / stem / "image_meta.json"
         write_json(image_meta_path, {
+            "output_id": stem,
             "image_id": image_id,
+            "source_image_path": str(getattr(transform_meta, "source_path", str(image_path.resolve()))),
             "source": transform_meta.to_dict(),
             "activation_names": list(entries),
             "stage_status": stage_info.get("status") if stage_info else "disabled",
             "model_output_type": type(first_output).__name__,
         })
         links.append(str(image_meta_path.relative_to(run_dir)))
-        records.append({"image": str(image_path), "links": sorted(set(links))})
+        records.append({
+            "output_id": stem,
+            "image_id": image_id,
+            "source_image_path": str(image_path.resolve()),
+            "links": sorted(set(links)),
+        })
         print(f"[{len(records)}/{len(images)}] {image_path.name} -> {len(links)} 个输出")
-
-    if module_states["visualization.stage_trace"] and bool(stage_values.get("export_canonical", True)):
-        canonical_root = run_dir / "canonical"
-        raw_canonical_path = canonical_root / "raw_predictions.json"
-        final_canonical_path = canonical_root / "final_predictions.json"
-        write_json(raw_canonical_path, {
-            "records": canonical_raw_records,
-            "metadata": {"stage": "raw_candidate", "images": len(canonical_raw_records)},
-        })
-        write_json(final_canonical_path, {
-            "records": canonical_final_records,
-            "metadata": {"stage": "final", "images": len(canonical_final_records)},
-        })
-        if records:
-            records[0]["links"].extend([
-                str(raw_canonical_path.relative_to(run_dir)),
-                str(final_canonical_path.relative_to(run_dir)),
-            ])
 
     append_html_index(run_dir, records)
     write_json(run_dir / "run_metadata.json", {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": mode,
         "images": records,
         "layers": module_names,

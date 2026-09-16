@@ -30,12 +30,19 @@ class StageExport(unittest.TestCase):
                 transform_meta=SimpleNamespace(original_width=20, original_height=20, source_path='/dataset/images/a.jpg'))
             self.assertEqual(result['status'], 'ok')
             self.assertAlmostEqual(result['raw_rows'][0]['class_scores'][0], 0.8)
-            for path in (root/'canonical').glob('*.json'):
+            canonical_files = sorted((root/'canonical').glob('*.json'))
+            self.assertEqual([path.name for path in canonical_files], ['final_safe_output_hash.json', 'raw_safe_output_hash.json'])
+            for path in canonical_files:
                 record = json.loads(path.read_text())['records'][0]
                 self.assertEqual(record['image_id'], 'images/a.jpg')
                 self.assertEqual(record['predictions'][0]['image_id'], 'images/a.jpg')
+                metadata = json.loads(path.read_text())['metadata']
+                self.assertEqual(metadata['output_id'], 'safe_output_hash')
+                self.assertEqual(metadata['source_image_path'], '/dataset/images/a.jpg')
             stage = json.loads((root/'stage_trace/safe_output_hash/final_detections.json').read_text())
             self.assertEqual(stage['image_id'], 'images/a.jpg')
+            self.assertEqual(stage['output_id'], 'safe_output_hash')
+            self.assertEqual(stage['source_image_path'], '/dataset/images/a.jpg')
 
     def test_failed_topk_is_not_reported_as_empty_success(self):
         from unittest.mock import patch
