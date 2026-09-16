@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 import yaml
-from vtools_ui.app import QApplication, ConfigEditorDialog, ToolPage, ToolSpec
+from vtools_ui.app import QApplication, ConfigEditorDialog, ResultsPage, ToolPage, ToolSpec, _ResultScanWorker
+from PySide6.QtWidgets import QToolButton
 
 
 class UIIntegration(unittest.TestCase):
@@ -30,6 +31,65 @@ class UIIntegration(unittest.TestCase):
             dialog._save()
             self.assertEqual(yaml.safe_load(path.read_text()), {'benchmark': {'device': 'cpu'}, 'extra': [1, 2]})
             dialog.deleteLater()
+
+    def test_diagnostics_graphical_fields_match_named_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.yaml'
+            path.write_text(
+                'mode: ultralytics_model\n'
+                'predictions_file:\n  predictions: predictions.json\n'
+                'ultralytics_model:\n  weights: model.pt\n  task: detect\n'
+                'custom_adapter:\n  adapter: adapter.py\n',
+                encoding='utf-8',
+            )
+            dialog = ConfigEditorDialog(path, 'diagnostics')
+            self.assertNotIn('mode_a.predictions', dialog.field_widgets)
+            self.assertNotIn('mode_b.weights', dialog.field_widgets)
+            self.assertEqual(dialog.field_widgets['mode'][0].currentText(), 'ultralytics_model')
+            self.assertEqual(dialog.field_widgets['ultralytics_model.weights'][0].text(), 'model.pt')
+            dialog.tabs.setCurrentIndex(0)
+            dialog.field_widgets['mode'][0].setCurrentText('predictions_file')
+            dialog._save()
+            saved = yaml.safe_load(path.read_text(encoding='utf-8'))
+            self.assertEqual(saved['mode'], 'predictions_file')
+            self.assertEqual(saved['predictions_file']['predictions'], 'predictions.json')
+            dialog.deleteLater()
+
+    def test_tool_page_has_single_config_editor_button(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.yaml'
+            path.write_text('mode: ultralytics_model\n', encoding='utf-8')
+            page = ToolPage(ToolSpec('diagnostics', 'test', '', 'diagnostics', path))
+            self.assertEqual(page.findChildren(QToolButton), [])
+            page.deleteLater()
+
+    def test_result_scan_includes_updated_output_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = [
+                root / 'runs' / 'run1' / 'summary.json',
+                root / 'runs' / 'run1' / 'raw_data' / 'details.csv',
+                root / 'runs' / 'run1' / 'artifacts' / 'quantization' / 'model.pt',
+                root / 'runs' / 'run1' / 'images' / 'case.png',
+                root / 'runs' / 'run1' / 'canonical' / 'final_img.json',
+                root / 'runs' / 'run1' / 'index.html',
+            ]
+            for file in files:
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(b'0')
+            stale_registry = root / 'store' / 'registry.json'
+            stale_registry.parent.mkdir(parents=True, exist_ok=True)
+            stale_registry.write_bytes(b'{}')
+            found = []
+            worker = _ResultScanWorker(
+                root,
+                root,
+                ResultsPage._SKIP_DIRS,
+                ResultsPage._IMAGE_SUFFIXES | ResultsPage._TEXT_SUFFIXES | ResultsPage._MODEL_SUFFIXES,
+            )
+            worker.finished.connect(lambda _root, result: found.append(result))
+            worker.run()
+            self.assertEqual(set(Path(item) for item in found[0]), set(files))
 
     def test_manual_path_change_and_legacy_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:

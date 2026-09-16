@@ -45,7 +45,6 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -95,8 +94,6 @@ QPushButton:pressed { background: #1c2430; }
 QPushButton#primary { background: #2f6fe4; border-color: #397cf5; color: white; font-weight: 600; }
 QPushButton#primary:hover { background: #3c7cf0; }
 QPushButton#danger { color: #ffb4b4; border-color: #6d3b42; }
-QToolButton { border: 0; padding: 6px; color: #aeb8c8; }
-QToolButton:hover { background: #242b36; border-radius: 5px; }
 QCheckBox { spacing: 10px; min-height: 30px; font-size: 14px; }
 QCheckBox::indicator { width: 20px; height: 20px; border: 1px solid #738198; border-radius: 4px; background: #10151c; }
 QCheckBox::indicator:hover { border-color: #8fb4ff; background: #172235; }
@@ -184,7 +181,10 @@ class _ResultScanWorker(QObject):
 
     def run(self) -> None:
         project_scan = self.root == self.project_root
-        result_markers = {"runs", "runs-profile", "results", "outputs", "reports", "store"}
+        # Results are self-contained in the run directories.  ``store`` was
+        # used by the old compression registry and is no longer an output
+        # location, so do not surface stale registry files in the UI.
+        result_markers = {"runs", "runs-profile", "results", "outputs", "reports"}
         files: list[Path] = []
         try:
             for base, dirs, names in os.walk(self.root):
@@ -443,12 +443,23 @@ class ConfigEditorDialog(QDialog):
 
         if self.tool_key == "diagnostics":
             self._add_section(layout, "运行与数据")
-            self._add_field(form, "mode", "运行模式", "combo", "B", ["A", "B", "C"])
+            self._add_field(
+                form,
+                "mode",
+                "运行模式",
+                "combo",
+                "ultralytics_model",
+                ["predictions_file", "ultralytics_model", "custom_adapter"],
+            )
             self._add_field(form, "dataset.data", "数据集 YAML", default="")
             self._add_field(form, "dataset.split", "数据集划分", "combo", "val", ["train", "val", "test"])
-            self._add_field(form, "mode_a.predictions", "已有预测文件", default="")
-            self._add_field(form, "mode_b.weights", "Ultralytics 权重", default="")
-            self._add_field(form, "mode_b.task", "模型任务", "combo", "detect", ["detect", "segment", "pose", "classify"])
+            self._add_field(form, "predictions_file.predictions", "已有预测文件", default="")
+            self._add_field(form, "predictions_file.pred_format", "预测文件格式", "combo", "auto", ["auto", "coco", "ndjson", "yolo"])
+            self._add_field(form, "ultralytics_model.weights", "Ultralytics 权重", default="")
+            self._add_field(form, "ultralytics_model.task", "Ultralytics 任务", "combo", "detect", ["detect", "segment", "pose", "classify"])
+            self._add_field(form, "custom_adapter.weights", "自定义模型权重", default="")
+            self._add_field(form, "custom_adapter.adapter", "自定义 Adapter", default="")
+            self._add_field(form, "custom_adapter.task", "自定义模型任务", "combo", "detect", ["detect", "segment", "pose", "classify"])
             self._add_section(layout, "推理与诊断")
             self._add_field(form, "benchmark.device", "运行设备", "combo", "auto", ["auto", "cpu", "cuda:0"])
             self._add_field(form, "benchmark.input_size", "输入尺寸", "size", [832, 832])
@@ -789,13 +800,6 @@ class ToolPage(QWidget):
         graphical.setToolTip("打开可编辑全部 YAML 字段的配置窗口")
         graphical.clicked.connect(self._open_config_editor)
         config_layout.addWidget(graphical)
-        gear = QToolButton()
-        gear.setText("⚙")
-        gear.setFixedSize(56, 56)
-        gear.setToolTip("打开 YAML 配置编辑器")
-        gear.setAccessibleName("打开 YAML 配置编辑器")
-        gear.clicked.connect(self._open_config_editor)
-        config_layout.addWidget(gear)
         form.addRow("配置文件", config_row)
 
         resource_row = QWidget()
@@ -1487,9 +1491,12 @@ class EnvironmentPage(QWidget):
 
 
 class ResultsPage(QWidget):
-    """Browse image results produced by vtools runs."""
+    """Browse result files produced by vtools runs."""
 
     _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff", ".svg"}
+    _TEXT_SUFFIXES = {".json", ".csv", ".html", ".md", ".txt", ".yaml", ".yml"}
+    _MODEL_SUFFIXES = {".pt", ".pth", ".onnx", ".engine", ".kmodel"}
+    _PREVIEW_BYTES = 256 * 1024
     _SKIP_DIRS = {".git", ".vtools_ui", "__pycache__"}
 
     def __init__(self, root: Path) -> None:
@@ -1509,7 +1516,7 @@ class ResultsPage(QWidget):
         title = QLabel("结果查看")
         title.setObjectName("pageTitle")
         outer.addWidget(title)
-        desc = QLabel("浏览诊断和可视化图片结果；这里只显示图片文件。")
+        desc = QLabel("浏览运行目录中的概要、详细数据、图片和模型产物。")
         desc.setObjectName("muted")
         desc.setWordWrap(True)
         outer.addWidget(desc)
@@ -1531,9 +1538,9 @@ class ResultsPage(QWidget):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.file_list = QListWidget()
-        # Keep the file browser wide enough to read generated names such as
-        # ``model.23.input.0.2_overlay.jpg``.  Without an explicit initial
-        # size QSplitter may collapse the first pane to its size hint.
+        # Keep the file browser wide enough to read run-relative paths.  Without
+        # an explicit initial size QSplitter may collapse the first pane to its
+        # size hint.
         self.file_list.setMinimumWidth(340)
         self.file_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -1545,8 +1552,9 @@ class ResultsPage(QWidget):
         preview_panel.setObjectName("panel")
         preview_layout = QVBoxLayout(preview_panel)
         preview_layout.setContentsMargins(12, 12, 12, 12)
-        self.preview_title = QLabel("选择一张图片")
+        self.preview_title = QLabel("选择一个结果文件")
         self.preview_title.setObjectName("muted")
+        self.preview_title.setWordWrap(True)
         preview_layout.addWidget(self.preview_title)
         self.preview_image = QLabel()
         self.preview_image.setObjectName("preview")
@@ -1554,11 +1562,19 @@ class ResultsPage(QWidget):
         self.preview_image.setMinimumSize(280, 220)
         self.preview_image.hide()
         preview_layout.addWidget(self.preview_image, 1)
-        self.preview_status = QLabel("只显示图片结果；文本、表格和模型文件不会出现在这里。")
+        self.preview_text = QPlainTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.hide()
+        preview_layout.addWidget(self.preview_text, 1)
+        self.preview_status = QLabel("选择文件查看内容；模型文件可从外部程序打开。")
         self.preview_status.setObjectName("muted")
         self.preview_status.setWordWrap(True)
         self.preview_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview_layout.addWidget(self.preview_status, 1)
+        self.open_file_button = QPushButton("打开所选文件")
+        self.open_file_button.setEnabled(False)
+        self.open_file_button.clicked.connect(self._open_selected)
+        preview_layout.addWidget(self.open_file_button)
         splitter.addWidget(preview_panel)
         splitter.setSizes([380, 820])
         splitter.setStretchFactor(0, 0)
@@ -1580,16 +1596,19 @@ class ResultsPage(QWidget):
         root = Path(self.root_edit.text()).expanduser().resolve()
         self.file_list.clear()
         self._image_path = None
+        self.preview_title.setText("选择一个结果文件")
         self.preview_image.hide()
+        self.preview_text.hide()
+        self.open_file_button.setEnabled(False)
         self.preview_status.show()
-        self.preview_status.setText("正在扫描图片结果…")
+        self.preview_status.setText("正在扫描结果文件…")
         if not root.is_dir():
             self.preview_status.setText(f"目录不存在：{root}")
             return
         if self._scan_thread is not None and self._scan_thread.isRunning():
             return
         self._scan_thread = QThread(self)
-        suffixes = self._IMAGE_SUFFIXES
+        suffixes = self._IMAGE_SUFFIXES | self._TEXT_SUFFIXES | self._MODEL_SUFFIXES
         self._scan_worker = _ResultScanWorker(root, ROOT.resolve(), self._SKIP_DIRS, suffixes)
         self._scan_worker.moveToThread(self._scan_thread)
         self._scan_thread.started.connect(self._scan_worker.run)
@@ -1622,15 +1641,23 @@ class ResultsPage(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, str(path))
             item.setToolTip(str(relative))
             self.file_list.addItem(item)
-        self.preview_status.setText(f"找到 {len(files)} 张图片。")
+        self.preview_status.setText(f"找到 {len(files)} 个结果文件。")
 
     def _preview_selected(self) -> None:
         item = self.file_list.currentItem()
         if not item:
-            self.preview_status.setText("选择一张图片预览")
+            self._image_path = None
+            self.preview_image.hide()
+            self.preview_text.hide()
+            self.open_file_button.setEnabled(False)
+            self.preview_status.show()
+            self.preview_status.setText("选择一个文件预览")
             return
         path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
         self.preview_title.setText(str(path))
+        self.open_file_button.setEnabled(path.is_file())
+        self.preview_image.hide()
+        self.preview_text.hide()
         suffix = path.suffix.lower()
         if suffix in self._IMAGE_SUFFIXES:
             self._image_path = path
@@ -1639,9 +1666,30 @@ class ResultsPage(QWidget):
             self._show_image()
             return
         self._image_path = None
-        self.preview_image.hide()
+        if suffix in self._TEXT_SUFFIXES:
+            try:
+                with path.open("rb") as source:
+                    content = source.read(self._PREVIEW_BYTES + 1)
+            except OSError as exc:
+                self.preview_status.show()
+                self.preview_status.setText(f"无法读取文件：{exc}")
+                return
+            truncated = len(content) > self._PREVIEW_BYTES
+            self.preview_text.setPlainText(content[:self._PREVIEW_BYTES].decode("utf-8", errors="replace"))
+            self.preview_text.show()
+            self.preview_status.setVisible(truncated)
+            if truncated:
+                self.preview_status.setText("仅预览前 256 KB；打开文件可查看完整内容。")
+            return
         self.preview_status.show()
-        self.preview_status.setText("该结果不是图片，无法在此预览。")
+        self.preview_status.setText("模型产物无法在此预览，可打开文件。")
+
+    def _open_selected(self) -> None:
+        item = self.file_list.currentItem()
+        if item:
+            path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
+            if path.is_file():
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _show_image(self) -> None:
         if not self._image_path:

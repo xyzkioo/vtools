@@ -1,61 +1,52 @@
 # vtools 桌面工作台
 
-## 入口
+vtools 使用浅色 React 界面、pywebview 桌面窗口和仅监听本机的 Python 服务。模型任务继续通过项目原有命令或独立脚本在子进程中运行；关闭窗口会停止当前任务。Windows 与 Ubuntu 是首版目标平台，macOS 尚未实测。
+
+## 从仓库根目录启动
 
 ```bash
 python -m pip install -r vtools_ui/requirements.txt
 python -m vtools_ui
 ```
 
-启动后通过界面选择工具和配置；模型类工具的 YAML 是唯一参数来源。
-
-这是 vtools 的第一版跨平台桌面 UI。它使用 PySide6/Qt Widgets，Windows 和 Ubuntu 都可以运行；模型推理、测速和诊断在独立子进程中执行，界面不会被长任务阻塞。
-
-## 运行
-
-在仓库根目录执行：
+如果默认 Python 没有桌面依赖，启动器会自动寻找已安装 pywebview 的 conda 环境（例如 `yolo`）。也可以明确使用该环境：
 
 ```bash
-python -m pip install -r vtools_ui/requirements.txt
-python -m vtools_ui
+conda run -n yolo python -m vtools_ui
+# 或：conda activate yolo && python -m vtools_ui
 ```
 
-Ubuntu 若提示 Qt 无法加载 `xcb` 平台插件，先安装桌面运行库：
+不要直接双击 `frontend/index.html`；它是 Vite 开发源文件，没有本地 API。需要浏览器预览时使用 `python -m vtools_ui --browser`。
+
+开发时可使用浏览器预览；仍由本地服务提供真实数据。浏览器模式中路径可手动填写，原生文件选择按钮只在桌面窗口中启用。允许文件或目录的输入框分别提供“选择文件”和“选择目录”按钮。
 
 ```bash
-sudo apt update
-sudo apt install -y libxcb-cursor0
+python -m vtools_ui --browser
 ```
 
-然后重新执行 `python -m vtools_ui`。PySide6 已经安装到当前 Conda 环境时，不需要重复安装 Python 依赖。
-
-当前版本已经接入：
-
-- 检测诊断、模型可视化、模型压缩；
-- 模型压缩页面区分 YOLO 目标检测与图像分类：检测模式使用 `data.yaml`，提供基线、非结构化剪枝、结构化通道缩放和压缩前后 mAP/固定输入延迟评估；
-- PyTorch、TensorRT、输出一致性、一次性测速和 checkpoint 检查；
-- NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验；
-- 视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。
-- 结果查看：扫描 runs、results、reports、outputs 和 store，只列出图片并提供图片预览；任务完成后会在状态栏、日志和提示框显示结果目录。
-
-配置文件仍然是模型类工具的真实参数来源；独立脚本的常用参数已经映射到表单。模型类页面的配置文件右侧提供齿轮按钮，可用图形化表单修改常用字段，也可以在“全部配置”页编辑所有标量字段，或切换到 YAML 高级页编辑自定义结构。保存配置前会校验 YAML 和数值格式，并自动保留 `.bak` 备份。所有任务统一使用子进程、日志和历史记录。
-
-如果窗口仍显示旧布局，请先关闭旧窗口，再从仓库根目录重新启动。PySide6 窗口不会自动热更新；下面的检查应当打印当前仓库里的 `vtools_ui` 路径：
+前端构建产物已随源码提供，普通使用者不需要 Node。修改前端源码时，在仓库根目录运行：
 
 ```bash
-cd /path/to/vtools
-conda activate yolo
-python -c "import vtools_ui; print(vtools_ui.__file__)"
-python -m vtools_ui
+cd vtools_ui/webapp/frontend
+npm install
+npm run build
 ```
 
-诊断、可视化、测速和压缩页面的“配置文件”一行现在同时提供“图形配置”和右侧齿轮；打开后默认进入“全部配置”，YAML 中的点号模块名、列表、布尔值和空值都可以保存。诊断页面把模型权重、已有预测文件和数据集 YAML 分成三个独立输入，不会再把 `.pt` 权重误传给 `--predictions`。
+Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。pywebview 的 PySide6 适配依赖由 `requirements.txt` 安装；Windows 使用系统 WebView2 运行时。首次安装后若窗口仍显示旧内容，请完全关闭再启动。
 
-顶部环境下拉框会在后台扫描当前 Python、Conda 环境（包含 `base`）以及系统 `python/python3`；未手动选择时继续使用启动 UI 的当前环境，手动选择会在下次启动恢复。
+## 功能
 
-## 设计约定
+- 模型工具：检测诊断、模型可视化、PyTorch/TensorRT 测速、输出一致性、一键测速、checkpoint 检查和模型压缩。
+- 转换和数据工具：NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验、视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。
+- 环境检查：检查 Python、PyTorch、CUDA 和本地 Ultralytics 源码。
+- 配置编辑：常用字段、全部标量字段与 YAML 原文共享编辑状态。YAML 是模型工具的完整参数来源；保存前校验并保留 `.bak` 备份。对模块按钮的修改是本次运行的增量覆盖，不会关闭未显示的模块。
+- 结果查看：扫描选定目录中的 runs、results、reports 和 outputs，以可展开的多级目录树浏览任意深度的子文件夹；预览诊断的 `summary.json`、`raw_data/`、差图，可视化单图 JSON、图片和 `index.html`，以及压缩的 `summary.json`、`effective_config.json` 和 `artifacts/`。文本最多预览前 256 KB；模型文件可打开所在目录。任务完成后可直接跳转至结果目录。
+- 历史与设置：历史保存于 `.vtools_ui/history.json`，新增的任务日志保存在 `.vtools_ui/logs/`；结果目录、历史数量和任务解释器保存在 `.vtools_ui/settings.json`。首次启动会读取旧 Qt 工作台的 QSettings 值。
 
-- UI 与 CUDA、TensorRT、Ultralytics 依赖解耦。
-- 子进程使用当前选择的 Python 解释器，路径通过 `pathlib` 处理。
-- 任务历史保存到项目根目录的 `.vtools_ui/history.json`；“设置”页可以调整保留数量、默认结果目录和清空历史。
-- 不依赖 shell 激活命令，因此 Windows 和 Ubuntu 的启动逻辑一致。
+工作台保留模型任务的 YAML、CLI 覆盖项和独立子进程语义。路径输入中的相对路径按项目根目录解析；YAML 内部相对路径仍由各工具自身解释。
+
+## 安全与运行限制
+
+本地服务只绑定 `127.0.0.1` 的随机端口，API 要求每次启动随机生成的会话令牌。前端只提交结构化工具参数，服务端决定可执行的命令。结果预览限于当前选定目录，文本读取量受上限限制。一次只允许一个任务运行；启动失败、非零退出和用户停止会显示不同状态。
+
+无 GPU、TensorRT、nncase 或真实权重时，界面仍可启动并运行无硬件任务；这些硬件路径需要在对应环境中分别验收。

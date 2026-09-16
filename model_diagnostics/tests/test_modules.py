@@ -69,6 +69,7 @@ class ErrorEventTests(unittest.TestCase):
         rows = bad_case_rows(result)
         self.assertEqual(rows[0]["image_category"], "classification")
         self.assertEqual(rows[0]["error_count"], 1)
+        self.assertTrue(rows[0]["case_name"].startswith("classification_"))
         self.assertNotIn("error_event_ids", rows[0])
         self.assertNotIn("classification_count", rows[0])
 
@@ -84,6 +85,7 @@ class ErrorEventTests(unittest.TestCase):
         rows = bad_case_rows(result)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["image_category"], "mixed")
+        self.assertTrue(rows[0]["case_name"].startswith("mixed_"))
 
 
 if __name__ == "__main__":

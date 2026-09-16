@@ -20,7 +20,7 @@ python run_tools.py --tool compression --config model_compression/config/config.
 
 ## 桌面工作台（Windows / Ubuntu）
 
-仓库包含一个独立的 PySide6 桌面工作台，可将检测诊断、模型可视化、性能测速和模型压缩集中到同一个入口。界面通过独立子进程调用现有的 `run_tools.py`，不会改变原有命令行流程，也不会因为 CUDA 或 TensorRT 任务阻塞窗口。
+仓库包含一个浅色跨平台桌面工作台。界面使用 React 和 pywebview，本地 Python 服务负责配置、任务与结果；模型任务仍由独立子进程调用现有 `run_tools.py`，不会改变命令行流程。
 
 首次使用时安装 UI 依赖并启动：
 
@@ -35,7 +35,7 @@ python -m vtools_ui
 
 | 目录 / 文件 | 主要内容 | 使用入口 / 说明 |
 | --- | --- | --- |
-| [vtools_ui/](vtools_ui/) | PySide6 跨平台桌面工作台；统一工具导航、配置选择、运行日志和任务记录 | [桌面 UI 说明](vtools_ui/README.md) |
+| [vtools_ui/](vtools_ui/) | React + pywebview 跨平台桌面工作台；统一工具导航、配置选择、运行日志和任务记录 | [桌面 UI 说明](vtools_ui/README.md) |
 | [AGENTS.md](AGENTS.md) | AI coding agent 和协作者的目录边界、入口、配置、验证与交付约定 | 编辑代码前先阅读 |
 | [ultralytics-cn/](ultralytics-cn/) | Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](ultralytics-cn/README.zh-CN.md)、[安装配置](ultralytics-cn/pyproject.toml) |
 | [env_test/](env_test/) | 检查 Python、依赖、实际导入的源码路径、CUDA、模型构建与前向传播 | [check_install.py](env_test/check_install.py)、[安装与检验向导](env_test/README.md) |

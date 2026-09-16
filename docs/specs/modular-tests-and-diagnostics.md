@@ -286,7 +286,7 @@ runs/runN/
 
 `run_info.json` 保存完整实际配置、输入、模块、运行状态和产物索引；`summary.json` 只保存整体指标、去重错误事件数量、错误图片数量和警告数量，不保存警告文本。详细 CSV 与预测文件统一放在 `raw_data/`，不再生成 `report.md`、`config_used.json`、`run_manifest.json`、`run_metadata.json` 或 `overlap_summary.json`。
 
-关闭的模块不生成业务文件；开启但无问题的分析输出明确的零计数，明细 CSV 保留表头。`bad_cases.csv` 是图片索引，只保留图片 ID、原始路径、短图片路径、错误类型、错误数和渲染状态；逐事件和逐图统计只写入 `raw_data/`，不在索引中重复。错误图片按唯一事件类型写入对应目录，多种类型只写入 `mixed/` 一次；纯漏检写入 `missed/`。HTML 读取 `bad_cases.csv` 中的相对图片路径。
+关闭的模块不生成业务文件；开启但无问题的分析输出明确的零计数，明细 CSV 保留表头。`bad_cases.csv` 是图片索引，只保留图片 ID、原始路径、短图片路径、错误类型、错误数和渲染状态；逐事件和逐图统计只写入 `raw_data/`，不在索引中重复。错误图片按唯一事件类型写入对应目录，图片短名称使用错误类型前缀，多种类型只写入 `mixed/` 一次；例如 `mixed_000001_<hash>.jpg`；纯漏检写入 `missed/`。HTML 读取 `bad_cases.csv` 中的相对图片路径。
 
 状态：`passed/failed/error/inconclusive/skipped`。发现差图是正常分析结果，默认不等同于任务失败；一致性不达标属于 failed。退出码：0 表示所选功能成功完成；1 表示检查失败、运行错误或证据不足；2 表示参数/配置错误。显式请求而不支持的功能不能仅记 skipped 后返回成功。
 

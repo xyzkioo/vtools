@@ -115,8 +115,9 @@ flowchart TD
 
 | 项目模块 | 接口/函数 | 职责 |
 |---|---|---|
-| `vtools_ui/app.py` | `ToolPage._run()` | 收集检测输入并发出运行请求 |
-| `vtools_ui/runner.py` | `ToolRunner.start()` | 用所选 Python 启动子进程、接收输出与退出码 |
+| `vtools_ui/webapp/frontend/src/App.tsx` | 压缩工具页 | 收集检测输入并提交结构化运行请求 |
+| `vtools_ui/webapp/core.py` | `build_command()` | 校验输入并构造所选 Python 的压缩命令 |
+| `vtools_ui/webapp/tasks.py` | `TaskManager.start()` | 启动子进程、接收输出与退出码 |
 | `run_tools.py` | `main()` | 将 `--weights/--data/--task/--device` 转发给压缩入口 |
 | `model_compression/core/config.py` | `load_config()`、`apply_python_paths()` | 解析相对路径、应用源码路径 |
 | `model_compression/core/module_selection.py` | `resolve_compression_modules()` | 验证模块 ID 和选择冲突 |

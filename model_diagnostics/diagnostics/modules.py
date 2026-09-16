@@ -280,9 +280,11 @@ def bad_case_rows(summary: Mapping[str, Any], dataset: Any = None, base_dir: Pat
         image_category = str(image_row.get("image_category", "mixed"))
         if image_category == "classification_localization":
             image_category = "mixed"
+        if image_category not in {"background", "classification", "duplicate", "localization", "missed", "mixed"}:
+            image_category = "mixed"
         rows.append({
             "case_index": index,
-            "case_name": f"case_{index:06d}_{digest}",
+            "case_name": f"{image_category}_{index:06d}_{digest}",
             "image_id": image_id,
             "source_image_path": str(source) if source is not None else "",
             "rendered_image_path": "",

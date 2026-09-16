@@ -1,4 +1,4 @@
-from .app import run
+from .webapp.server import run
 
 
 if __name__ == "__main__":
