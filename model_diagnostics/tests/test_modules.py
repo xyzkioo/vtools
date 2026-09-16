@@ -2,11 +2,11 @@ import unittest
 from collections import defaultdict
 
 try:
-    from diagnostics.engine import Dataset, ImageInfo, Instance, validate_config
-    from diagnostics.modules import overlap_analysis, resolve_modules
+    from diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, validate_config
+    from diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
 except ModuleNotFoundError:
-    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, validate_config
-    from model_diagnostics.diagnostics.modules import overlap_analysis, resolve_modules
+    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, validate_config
+    from model_diagnostics.diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
 
 
 class ModuleSelectionTests(unittest.TestCase):
@@ -54,6 +54,36 @@ class OverlapTests(unittest.TestCase):
         result = overlap_analysis(dataset, {"score_threshold": 0.25, "overlap": {"iou_threshold": 0.3, "smaller_area_threshold": 0.7, "criterion": "either"}})
         self.assertEqual(result["summary"]["gt_overlapping_target_count"], 3)
         self.assertEqual(result["summary"]["prediction_duplicate_pair_count"], 0)
+
+
+class ErrorEventTests(unittest.TestCase):
+    def test_wrong_class_prediction_and_missed_gt_are_one_event(self):
+        dataset = Dataset(
+            images={"long/path/image.jpg": ImageInfo("long/path/image.jpg")},
+            gt={"long/path/image.jpg": [Instance("long/path/image.jpg", (0, 0, 10, 10), 0, instance_id="g0")]},
+            predictions={"long/path/image.jpg": [Instance("long/path/image.jpg", (0, 0, 10, 10), 1, 0.9, "p0")]},
+        )
+        result = evaluate_operating(dataset, {"score_threshold": 0.25, "match_iou": 0.5, "localization_iou_floor": 0.1})
+        self.assertEqual(result["aggregate"]["error_event_count"], 1)
+        self.assertEqual(result["aggregate"]["error_counts"], {"classification": 1})
+        rows = bad_case_rows(result)
+        self.assertEqual(rows[0]["image_category"], "classification")
+        self.assertEqual(rows[0]["error_count"], 1)
+        self.assertNotIn("error_event_ids", rows[0])
+        self.assertNotIn("classification_count", rows[0])
+
+    def test_mixed_image_is_indexed_once(self):
+        dataset = Dataset(
+            images={"a": ImageInfo("a")},
+            gt={"a": [Instance("a", (0, 0, 10, 10), 0, instance_id="g0")]},
+            predictions={"a": [Instance("a", (20, 20, 30, 30), 0, 0.9, "p0")]},
+        )
+        result = evaluate_operating(dataset, {"score_threshold": 0.25, "match_iou": 0.5, "localization_iou_floor": 0.1})
+        self.assertEqual(result["aggregate"]["error_event_count"], 2)
+        self.assertEqual(result["aggregate"]["error_image_count"], 1)
+        rows = bad_case_rows(result)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["image_category"], "mixed")
 
 
 if __name__ == "__main__":

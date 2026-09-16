@@ -8,7 +8,7 @@
 python model_diagnostics/run_model_diagnostics.py --config model_diagnostics/config/config.yaml
 ```
 
-输入路径在配置中的 `dataset`、`mode_a` 字段设置。
+输入路径在配置中的 `dataset`、`predictions_file` 字段设置。
 
 把验证集数据和预测结果放在这里，或在 `config/config.yaml` 中填写相对/绝对路径。推荐直接使用 Ultralytics 的 `data.yaml`，配置为 `dataset.data` + `dataset.split`；程序会根据 `path`、`val` 和标准 `images/`、`labels/` 目录自动读取数据。
 
@@ -44,6 +44,6 @@ Ultralytics Platform 的 `.ndjson` 清单也可以直接填到 `dataset.data`；
 也兼容 canonical JSON/JSONL。其最小运行需要：
 
 - `gt.json`：每张图的 `image_id`、图像尺寸和 `ground_truth`；
-- `predictions.json`：每张图的 `image_id` 和 `predictions`；如果由模式 B/C 生成，可不预先创建，运行器会写入当前 `runs/runN/<mode_name>/predictions_adapter.json`。
+- `predictions.json`：每张图的 `image_id` 和 `predictions`；如果由模型模式生成，可不预先创建，运行器会写入当前 `runs/runN/<mode_name>/raw_data/predictions_adapter.json`。
 
 当前目录不放示例数据，避免把测试数据误当成真实验证结果。

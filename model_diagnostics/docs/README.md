@@ -15,9 +15,9 @@ python model_diagnostics/run_model_diagnostics.py --help
 
 1. 从仓库根目录启动桌面工作台或终端入口。
 2. 在仓库根目录安装 `python -m pip install -r model_diagnostics/requirements.txt`。
-3. 打开 `config/config.yaml`，填写 `dataset.data`，再选择一个 A/B/C 模式。
+3. 打开 `config/config.yaml`，填写 `dataset.data`，再选择一个命名模式。
 4. 直接运行 `run_model_diagnostics.py`。
-5. 在 `runs/runN/<mode_name>/` 查看 `report.md`、`summary.json` 和 CSV 明细。
+5. 在 `runs/runN/<mode_name>/` 查看 `run_info.json`、`summary.json`、`bad_cases.csv`；CSV 明细在 `raw_data/`。
 
 每次运行会创建新的 `runN`，避免把上一次结果混进本次结果。入口配置只保留一个 `mode` 选择。
 
@@ -37,7 +37,7 @@ modules:
   output.html: false
 ```
 
-## A/B/C 三种模式
+## 三种命名模式
 
 三种模式共用数据集配置：
 
@@ -47,14 +47,14 @@ dataset:
   split: val
 ```
 
-### 模式 A：已有预测文件
+### `predictions_file`：已有预测文件
 
 不加载模型，只评估已经生成的预测结果：
 
 ```yaml
-mode: A
+mode: predictions_file
 
-mode_a:
+predictions_file:
   name: existing_predictions
   predictions: data/predictions.json
   pred_format: auto
@@ -62,14 +62,14 @@ mode_a:
 
 预测文件支持 canonical JSON/JSONL 或 COCO detection results。预测应尽量保留低分框；只有显式启用 `diagnostics.threshold_sweep` 时才会执行阈值扫描。
 
-### 模式 B：Ultralytics `.pt`
+### `ultralytics_model`：Ultralytics `.pt`
 
 直接使用现成的 Ultralytics 权重逐图生成预测：
 
 ```yaml
-mode: B
+mode: ultralytics_model
 
-mode_b:
+ultralytics_model:
   name: ultralytics_pt
   weights: /path/to/best.pt
   task: detect
@@ -77,25 +77,25 @@ mode_b:
 
 如果权重依赖本地修改版 Ultralytics，在 `project.ultralytics_repo` 填写训练时使用的源码目录；如果环境中已经安装兼容版本，可以不填。
 
-### 模式 C：自定义 adapter
+### `custom_adapter`：自定义 adapter
 
 适合普通 PyTorch、DETR、Faster R-CNN 或自定义网络。复制 `adapters/vision_adapter_template.py`，例如保存为 `adapters/my_detector.py`：
 
 ```yaml
-mode: C
+mode: custom_adapter
 
-mode_c:
+custom_adapter:
   name: custom_adapter
   weights: weights/best.pt
   adapter: adapters/my_detector.py
   task: detect
 ```
 
-模式 B/C 会自动逐图推理，并把中间预测保存为当前运行目录中的 `predictions_adapter.json`；模式 A 不会加载模型。
+模型模式会自动逐图推理，并把中间预测保存为当前运行目录 `raw_data/predictions_adapter.json`；`predictions_file` 不会加载模型。
 
-开启 `diagnostics.overlap` 会额外生成 `overlap_gt_pairs.csv`、
-`overlap_prediction_pairs.csv` 和 `overlap_summary.json`；开启 `output.bad_cases` 会生成
-`bad_cases.csv`，`output.images` 与 `output.html` 再分别生成图片和浏览索引。
+开启 `diagnostics.overlap` 会在 `raw_data/` 生成 `overlap_gt_pairs.csv`、
+`overlap_prediction_pairs.csv` 和 `overlap_per_image.csv`；开启 `output.bad_cases` 会生成
+`bad_cases.csv`，`output.images` 会按错误类型生成分类差图，`output.html` 生成浏览索引。
 
 ## vtools 对齐的 adapter 契约
 
@@ -217,17 +217,17 @@ COCO GT（`images` + `annotations` + `categories`）、COCO prediction results�
 | Precision、Recall、F1 | `diagnostics.score_threshold` 工作点表现 | 对照阈值扫描，判断是否只是工作点选择 |
 | Recall@IoU、候选覆盖率 | 宽松候选是否已经产生 | 低 IoU 高、严格 IoU 低时优先查定位 |
 | 低置信度可找回 GT | 目标是否被低分过滤 | 降低阈值并观察 FP/图，确认校准或类别区分度 |
-| 错误类型 | 漏检、背景、重复、定位、类别错误 | 查 `per_gt.csv` 与 `per_prediction.csv` |
+| 错误类型 | 漏检、背景、重复、定位、类别错误 | 查 `raw_data/per_gt.csv` 与 `raw_data/per_prediction.csv` |
 | 尺寸/密度/类别分组 | 小目标、拥挤场景或特定类别短板 | 固定数据分组做分辨率、裁剪和标签复核 |
 | raw vs final | 后处理/筛选是否额外丢失候选 | 在 `dataset.raw_predictions` 或模型条目的 `raw_predictions` 中填写文件，查看 `stage_comparison.csv` |
 
 核心确认顺序是：
 
 1. `summary.json`：先看正式 Recall、Recall@IoU、候选覆盖率和低置信度可找回比例。
-2. `per_gt.csv`：区分 `miss_no_candidate`、`miss_low_confidence`、`miss_localization` 和类别错误。
-3. `group_metrics.csv`：只有组内样本足够时才比较小目标、密度和类别差异。
-4. `threshold_sweep.csv` / `fp_budget.csv`：确认分数阈值和 FP/图约束下的取舍。
-5. `stage_comparison.csv`：raw 明显好于 final 时，才支持筛选、NMS、top-k 或 query 截断造成额外损失；具体是哪一步仍需单独导出和标注。
+2. `raw_data/per_gt.csv`：区分 `miss_no_candidate`、`miss_low_confidence`、`miss_localization` 和类别错误。
+3. `raw_data/group_metrics.csv`：只有组内样本足够时才比较小目标、密度和类别差异。
+4. `raw_data/threshold_sweep.csv` / `raw_data/fp_budget.csv`：确认分数阈值和 FP/图约束下的取舍。
+5. `raw_data/stage_comparison.csv`：raw 明显好于 final 时，才支持筛选、NMS、top-k 或 query 截断造成额外损失；具体是哪一步仍需单独导出和标注。
 
 本工具报告的是可观测错误，不会仅凭相关性把问题归因到某个网络模块。输入信息不足、特征表示不足、标签问题和训练问题分别需要分辨率/裁剪对照、特征探针、标注复核和小数据集过拟合等实验确认。
 
@@ -260,8 +260,8 @@ python run_model_diagnostics.py --list-modules
 ```
 
 `--only`、`--enable`、`--disable` 不能混用。开启差图时会生成 `bad_cases.csv`；
-开启重叠分析时会生成 `overlap_gt_pairs.csv`、`overlap_prediction_pairs.csv` 和
-`overlap_summary.json`。已有预测可用 `--predictions` 直接复用，不加载模型。
+开启重叠分析时会在 `raw_data/` 生成 `overlap_gt_pairs.csv`、`overlap_prediction_pairs.csv` 和
+`overlap_per_image.csv`。已有预测可用 `--predictions` 直接复用，不加载模型。
 
 ## 项目目录
 

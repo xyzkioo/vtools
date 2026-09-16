@@ -3,8 +3,8 @@
 """vtools-compatible detection adapter template.
 
 Copy this file to ``adapters/my_detector.py`` and modify ``build_model`` plus
-``postprocess_detections``.  Then select ``mode: C`` and change
-``mode_c.weights`` and ``mode_c.adapter`` in ``config/config.yaml``.
+``postprocess_detections``.  Then select ``mode: custom_adapter`` and change
+``custom_adapter.weights`` and ``custom_adapter.adapter`` in ``config/config.yaml``.
 
 The hook names and signatures intentionally follow
 ``vtools/speed_test/adapters/vision_adapter_template.py``:

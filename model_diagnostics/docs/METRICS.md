@@ -15,7 +15,7 @@ AP 文件。阈值扫描也只有显式开启 `diagnostics.threshold_sweep` 才�
 | Recall@IoU | 保留 `candidate_threshold` 以上的预测，在 IoU=0.3/0.5/0.75 下重新一对一匹配 | 区分宽松定位与严格定位 |
 | 候选覆盖率 | 对每个 GT 查找最佳同类别预测，不要求 GT 之间一对一 | 判断模型是否曾经产生过可用候选；不能替代正式 Recall |
 | 低置信度可找回 GT | 候选阈值下同类别 IoU 足够高，但工作阈值下没有匹配 | 确认漏检是否由分数阈值造成 |
-| 错误类型 | 根据同类别/任意类别最佳 IoU，划分 duplicate、classification、localization、background | 统计错误来源 |
+| 错误类型 | 根据同类别/任意类别最佳 IoU，划分 duplicate、classification、localization、classification_localization、background；未关联 GT 记为 missed | 统计错误来源 |
 | 尺寸分组 | GT 框短边固定区间与面积四分位 | 判断小目标性能是否明显下降 |
 | 密集分组 | 目标数量和 GT 之间最大重叠程度分组 | 区分密集场景、遮挡和单目标问题 |
 | 计数指标 | 每图预测数减 GT 数、MAE、系统偏差和完全正确率 | 评估检测结果对计数任务的影响 |
@@ -24,11 +24,13 @@ AP 文件。阈值扫描也只有显式开启 `diagnostics.threshold_sweep` 才�
 
 ## 确认顺序
 
-1. 先看 `summary.json` 的 Recall@IoU、候选覆盖率和低置信度可找回比例。
-2. 看 `per_gt.csv`：`miss_no_candidate` 表示低阈值下也没有有效候选；`miss_low_confidence` 表示候选存在但工作阈值过滤掉；`miss_localization` 表示候选位置不够准；类别错误会记录为 `miss_classification`。
-3. 看 `group_metrics.csv`：只在 GT 数量足够时比较分组，报告分组样本数；小目标组较差才支持小目标短板假设。
-4. 看 `threshold_sweep.csv`：若降低阈值能恢复 Recall，但 FP/图快速增加，应先检查分数校准和分类区分度。
-5. 若有原始候选，使用 `--raw-pred` 生成 `stage_comparison.csv`。raw 明显高于 final 时，才支持筛选、NMS、top-k 或 query 截断造成了额外损失；具体是哪一步必须由 adapter 单独导出并标记。
+错误统计使用 `raw_data/error_events.csv` 的去重事件流：一个错类别或定位预测与其对应的漏检 GT 只算一个事件，剩余 GT 算 `missed`，低于工作阈值的预测只作为漏检原因。`summary.json` 的错误数量和 `bad_cases.csv` 都来自这份事件流；一张图片只要有一个事件就计为错误图片，多种事件类型的图片只渲染一次并归入 `mixed/`。
+
+1. 先看 `summary.json` 的 `aggregate` 中 Recall@IoU、候选覆盖率和低置信度可找回比例。
+2. 看 `raw_data/per_gt.csv`：`miss_no_candidate` 表示低阈值下也没有有效候选；`miss_low_confidence` 表示候选存在但工作阈值过滤掉；`miss_localization` 表示候选位置不够准；类别错误会记录为 `miss_classification`。
+3. 看 `raw_data/group_metrics.csv`：只在 GT 数量足够时比较分组，报告分组样本数；小目标组较差才支持小目标短板假设。
+4. 看 `raw_data/threshold_sweep.csv`：若降低阈值能恢复 Recall，但 FP/图快速增加，应先检查分数校准和分类区分度。
+5. 若有原始候选，使用 `--raw-pred` 生成 `raw_data/stage_comparison.csv`。raw 明显高于 final 时，才支持筛选、NMS、top-k 或 query 截断造成了额外损失；具体是哪一步必须由 adapter 单独导出并标记。
 6. 对输入信息不足、特征表示不足、标签问题和训练问题，需要分别做分辨率/裁剪对照、特征探针、标注复核和小数据集过拟合实验。统计报告不会自动把现象命名为某个网络模块的缺陷。
 
 ## 口径约束

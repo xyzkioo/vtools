@@ -18,7 +18,7 @@
 ## 2. 已确认的现状
 
 - `speed_test` 已有独立入口和部分开关，但参数量、显存等仍与测速实现耦合。
-- `model_diagnostics/run_model_diagnostics.py` 通过统一配置解析和模块计划调用诊断引擎；已有预测模式读取一次数据集，B/C 生成预测时会为生成和评估分别读取数据集。
+- `model_diagnostics/run_model_diagnostics.py` 通过统一配置解析和模块计划调用诊断引擎；`predictions_file` 读取一次数据集，模型模式生成预测时会为生成和评估分别读取数据集。
 - 诊断引擎已有基于标注框 IoU 的重叠分组，阈值固定为 0.10/0.30，缺少专门的差图展示。
 - 多个子项目使用 `core` 等同名顶层导入，组合运行需要消除模块名冲突。
 - 保留用户已有模型路径、数据路径和本地未提交修改，不以重构覆盖它们。
@@ -117,7 +117,7 @@ python run_tools.py --tool diagnostics --list-modules
 - `--enable/--disable` 在配置选择上增减模块；可重复传入或逗号分隔。同一 ID 同时启用和禁用时报错。
 - `--only` 不与 `--enable/--disable` 混用，避免覆盖歧义。
 - 未知 ID、错误配置、缺少依赖在执行前报错；显示可用模块和具体修复方式。
-- `--predictions` 显式选择已有预测模式，覆盖 B/C 推理选择，打印实际生效模式。
+- `--predictions` 显式选择已有预测模式，覆盖模型模式推理选择，打印实际生效模式。
 
 优先级：命令行 > YAML > 配置默认值。实际生效配置写入结果目录。
 
@@ -125,15 +125,15 @@ python run_tools.py --tool diagnostics --list-modules
 
 ## 5. 配置示例
 
-下例为新诊断配置的关键字段；现有模型 A/B/C 配置继续支持。
+下例为新诊断配置的关键字段；旧的单字母写法需要迁移到命名模式。
 
 ```yaml
 schema_version: 2
 project:
   root: ../..
 
-mode: A
-mode_a:
+mode: predictions_file
+predictions_file:
   predictions: data/predictions.json
 dataset:
   data: data/data.yaml
@@ -170,7 +170,7 @@ run:
   name: auto
 ```
 
-B/C 模式需要推理时显式开启 `predict.generate`。无预测且推理关闭时报配置错误，不自行打开推理。阈值为起始默认值，可按数据调整；推理保留分数不得高于诊断需要的候选阈值，否则标记证据不足。
+模型模式需要推理时显式开启 `predict.generate`。无预测且推理关闭时报配置错误，不自行打开推理。阈值为起始默认值，可按数据调整；推理保留分数不得高于诊断需要的候选阈值，否则标记证据不足。
 
 ## 6. 模块与共享依赖
 
@@ -213,7 +213,7 @@ model_visualization/modules/
 
 共享资源包括标注、图片索引、模型、输入、预测、匹配关系。必要的数据读取和匹配属于底层准备，允许按需执行；关闭的业务模块不得因依赖而被隐式启用。关闭错分类输出仍可为漏检分析计算基础匹配，但不得生成错分类报告。
 
-- 已有预测模式中，同一配置的标注只读取一次；B/C 生成预测时会先为 adapter 读取一次标注索引，再由诊断引擎读取一次以完成评估。普通预测只执行一次；测速的 warmup/repeats 属于测量要求，不算重复业务推理。
+- 已有预测模式中，同一配置的标注只读取一次；模型模式生成预测时会先为 adapter 读取一次标注索引，再由诊断引擎读取一次以完成评估。普通预测只执行一次；测速的 warmup/repeats 属于测量要求，不算重复业务推理。
 - 模型按权重、adapter、设备、精度、融合状态等完整配置区分；存在原地修改风险时隔离实例，不强行共享。
 - 一致性检查需要其专用同输入、同输出边界，不能用经过后处理的诊断预测替代。
 - 已有预测可跨次显式复用；不默默复用上次结果。记录权重来源、图片 ID、类别表、坐标格式、推理阈值、输入尺寸、后处理方式等元数据。
@@ -261,22 +261,32 @@ GT 未被正确匹配计为未正确检出，同时附原因（低分、类别�
 
 ```text
 runs/runN/
-  config_used.yaml
-  run_manifest.json
-  predictions/          # 仅本次生成预测时写入
-  speed/                # 仅开启相应模块时生成
-  consistency/
-  diagnostics/
-    missed.csv
-    classification.csv
-    overlap_pairs.csv
-    overlap_summary.json
+  <model_name>/
+    run_info.json
+    summary.json
     bad_cases.csv
-  images/
-  index.html
+    raw_data/
+      predictions_adapter.json
+      error_events.csv
+      per_image.csv
+      per_gt.csv
+      per_prediction.csv
+      overlap_gt_pairs.csv
+      overlap_prediction_pairs.csv
+      overlap_per_image.csv
+    images/
+      background/
+      classification/
+      duplicate/
+      localization/
+      missed/
+      mixed/
+    index.html
 ```
 
-关闭的模块不生成业务文件；运行清单仍记录其禁用状态。开启但无问题的分析输出明确的零计数，明细 CSV 保留表头。HTML 可以只展示清单；关闭图片绘制时不触发绘制。开启 HTML 或图片输出却没有任何可消费分析模块时，配置校验报错。
+`run_info.json` 保存完整实际配置、输入、模块、运行状态和产物索引；`summary.json` 只保存整体指标、去重错误事件数量、错误图片数量和警告数量，不保存警告文本。详细 CSV 与预测文件统一放在 `raw_data/`，不再生成 `report.md`、`config_used.json`、`run_manifest.json`、`run_metadata.json` 或 `overlap_summary.json`。
+
+关闭的模块不生成业务文件；开启但无问题的分析输出明确的零计数，明细 CSV 保留表头。`bad_cases.csv` 是图片索引，只保留图片 ID、原始路径、短图片路径、错误类型、错误数和渲染状态；逐事件和逐图统计只写入 `raw_data/`，不在索引中重复。错误图片按唯一事件类型写入对应目录，多种类型只写入 `mixed/` 一次；纯漏检写入 `missed/`。HTML 读取 `bad_cases.csv` 中的相对图片路径。
 
 状态：`passed/failed/error/inconclusive/skipped`。发现差图是正常分析结果，默认不等同于任务失败；一致性不达标属于 failed。退出码：0 表示所选功能成功完成；1 表示检查失败、运行错误或证据不足；2 表示参数/配置错误。显式请求而不支持的功能不能仅记 skipped 后返回成功。
 

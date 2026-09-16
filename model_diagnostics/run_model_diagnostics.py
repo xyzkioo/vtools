@@ -167,41 +167,41 @@ def _mode_entry(
     weights_override: Path | None = None,
     predictions_override: bool = False,
 ) -> Mapping[str, Any]:
-    """Translate the simple A/B/C YAML layout into one internal model entry.
-
-    Every run uses exactly one of ``mode_a``, ``mode_b`` or ``mode_c``.
-    """
+    """Translate the named input mode into one internal model entry."""
     if "mode" not in settings:
-        raise ValueError("配置必须填写 mode: A、B 或 C")
-    mode = str(settings.get("mode", "")).strip().upper()
-    if mode not in {"A", "B", "C"}:
-        raise ValueError("mode 必须是 A、B 或 C")
+        raise ValueError("配置必须填写 mode: predictions_file、ultralytics_model 或 custom_adapter")
+    mode = str(settings.get("mode", "")).strip().lower()
+    legacy = {"a": "predictions_file", "b": "ultralytics_model", "c": "custom_adapter"}
+    if mode in legacy:
+        raise ValueError(f"已移除不明确的 mode: {mode.upper()}；请改用 mode: {legacy[mode]}")
+    if mode not in {"predictions_file", "ultralytics_model", "custom_adapter"}:
+        raise ValueError("mode 必须是 predictions_file、ultralytics_model 或 custom_adapter")
 
-    section_name = f"mode_{mode.lower()}"
+    section_name = mode
     section = _mapping(settings.get(section_name), section_name)
-    if mode == "A":
+    if mode == "predictions_file":
         predictions = section.get("predictions")
         if predictions is None or not str(predictions).strip():
-            raise ValueError("模式 A 必须在 mode_a.predictions 中填写已有预测文件")
+            raise ValueError("predictions_file 模式必须在 predictions_file.predictions 中填写已有预测文件")
         return {
-            "name": section.get("name", "mode_a_predictions"),
+            "name": section.get("name", "existing_predictions"),
             "mode": mode,
             "predictions": predictions,
             "pred_format": section.get("pred_format", "auto"),
             "task": "detect",
         }
 
-    if mode == "B":
+    if mode == "ultralytics_model":
         weights = weights_override or section.get("weights")
         if (weights is None or not str(weights).strip()) and not predictions_override:
-            raise ValueError("模式 B 必须在 mode_b.weights 中填写 Ultralytics .pt 路径")
+            raise ValueError("ultralytics_model 模式必须在 ultralytics_model.weights 中填写 .pt 路径")
         return {
-            "name": section.get("name", "mode_b_ultralytics"),
+            "name": section.get("name", "ultralytics_model"),
             "mode": mode,
             "weights": weights,
             "adapter": "ultralytics",
             "task": section.get("task", "detect"),
-            # B/C always generate predictions from the model.
+            # Model input modes generate predictions from the model.
             "predictions": None,
         }
 
@@ -210,11 +210,11 @@ def _mode_entry(
         weights = weights_override
     adapter = section.get("adapter")
     if (weights is None or not str(weights).strip()) and not predictions_override:
-        raise ValueError("模式 C 必须在 mode_c.weights 中填写模型权重路径")
+        raise ValueError("custom_adapter 模式必须在 custom_adapter.weights 中填写模型权重路径")
     if adapter is None or not str(adapter).strip():
-        raise ValueError("模式 C 必须在 mode_c.adapter 中填写 adapter.py 或模块名")
+        raise ValueError("custom_adapter 模式必须在 custom_adapter.adapter 中填写 adapter.py 或模块名")
     return {
-        "name": section.get("name", "mode_c_adapter"),
+        "name": section.get("name", "custom_adapter"),
         "mode": mode,
         "weights": weights,
         "adapter": adapter,
@@ -235,10 +235,10 @@ def _generate_predictions(
 
     adapter_spec = _adapter_spec(model_entry.get("adapter"), project_root)
     if not adapter_spec:
-        raise ValueError("没有配置 adapter；模式 B 使用 ultralytics，模式 C 使用 vtools 风格 adapter.py")
+        raise ValueError("没有配置 adapter；ultralytics_model 使用 ultralytics，custom_adapter 使用 vtools 风格 adapter.py")
     weights = _resolve(model_entry.get("weights"), project_root)
     if weights is None:
-        raise ValueError("模型未提供 weights；模式 B/C 必须填写权重路径")
+        raise ValueError("模型未提供 weights；ultralytics_model/custom_adapter 必须填写权重路径")
     benchmark = _mapping(settings.get("benchmark"), "benchmark")
     config = make_benchmark_config(benchmark)
     adapter = create_adapter(adapter_spec, project_root, str(model_entry.get("task", "detect")))
@@ -302,10 +302,10 @@ def _run_one_model(
     model_dir = run_dir / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    # A/B/C entries explicitly control the prediction source.
+    # Named input modes explicitly control the prediction source.
     if cli_args.predictions is not None:
         prediction_value = str(cli_args.predictions)
-    elif model_entry.get("mode") in {"B", "C"}:
+    elif model_entry.get("mode") in {"ultralytics_model", "custom_adapter"}:
         prediction_value = None
     else:
         prediction_value = model_entry.get("predictions")
@@ -318,7 +318,7 @@ def _run_one_model(
         generation_enabled = bool(resolve_modules(settings, only=cli_args.only, enable=cli_args.enable, disable=cli_args.disable).get("predict.generate", False))
         if not generation_enabled:
             raise ValueError("没有现成 predictions 文件时，必须显式启用 modules.predict.generate")
-        prediction_path = model_dir / "predictions_adapter.json"
+        prediction_path = model_dir / "raw_data" / "predictions_adapter.json"
         gt_dataset = engine.load_ground_truth(gt_path, gt_format, images_dir, split=split, base_dir=project_root)
         _generate_predictions(settings, model_entry, gt_dataset, project_root, images_dir, prediction_path)
     elif not prediction_path.exists():
@@ -354,18 +354,26 @@ def _run_one_model(
     if exit_code != 0:
         raise RuntimeError(f"诊断引擎失败，退出码={exit_code}")
 
-    metadata = {
-        "name": str(model_entry.get("name", model_name)),
+    run_info_path = model_dir / "run_info.json"
+    run_info = json.loads(run_info_path.read_text(encoding="utf-8")) if run_info_path.exists() else {}
+    run_info.update({
         "mode": str(model_entry["mode"]),
-        "weights": str(_resolve(model_entry.get("weights"), project_root) or ""),
-        "adapter": str(model_entry.get("adapter", "")),
-        "task": str(model_entry.get("task", "detect")),
-        "gt": str(gt_path),
-        "dataset_data": str(data_yaml_path) if data_yaml_path is not None else "",
-        "split": split,
-        "predictions": str(prediction_path),
-    }
-    (model_dir / "run_metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        "model": {
+            "name": str(model_entry.get("name", model_name)),
+            "weights": str(_resolve(model_entry.get("weights"), project_root) or ""),
+            "adapter": str(model_entry.get("adapter", "")),
+            "task": str(model_entry.get("task", "detect")),
+        },
+        "config": settings,
+        "inputs": {
+            **dict(run_info.get("inputs") or {}),
+            "gt": str(gt_path),
+            "dataset_data": str(data_yaml_path) if data_yaml_path is not None else "",
+            "split": split,
+            "predictions": str(prediction_path),
+        },
+    })
+    run_info_path.write_text(json.dumps(run_info, ensure_ascii=False, indent=2), encoding="utf-8")
     return model_dir
 
 
@@ -375,9 +383,9 @@ def main() -> int:
     parser.add_argument("--only", action="append", help="只运行指定模块 ID，可重复或用逗号分隔")
     parser.add_argument("--enable", action="append", help="临时启用模块 ID，可重复或用逗号分隔")
     parser.add_argument("--disable", action="append", help="临时关闭模块 ID，可重复或用逗号分隔")
-    parser.add_argument("--predictions", type=Path, help="直接使用已有预测文件，覆盖模式 B/C 的推理")
+    parser.add_argument("--predictions", type=Path, help="直接使用已有预测文件，覆盖模型推理")
     parser.add_argument("--run-dir", type=Path, help="指定一个尚不存在的输出目录")
-    parser.add_argument("--weights", type=Path, help="直接使用模型权重，覆盖 mode_b/mode_c.weights")
+    parser.add_argument("--weights", type=Path, help="直接使用模型权重，覆盖模型配置中的 weights")
     parser.add_argument("--data", type=Path, help="直接使用数据集 YAML，覆盖 dataset.data")
     parser.add_argument("--device", help="临时覆盖 benchmark.device：auto、cpu、cuda:0 或 0")
     parser.add_argument("--list-modules", action="store_true", help="列出可用模块后退出")
@@ -397,15 +405,15 @@ def main() -> int:
     config_path = cli_args.config.expanduser().resolve()
     settings = _read_run_config(config_path)
     if "models" in settings:
-        raise ValueError("已移除旧版配置字段 models；请使用 mode: A、B 或 C")
+        raise ValueError("已移除旧版配置字段 models；请使用一个命名 mode")
     dataset_settings = _mapping(settings.get("dataset"), "dataset")
     if "predictions" in dataset_settings:
-        raise ValueError("已移除旧版配置字段 dataset.predictions；请使用 mode_a.predictions")
-    if cli_args.predictions is not None and str(settings.get("mode", "")).strip().upper() == "A":
-        mode_a = dict(settings.get("mode_a") or {})
-        mode_a["predictions"] = str(cli_args.predictions.expanduser().resolve())
+        raise ValueError("已移除旧版配置字段 dataset.predictions；请使用 predictions_file.predictions")
+    if cli_args.predictions is not None and str(settings.get("mode", "")).strip().lower() in {"predictions_file", "a"}:
+        predictions_file = dict(settings.get("predictions_file") or {})
+        predictions_file["predictions"] = str(cli_args.predictions.expanduser().resolve())
         settings = dict(settings)
-        settings["mode_a"] = mode_a
+        settings["predictions_file"] = predictions_file
     project_root = _project_root(settings)
     _add_python_paths(settings, project_root)
 
@@ -417,8 +425,8 @@ def main() -> int:
     models: list[Mapping[str, Any]] = [selected_mode]
 
     if cli_args.weights:
-        if any(str(model.get("mode", "")).upper() == "A" for model in models):
-            raise ValueError("模式 A 使用已有预测文件，不能传 --weights；请使用 --predictions")
+        if any(str(model.get("mode", "")).lower() == "predictions_file" for model in models):
+            raise ValueError("predictions_file 模式使用已有预测文件，不能传 --weights；请使用 --predictions")
         models = [{**dict(model), "weights": str(cli_args.weights)} for model in models]
 
     if cli_args.data:
@@ -440,12 +448,23 @@ def main() -> int:
     except ImportError:
         from model_diagnostics.diagnostics.modules import resolve_modules
     selected_modules = resolve_modules(settings, only=cli_args.only, enable=cli_args.enable, disable=cli_args.disable)
+    settings = dict(settings)
+    settings["modules"] = selected_modules
+    settings["cli_overrides"] = {
+        "only": list(cli_args.only or []),
+        "enable": list(cli_args.enable or []),
+        "disable": list(cli_args.disable or []),
+        "predictions": str(cli_args.predictions.expanduser().resolve()) if cli_args.predictions is not None else "",
+        "weights": str(cli_args.weights.expanduser().resolve()) if cli_args.weights is not None else "",
+        "data": str(cli_args.data.expanduser().resolve()) if cli_args.data is not None else "",
+        "device": cli_args.device or "",
+    }
     if (
-        any(model.get("mode") in {"B", "C"} for model in models)
+        any(model.get("mode") in {"ultralytics_model", "custom_adapter"} for model in models)
         and cli_args.predictions is None
         and not any(model.get("weights") for model in models)
     ):
-        raise ValueError("B/C 模式没有模型权重；请填写 mode_b/mode_c.weights 或使用 --weights/--predictions")
+        raise ValueError("模型模式没有权重；请填写对应 mode 节的 weights 或使用 --weights/--predictions")
 
     if cli_args.run_dir is not None:
         run_dir = cli_args.run_dir.expanduser().resolve()
@@ -463,6 +482,17 @@ def main() -> int:
             print(f"模型 {name} 完成：{completed[-1]}")
         except Exception as exc:  # keep other enabled models running
             failures.append(f"{name}: {type(exc).__name__}: {exc}")
+            failed_dir = run_dir / name
+            if failed_dir.exists():
+                info_path = failed_dir / "run_info.json"
+                info = {}
+                if info_path.exists():
+                    try:
+                        info = json.loads(info_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        info = {}
+                info.update({"status": "failed", "error": failures[-1], "mode": str(model_entry.get("mode", ""))})
+                info_path.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
             print(f"模型 {name} 失败：{failures[-1]}", file=sys.stderr)
 
     print(f"本次运行目录：{run_dir.resolve()}")

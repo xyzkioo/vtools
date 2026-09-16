@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -241,42 +242,80 @@ def _box_area_for_overlap(box: Sequence[float]) -> float:
     return max(0.0, x2 - x1) * max(0.0, y2 - y1)
 
 
-def bad_case_rows(summary: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _declared_image_path(dataset: Any, image_id: str, base_dir: Path | None = None) -> Path | None:
+    info = dataset.images.get(image_id)
+    extra = getattr(info, "extra", {}) if info is not None else {}
+    source = extra.get("source_path") if isinstance(extra, Mapping) else None
+    source = source or (getattr(info, "file_name", None) if info is not None else None)
+    if not source:
+        return None
+    path = Path(str(source)).expanduser()
+    if not path.is_absolute() and base_dir is not None:
+        path = (base_dir / path).resolve()
+    return path
+
+
+def _source_image_path(dataset: Any, image_id: str, base_dir: Path | None = None) -> Path | None:
+    path = _declared_image_path(dataset, image_id, base_dir)
+    return path if path is not None and path.is_file() else None
+
+
+def bad_case_rows(summary: Mapping[str, Any], dataset: Any = None, base_dir: Path | None = None) -> list[dict[str, Any]]:
+    """Create the compact image index consumed by CSV, images and HTML.
+
+    Detailed event and per-image metrics stay in ``raw_data``.  The public
+    bad-case CSV only needs enough information to locate, filter and preview
+    an image without copying those detailed tables into another file.
+    """
     rows: list[dict[str, Any]] = []
-    by_image: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for item in summary.get("per_prediction", []) or []:
-        image_id = str(item.get("image_id", ""))
-        error_type = str(item.get("error_type", ""))
-        if error_type and error_type != "TP":
-            by_image[image_id][error_type] += 1
-    for row in summary.get("per_image", []) or []:
-        image_id = str(row.get("image_id", ""))
-        errors = {"missed": int(row.get("fn", 0) or 0)}
-        typed = by_image.get(image_id, {})
-        counts = {"background": typed.get("background", 0), "duplicate": typed.get("duplicate", 0), "classification": typed.get("classification", 0), "localization": typed.get("localization", 0) + typed.get("classification_localization", 0)}
-        total = errors["missed"] + sum(counts.values())
-        rows.append({"image_id": image_id, "error_count": total, "gt_count": int(row.get("gt_count", 0) or 0), "missed_count": errors["missed"], "background_count": counts["background"], "duplicate_count": counts["duplicate"], "classification_count": counts["classification"], "localization_count": counts["localization"], "error_rate": (total / int(row.get("gt_count", 0)) if int(row.get("gt_count", 0) or 0) else None), "count_absolute_error": row.get("count_absolute_error")})
-    return sorted((row for row in rows if int(row["error_count"]) > 0), key=lambda row: (-int(row["error_count"]), str(row["image_id"])))
+    error_images = sorted(
+        list(summary.get("error_images", []) or []),
+        key=lambda item: (-int(item.get("error_count", 0) or 0), str(item.get("image_id", ""))),
+    )
+    for index, image_row in enumerate(error_images, 1):
+        image_id = str(image_row.get("image_id", ""))
+        source = _declared_image_path(dataset, image_id, base_dir) if dataset is not None else None
+        digest = hashlib.sha1(image_id.encode("utf-8")).hexdigest()[:8]
+        types = list(image_row.get("error_types", []) or [])
+        image_category = str(image_row.get("image_category", "mixed"))
+        if image_category == "classification_localization":
+            image_category = "mixed"
+        rows.append({
+            "case_index": index,
+            "case_name": f"case_{index:06d}_{digest}",
+            "image_id": image_id,
+            "source_image_path": str(source) if source is not None else "",
+            "rendered_image_path": "",
+            "image_category": image_category,
+            "error_types": json.dumps(types, ensure_ascii=False),
+            "error_count": int(image_row.get("error_count", 0) or 0),
+            "render_status": "pending",
+        })
+    return rows
 
 
-def render_bad_cases(dataset: Any, rows: Sequence[Mapping[str, Any]], output_dir: Path, top_k: int = 50, score_threshold: float = 0.25, base_dir: Path | None = None) -> list[Path]:
+def render_bad_cases(dataset: Any, rows: Sequence[dict[str, Any]], output_root: Path, top_k: int = 50, score_threshold: float = 0.25, base_dir: Path | None = None) -> list[Path]:
     try:
         from PIL import Image, ImageDraw  # type: ignore
     except ImportError as exc:
         raise RuntimeError("output.images 需要 Pillow，请安装 pillow") from exc
-    output_dir.mkdir(parents=True, exist_ok=True)
+    images_root = output_root / "images"
     paths: list[Path] = []
-    for row in list(rows)[: max(0, int(top_k))]:
+    selected = set(id(row) for row in list(rows)[: max(0, int(top_k))])
+    for row in rows:
         image_id = str(row.get("image_id", ""))
-        info = dataset.images.get(image_id)
-        extra = getattr(info, "extra", {}) if info is not None else {}
-        source = extra.get("source_path") if isinstance(extra, Mapping) else None
-        source = source or (getattr(info, "file_name", None) if info is not None else None)
-        source_path = Path(str(source)) if source else Path()
-        if source and not source_path.is_absolute() and base_dir is not None:
-            source_path = (base_dir / source_path).resolve()
-        if not source or not source_path.is_file():
+        if id(row) not in selected:
+            row["render_status"] = "not_selected"
             continue
+        source_path = _source_image_path(dataset, image_id, base_dir)
+        if source_path is None:
+            row["render_status"] = "source_missing"
+            continue
+        category = str(row.get("image_category") or "mixed")
+        if category not in {"background", "classification", "duplicate", "localization", "missed", "mixed"}:
+            category = "mixed"
+        target_dir = images_root / category
+        target_dir.mkdir(parents=True, exist_ok=True)
         with Image.open(str(source_path)).convert("RGB") as image:
             draw = ImageDraw.Draw(image)
             for gt in dataset.gt.get(image_id, []):
@@ -286,24 +325,20 @@ def render_bad_cases(dataset: Any, rows: Sequence[Mapping[str, Any]], output_dir
                     continue
                 draw.rectangle(tuple(pred.bbox), outline=(220, 40, 40), width=2)
             draw.text((8, 8), f"{image_id}  errors={row.get('error_count', 0)}", fill=(255, 160, 0))
-            target = output_dir / f"{_safe_image_name(image_id)}.jpg"
+            target = target_dir / f"{row.get('case_name', 'case')}.jpg"
             image.save(target, quality=92)
+            row["rendered_image_path"] = target.relative_to(output_root).as_posix()
+            row["render_status"] = "rendered"
             paths.append(target)
     return paths
 
 
-def _safe_image_name(value: str) -> str:
-    return "".join(char if char.isalnum() or char in "-_." else "_" for char in value).strip("._") or "image"
-
-
-def write_bad_case_html(path: Path, rows: Sequence[Mapping[str, Any]], image_paths: Sequence[Path]) -> None:
-    by_id = {item.stem: item for item in image_paths}
-    lines = ["<!doctype html><meta charset='utf-8'><title>差图索引</title><h1>差图索引</h1><table border='1'><tr><th>图片</th><th>错误数</th><th>漏检</th><th>多余框</th><th>预览</th></tr>"]
+def write_bad_case_html(path: Path, rows: Sequence[Mapping[str, Any]], image_paths: Sequence[Path] | None = None) -> None:
+    lines = ["<!doctype html><meta charset='utf-8'><title>差图索引</title><h1>差图索引</h1><table border='1'><tr><th>图片</th><th>错误数</th><th>错误类型</th><th>预览</th></tr>"]
     for row in rows:
         image_id = str(row.get("image_id", ""))
-        preview = by_id.get(_safe_image_name(image_id))
-        preview_link = f"images/{preview.name}" if preview else ""
-        preview_html = f"<a href='{html.escape(preview_link)}'><img src='{html.escape(preview_link)}' width='320'></a>" if preview else ""
-        lines.append(f"<tr><td>{html.escape(image_id)}</td><td>{row.get('error_count', 0)}</td><td>{row.get('missed_count', 0)}</td><td>{row.get('background_count', 0)}</td><td>{preview_html}</td></tr>")
+        preview_link = str(row.get("rendered_image_path", ""))
+        preview_html = f"<a href='{html.escape(preview_link)}'><img src='{html.escape(preview_link)}' width='320'></a>" if preview_link else ""
+        lines.append(f"<tr><td>{html.escape(image_id)}</td><td>{row.get('error_count', 0)}</td><td>{html.escape(str(row.get('error_types', '')))}</td><td>{preview_html}</td></tr>")
     lines.append("</table>")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

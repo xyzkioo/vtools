@@ -4,20 +4,20 @@ Framework-independent diagnostics for object detection models.
 
 The script evaluates predictions against ground-truth boxes.  It does not
 import Ultralytics (or any other model framework), and it does not estimate
-runtime cost.  The diagnostics runner separates model use into three modes;
+runtime cost.  The diagnostics runner separates model use into three input modes;
 this engine remains the framework-independent evaluation layer:
 
-1. Mode A passes an existing prediction file.
-2. Mode B uses the built-in Ultralytics ``.pt`` loader.
-3. Mode C runs a vtools-style adapter.
+1. ``predictions_file`` passes an existing prediction file.
+2. ``ultralytics_model`` uses the built-in Ultralytics ``.pt`` loader.
+3. ``custom_adapter`` runs a vtools-style adapter.
 
 All three paths produce the same canonical format before this engine is
 called.  The command-line engine can also be used directly by pointing
 ``--gt`` at an Ultralytics ``data.yaml`` (or canonical/COCO/YOLO GT) and
 passing predictions with ``--pred``.
 
-The output directory contains machine-readable CSV/JSON files and a Markdown
-report.  Optional raw/candidate predictions can be supplied with ``--raw-pred``
+The output directory contains machine-readable CSV/JSON files.  Optional
+raw/candidate predictions can be supplied with ``--raw-pred``
 to quantify losses introduced by a model's filtering or post-processing stages.
 """
 
@@ -595,7 +595,7 @@ def load_config(path: Optional[Path]) -> Dict[str, Any]:
         raise ValueError("配置文件必须是 YAML/JSON 对象")
     # vtools-style run files keep detection thresholds under ``diagnostics``.
     # Flatten that section into the same keys used by the standalone CLI while
-    # retaining all original sections in config_used.json.
+    # retaining all original sections in run_info.json.
     if isinstance(user.get("diagnostics"), Mapping):
         merged = dict(user)
         merged.update(dict(user["diagnostics"]))
@@ -963,7 +963,7 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
                     reason = "miss_classification_localization"
                 else:
                     reason = "miss_no_candidate"
-            row = {"image_id": image_id, "gt_id": gt.instance_id, "class_id": gt.class_id, "matched": matched, "match_score": score, "best_same_class_iou": candidate_same, "best_any_class_iou": candidate_any, "best_same_class_iou_at_work_threshold": work_same, "best_any_class_iou_at_work_threshold": work_any, "best_same_class_score_at_candidate_threshold": _pred_score(candidate_same_pred) if candidate_same_pred else 0.0, "miss_reason": reason}
+            row = {"image_id": image_id, "gt_id": gt.instance_id, "class_id": gt.class_id, "matched": matched, "matched_prediction_id": matched_pred_instance.instance_id if matched else "", "match_score": score, "best_same_class_iou": candidate_same, "best_any_class_iou": candidate_any, "best_same_class_iou_at_work_threshold": work_same, "best_any_class_iou_at_work_threshold": work_any, "best_same_class_score_at_candidate_threshold": _pred_score(candidate_same_pred) if candidate_same_pred else 0.0, "miss_reason": reason}
             row.update(_target_attributes(gt, image_info, gts, area_quantiles, config))
             per_gt.append(row)
         image_metrics = _prf(len(matches), len(unmatched_pred), len(unmatched_gt))
@@ -993,8 +993,183 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
     aggregate["low_confidence_recoverable_gt_count"] = sum(row.get("miss_reason") == "miss_low_confidence" for row in per_gt)
     aggregate["low_confidence_recoverable_gt_rate"] = _safe_div(aggregate["low_confidence_recoverable_gt_count"], aggregate["gt_count"])
     operating_rows = [row for row in per_prediction if row.get("operating_included", True)]
-    aggregate["error_counts"] = {name: sum(1 for row in operating_rows if row["error_type"] == name) for name in sorted({row["error_type"] for row in operating_rows})}
-    return {"aggregate": aggregate, "per_image": per_image, "per_gt": per_gt, "per_prediction": per_prediction, "area_quantiles": {"q1": area_quantiles[0], "q2": area_quantiles[1], "q3": area_quantiles[2]}}
+    error_events, error_images = _build_error_events(
+        ds,
+        per_gt,
+        per_prediction,
+        score_threshold=score_threshold,
+        match_iou=match_iou,
+        localization_floor=localization_floor,
+    )
+    error_image_map = {str(row["image_id"]): row for row in error_images}
+    for image_row in per_image:
+        event_row = error_image_map.get(str(image_row.get("image_id")))
+        image_row["error_event_count"] = int(event_row.get("error_count", 0)) if event_row else 0
+        image_row["error_types"] = list(event_row.get("error_types", [])) if event_row else []
+    aggregate["error_counts"] = {
+        name: sum(1 for event in error_events if event["error_type"] == name)
+        for name in sorted({event["error_type"] for event in error_events})
+    }
+    aggregate["error_event_count"] = len(error_events)
+    aggregate["error_image_count"] = len(error_images)
+    return {
+        "aggregate": aggregate,
+        "per_image": per_image,
+        "per_gt": per_gt,
+        "per_prediction": per_prediction,
+        "error_events": error_events,
+        "error_images": error_images,
+        "area_quantiles": {"q1": area_quantiles[0], "q2": area_quantiles[1], "q3": area_quantiles[2]},
+    }
+
+
+def _build_error_events(
+    ds: Dataset,
+    per_gt: List[Dict[str, Any]],
+    per_prediction: List[Dict[str, Any]],
+    *,
+    score_threshold: float,
+    match_iou: float,
+    localization_floor: float,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Build one mutually exclusive event stream for summaries and bad cases.
+
+    The operating point matching remains the source of truth for TP/FP/FN.
+    Error attribution then pairs an unmatched GT with at most one unmatched
+    prediction.  This prevents a wrong-class prediction plus its corresponding
+    missed GT from being counted twice while preserving the original per-object
+    CSV rows for auditability.
+    """
+    gt_rows = {(str(row.get("image_id", "")), str(row.get("gt_id", ""))): row for row in per_gt}
+    pred_rows = {(str(row.get("image_id", "")), str(row.get("prediction_id", ""))): row for row in per_prediction}
+    events: List[Dict[str, Any]] = []
+    image_events: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+    def add_event(
+        image_id: str,
+        error_type: str,
+        *,
+        gt: Optional[Instance] = None,
+        pred: Optional[Instance] = None,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        event_id = f"{image_id}:error:{len(image_events[image_id]) + 1:04d}"
+        iou = box_iou(pred.bbox, gt.bbox) if pred is not None and gt is not None else 0.0
+        event = {
+            "event_id": event_id,
+            "image_id": image_id,
+            "error_type": error_type,
+            "gt_id": gt.instance_id if gt is not None else "",
+            "prediction_id": pred.instance_id if pred is not None else "",
+            "iou": iou,
+            "score": _pred_score(pred) if pred is not None else None,
+            "reason": reason,
+        }
+        events.append(event)
+        image_events[image_id].append(event)
+        if gt is not None:
+            row = gt_rows.get((image_id, gt.instance_id))
+            if row is not None:
+                row["error_event_id"] = event_id
+                row["error_event_type"] = error_type
+                row["error_event_prediction_id"] = pred.instance_id if pred is not None else ""
+        if pred is not None:
+            row = pred_rows.get((image_id, pred.instance_id))
+            if row is not None:
+                row["error_event_id"] = event_id
+                row["error_event_type"] = error_type
+                row["error_event_gt_id"] = gt.instance_id if gt is not None else ""
+        return event
+
+    image_ids = sorted(set(ds.images) | set(ds.gt) | set(ds.predictions))
+    for image_id in image_ids:
+        gts = _active_gt(ds.gt.get(image_id, []))
+        predictions = [
+            pred for pred in ds.predictions.get(image_id, [])
+            if _pred_score(pred) >= score_threshold
+        ]
+        matched_gt_ids = {
+            str(row.get("gt_id"))
+            for row in per_gt
+            if str(row.get("image_id")) == image_id and bool(row.get("matched"))
+        }
+        matched_prediction_ids = {
+            str(row.get("prediction_id"))
+            for row in per_prediction
+            if str(row.get("image_id")) == image_id and row.get("error_type") == "TP"
+        }
+        unmatched_gts = [gt for gt in gts if gt.instance_id not in matched_gt_ids]
+        unmatched_predictions = [
+            pred for pred in predictions if pred.instance_id not in matched_prediction_ids
+        ]
+        candidate_pairs: List[Tuple[int, float, float, str, str, Instance, Instance, str]] = []
+        for gt in unmatched_gts:
+            for pred in unmatched_predictions:
+                iou = box_iou(pred.bbox, gt.bbox)
+                if iou < localization_floor:
+                    continue
+                if pred.class_id == gt.class_id:
+                    if iou >= match_iou:
+                        error_type = "duplicate"
+                        priority = 0
+                    else:
+                        error_type = "localization"
+                        priority = 1
+                elif iou >= match_iou:
+                    error_type = "classification"
+                    priority = 0
+                else:
+                    error_type = "classification_localization"
+                    priority = 2
+                candidate_pairs.append((priority, -iou, -_pred_score(pred), gt.instance_id, pred.instance_id, gt, pred, error_type))
+        candidate_pairs.sort(key=lambda item: item[:5])
+        used_gts: set[str] = set()
+        used_predictions: set[str] = set()
+        for _, _, _, _, _, gt, pred, error_type in candidate_pairs:
+            if gt.instance_id in used_gts or pred.instance_id in used_predictions:
+                continue
+            used_gts.add(gt.instance_id)
+            used_predictions.add(pred.instance_id)
+            add_event(image_id, error_type, gt=gt, pred=pred, reason=error_type)
+
+        for gt in unmatched_gts:
+            if gt.instance_id in used_gts:
+                continue
+            row = gt_rows.get((image_id, gt.instance_id), {})
+            add_event(image_id, "missed", gt=gt, reason=str(row.get("miss_reason", "missed")))
+
+        for pred in unmatched_predictions:
+            if pred.instance_id in used_predictions:
+                continue
+            same = [(box_iou(pred.bbox, gt.bbox), gt) for gt in gts if gt.class_id == pred.class_id]
+            any_class = [(box_iou(pred.bbox, gt.bbox), gt) for gt in gts]
+            best_same, same_gt = max(same, key=lambda item: item[0]) if same else (0.0, None)
+            best_any, any_gt = max(any_class, key=lambda item: item[0]) if any_class else (0.0, None)
+            if best_same >= match_iou:
+                error_type, linked_gt = "duplicate", same_gt
+            elif best_any >= match_iou:
+                error_type, linked_gt = "classification", any_gt
+            elif best_same >= localization_floor:
+                error_type, linked_gt = "localization", same_gt
+            elif best_any >= localization_floor:
+                error_type, linked_gt = "classification_localization", any_gt
+            else:
+                error_type, linked_gt = "background", None
+            add_event(image_id, error_type, gt=linked_gt, pred=pred, reason=error_type)
+
+    image_rows: List[Dict[str, Any]] = []
+    for image_id in sorted(image_events):
+        grouped: Dict[str, int] = defaultdict(int)
+        for event in image_events[image_id]:
+            grouped[str(event["error_type"])] += 1
+        image_rows.append({
+            "image_id": image_id,
+            "error_count": len(image_events[image_id]),
+            "error_types": sorted(grouped),
+            "error_type_counts": dict(sorted(grouped.items())),
+            "image_category": next(iter(grouped)) if len(grouped) == 1 else "mixed",
+        })
+    return events, image_rows
 
 
 def group_metrics(per_gt: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -1073,6 +1248,7 @@ def _bootstrap_ci(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
         path.write_text("\n", encoding="utf-8")
         return
@@ -1105,27 +1281,6 @@ def _format_value(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.4f}"
     return str(value)
-
-
-def write_report(output_dir: Path, config: Mapping[str, Any], summary: Mapping[str, Any], ap: Mapping[str, Any], stage_rows: Sequence[Mapping[str, Any]], warnings: Sequence[str]) -> None:
-    agg = summary["aggregate"]
-    enabled = config.get("enabled_modules", [])
-    lines = ["# 通用目标检测诊断报告", "", "本报告按开关执行差图、错误类型和框重叠分析；mAP 等常规验证请查看 Ultralytics 原生验证结果。", "", "## 运行配置", "", f"- 启用模块：`{', '.join(enabled) or '无'}`", f"- 工作分数阈值：`{config.get('score_threshold')}`", f"- 候选保留阈值：`{config.get('candidate_threshold')}`", f"- 正式匹配 IoU：`{config.get('match_iou')}`", f"- 图像数：`{agg.get('image_count', 'N/A')}`；GT 数：`{agg.get('gt_count', 'N/A')}`"]
-    if agg:
-        lines += ["", "## 诊断匹配摘要", "", "| 指标 | 值 |", "|---|---:|", f"| Precision（诊断工作点） | {_format_value(agg.get('precision'))} |", f"| Recall（诊断工作点） | {_format_value(agg.get('recall'))} |", f"| F1（诊断工作点） | {_format_value(agg.get('f1'))} |", f"| 每图平均漏检 | {_format_value(agg.get('mean_fn_per_image'))} |", f"| 每图平均多余框 | {_format_value(agg.get('mean_fp_per_image'))} |"]
-    if ap:
-        lines += ["", "## 外部常规验证", "", "本入口不重复计算 AP；如显式导入验证结果，请以 Ultralytics 原始报告为准。"]
-    if agg.get("error_counts"):
-        lines += ["", "## 错误计数", "", "| 类型 | 数量 |", "|---|---:|"]
-        for key, value in sorted((agg.get("error_counts") or {}).items()):
-            lines.append(f"| {key} | {value} |")
-    lines += ["", "## 输出说明", "", "- `per_gt.csv`：逐目标检出和漏检原因。", "- `per_prediction.csv`：逐预测框错误类型。", "- `bad_cases.csv`：差图排序清单。", "- `overlap_*`：检测框重叠及疑似重复预测。", "", "重叠表示几何框相交，不等同于真实遮挡；仅凭最终预测不能断定 NMS 或其他后处理是原因。"]
-    if stage_rows:
-        lines += ["", "## 候选/后处理阶段对照", "", "详见 `stage_comparison.csv`。raw 与 final 的差值用于定位候选筛选造成的损失，不代表某个特定算法（例如 NMS），除非适配器明确提供了该阶段。"]
-    if warnings:
-        lines += ["", "## 数据警告", ""]
-        lines.extend(f"- {warning}" for warning in warnings)
-    (output_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _merge_prediction_dataset(gt_ds: Dataset, predictions: Mapping[str, Sequence[Instance]], warnings: Sequence[str]) -> Dataset:
@@ -1220,11 +1375,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.output.mkdir(parents=True, exist_ok=True)
 
     needs_diagnostics = any(modules.get(module_id) for module_id in modules if module_id.startswith("diagnostics.") or module_id.startswith("output."))
-    summary = evaluate_operating(ds, config) if needs_diagnostics else {"aggregate": {}, "per_image": [], "per_gt": [], "per_prediction": [], "area_quantiles": {}}
+    summary = evaluate_operating(ds, config) if needs_diagnostics else {"aggregate": {}, "per_image": [], "per_gt": [], "per_prediction": [], "error_events": [], "error_images": [], "area_quantiles": {}}
     # Overlap analysis consumes the same one-to-one matching table; no second
     # model call or GT read is needed.
     ds.diagnostic_per_gt = summary["per_gt"]
     ds.diagnostic_per_prediction = summary["per_prediction"]
+    ds.diagnostic_error_events = summary.get("error_events", [])
     overlap = overlap_analysis(ds, config) if modules.get("diagnostics.overlap") else None
     ap: Dict[str, Any] = {}
     sweep: list[dict[str, Any]] = threshold_sweep(ds, config) if modules.get("diagnostics.threshold_sweep") else []
@@ -1240,38 +1396,74 @@ def main(argv: Sequence[str] | None = None) -> int:
     # AP is intentionally not run here; it is provided by Ultralytics
     # validation and would repeat the standard evaluation.
 
-    _write_json(args.output / "summary.json", {"config": config, "aggregate": summary["aggregate"], "area_quantiles": summary["area_quantiles"], "ap": ap, "warnings": ds.warnings, "modules": modules})
+    raw_dir = args.output / "raw_data"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    aggregate = summary["aggregate"]
+    metrics = {key: value for key, value in aggregate.items() if key not in {"error_counts", "error_event_count", "error_image_count"}}
     if needs_diagnostics:
-        _write_csv(args.output / "per_image.csv", summary["per_image"])
+        _write_csv(raw_dir / "per_image.csv", summary["per_image"])
+        _write_csv(raw_dir / "error_events.csv", summary.get("error_events", []))
     if modules.get("diagnostics.missed") or modules.get("diagnostics.localization") or modules.get("diagnostics.overlap"):
-        _write_csv(args.output / "per_gt.csv", summary["per_gt"])
+        _write_csv(raw_dir / "per_gt.csv", summary["per_gt"])
     if modules.get("diagnostics.classification") or modules.get("diagnostics.background") or modules.get("diagnostics.duplicate") or modules.get("diagnostics.localization"):
-        _write_csv(args.output / "per_prediction.csv", summary["per_prediction"])
+        _write_csv(raw_dir / "per_prediction.csv", summary["per_prediction"])
     if groups:
-        _write_csv(args.output / "group_metrics.csv", groups)
+        _write_csv(raw_dir / "group_metrics.csv", groups)
     if sweep:
-        _write_csv(args.output / "threshold_sweep.csv", sweep)
-        _write_csv(args.output / "fp_budget.csv", budget)
+        _write_csv(raw_dir / "threshold_sweep.csv", sweep)
+        _write_csv(raw_dir / "fp_budget.csv", budget)
     if overlap is not None:
-        _write_csv(args.output / "overlap_gt_pairs.csv", overlap["gt_pairs"])
-        _write_csv(args.output / "overlap_prediction_pairs.csv", overlap["prediction_pairs"])
-        _write_csv(args.output / "overlap_per_image.csv", overlap["per_image"])
-        _write_json(args.output / "overlap_summary.json", overlap)
+        _write_csv(raw_dir / "overlap_gt_pairs.csv", overlap["gt_pairs"])
+        _write_csv(raw_dir / "overlap_prediction_pairs.csv", overlap["prediction_pairs"])
+        _write_csv(raw_dir / "overlap_per_image.csv", overlap["per_image"])
     bad_rows: list[dict[str, Any]] = []
-    image_paths: list[Path] = []
     if modules.get("output.bad_cases"):
-        bad_rows = bad_case_rows(summary)
-        _write_csv(args.output / "bad_cases.csv", bad_rows)
+        bad_rows = bad_case_rows(summary, ds, args.images_dir or args.base_dir or args.output.parent)
     if modules.get("output.images"):
         top_k = int((config.get("bad_cases") or {}).get("top_k", 50)) if isinstance(config.get("bad_cases"), Mapping) else 50
-        image_paths = render_bad_cases(ds, bad_rows, args.output / "images", top_k=top_k, score_threshold=float(config.get("score_threshold", 0.25)), base_dir=args.images_dir or args.base_dir or args.output.parent)
+        render_bad_cases(ds, bad_rows, args.output, top_k=top_k, score_threshold=float(config.get("score_threshold", 0.25)), base_dir=args.images_dir or args.base_dir or args.output.parent)
+    else:
+        for row in bad_rows:
+            row["render_status"] = "images_disabled"
+    if modules.get("output.bad_cases"):
+        _write_csv(args.output / "bad_cases.csv", bad_rows)
+        missing_sources = sum(row.get("render_status") == "source_missing" for row in bad_rows)
+        if missing_sources:
+            ds.warnings.append(f"{missing_sources} 张错误图片找不到源文件；bad_cases.csv 保留了原始路径")
     if modules.get("output.html"):
-        write_bad_case_html(args.output / "index.html", bad_rows, image_paths)
+        write_bad_case_html(args.output / "index.html", bad_rows)
     if stage_rows:
-        _write_csv(args.output / "stage_comparison.csv", stage_rows)
-    _write_json(args.output / "config_used.json", config)
-    _write_json(args.output / "run_manifest.json", {"modules": modules, "output_dir": str(args.output.resolve()), "prediction_source": str(args.pred or args.predictor or "")})
-    write_report(args.output, config, summary, ap, stage_rows, ds.warnings)
+        _write_csv(raw_dir / "stage_comparison.csv", stage_rows)
+    warning_messages = sorted(set(ds.warnings))
+    _write_json(args.output / "summary.json", {
+        "aggregate": metrics,
+        "error_counts": aggregate.get("error_counts", {}),
+        "error_event_count": aggregate.get("error_event_count", 0),
+        "error_image_count": aggregate.get("error_image_count", 0),
+        "warning_count": len(warning_messages),
+    })
+    artifact_paths = {}
+    for path in sorted(args.output.rglob("*")):
+        if path.is_file() and path.name not in {"run_info.json"}:
+            artifact_paths[path.relative_to(args.output).as_posix()] = str(path.stat().st_size)
+    _write_json(args.output / "run_info.json", {
+        "status": "completed",
+        "output_dir": ".",
+        "config": config,
+        "modules": modules,
+        "cli_overrides": {
+            "only": list(args.only or []),
+            "enable": list(args.enable or []),
+            "disable": list(args.disable or []),
+        },
+        "inputs": {
+            "gt": str(args.gt.resolve()),
+            "predictions": str(args.pred.resolve()) if args.pred is not None else "",
+            "raw_predictions": str(args.raw_pred.resolve()) if args.raw_pred is not None else "",
+            "predictor": str(args.predictor or ""),
+        },
+        "artifacts": artifact_paths,
+    })
     print(f"诊断完成：{args.output.resolve()}")
     print(f"启用模块：{', '.join(config['enabled_modules']) or '无'}")
     if summary["aggregate"]:

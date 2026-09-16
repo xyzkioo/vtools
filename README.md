@@ -95,9 +95,9 @@ python -m vtools_ui
 
 | 功能 | 所需依赖 |
 | --- | --- |
-| 已有预测文件的检测诊断（模式 A） | 评估核心使用 Python 标准库；YAML 配置需要 PyYAML，读取 YOLO 图片尺寸需要 Pillow；无需为此加载 PyTorch 模型 |
-| 本地 YOLO 模型开发、训练、推理、诊断（模式 B） | 配套的 PyTorch / torchvision，以及本地 `ultralytics-cn` 声明的依赖 |
-| 自定义模型诊断（模式 C） | 诊断基础依赖，加上 adapter 所用框架和模型依赖 |
+| 已有预测文件的检测诊断（`predictions_file`） | 评估核心使用 Python 标准库；YAML 配置需要 PyYAML，读取 YOLO 图片尺寸需要 Pillow；无需为此加载 PyTorch 模型 |
+| 本地 YOLO 模型开发、训练、推理、诊断（`ultralytics_model`） | 配套的 PyTorch / torchvision，以及本地 `ultralytics-cn` 声明的依赖 |
+| 自定义模型诊断（`custom_adapter`） | 诊断基础依赖，加上 adapter 所用框架和模型依赖 |
 | PyTorch 测速 | PyTorch、NumPy、PyYAML 和模型 adapter 依赖；内置图片流程还需要 OpenCV |
 | 特征图 / 阶段可视化 | PyTorch、NumPy、PyYAML、OpenCV、Pillow；使用本地 Ultralytics 权重时还需 `ultralytics-cn` 的依赖 |
 | TensorRT 测速与一致性检查 | NVIDIA GPU、兼容驱动、TensorRT Python API；导出/检查另需 ONNX，导出链路可能需要 onnxscript |
@@ -149,7 +149,7 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 python -m pip install -e ./ultralytics-cn --no-deps
 ```
 
-`--no-deps` 不会补齐缺失依赖，空环境不要使用。若只使用诊断模式 A，安装 `model_diagnostics/requirements.txt` 即可，读取 NDJSON 等额外转换流程除外。
+`--no-deps` 不会补齐缺失依赖，空环境不要使用。若只使用 `predictions_file`，安装 `model_diagnostics/requirements.txt` 即可，读取 NDJSON 等额外转换流程除外。
 
 ### 4. 确认安装与源码来源
 
@@ -196,16 +196,16 @@ python env_test/check_install.py --source ./ultralytics-cn --weights /path/to/be
 
 | 模式 | 输入 | 需要修改 |
 | --- | --- | --- |
-| A | 已有预测 JSON/JSONL 或 COCO 预测结果 | `mode: A`、`mode_a.predictions` |
-| B | 兼容的 Ultralytics `.pt` | `mode: B`、`mode_b.weights` |
-| C | 自定义模型与 adapter | `mode: C`、`mode_c.weights`、`mode_c.adapter` |
+| `predictions_file` | 已有预测 JSON/JSONL 或 COCO 预测结果 | `predictions_file.predictions` |
+| `ultralytics_model` | 兼容的 Ultralytics `.pt` | `ultralytics_model.weights` |
+| `custom_adapter` | 自定义模型与 adapter | `custom_adapter.weights`、`custom_adapter.adapter` |
 
 三种模式都要填写数据集配置，例如 `dataset.data` 指向检测数据集 `data.yaml`，`dataset.split: val` 选择验证集。
 
-以仓库根目录作为路径基准，模式 B 可将现有配置中的对应项改为以下内容；**合并到原有配置节，保留其余参数，不要重复添加同名 YAML 节**：
+以仓库根目录作为路径基准，`ultralytics_model` 可将现有配置中的对应项改为以下内容；**合并到原有配置节，保留其余参数，不要重复添加同名 YAML 节**：
 
 ```yaml
-mode: B
+mode: ultralytics_model
 
 project:
   root: ..
@@ -219,7 +219,7 @@ dataset:
   data: /path/to/dataset/data.yaml
   split: val
 
-mode_b:
+ultralytics_model:
   name: ultralytics_pt
   weights: /path/to/best.pt
   task: detect
@@ -246,16 +246,16 @@ python model_diagnostics/run_model_diagnostics.py
 
 | 输出文件 | 用途 |
 | --- | --- |
-| `report.md`、`summary.json` | 总览、整体指标和诊断摘要 |
-| `per_gt.csv`、`per_prediction.csv` | 每个真实目标的检出/漏检情况、每个预测框的匹配/错误类型 |
-| `per_image.csv` | 每张图片的检测和计数表现 |
-| `group_metrics.csv` | 按目标尺寸、密度、类别等分组对比 |
-| `threshold_sweep.csv`、`fp_budget.csv` | 仅在开启 `diagnostics.threshold_sweep` 时生成，用于观察置信度阈值与召回的取舍 |
-| `predictions_adapter.json` | 模式 B/C 本次推理生成的预测，便于复查或后续用模式 A 分析 |
+| `run_info.json` | 实际配置、输入、模块、运行状态和产物索引 |
+| `summary.json` | 整体指标、去重错误事件数量、错误图片数量和警告数量 |
+| `bad_cases.csv` | 图片索引、原图路径、短图片路径、错误类型和错误数；详细事件与逐图指标在 `raw_data/` |
+| `raw_data/*.csv` | 逐目标、逐预测、逐图、分组、阈值和重叠分析明细 |
+| `raw_data/predictions_adapter.json` | 模型模式本次生成的预测，便于复查或再次分析 |
+| `images/{background,classification,duplicate,localization,missed,mixed}/` | 按图片错误类型分类的差图 |
 
 `benchmark.conf: 0.001` 用于推理时保留低分候选，`diagnostics.score_threshold: 0.25` 是正式 P/R/F1 的工作阈值，两者用途不同。候选召回还由 `diagnostics.candidate_threshold` 控制；已被推理阶段删掉的框，后续降低诊断阈值也无法找回。AP/mAP 与常规验证使用 Ultralytics 原生 `val`，不会由诊断入口重复计算。
 
-前后处理阶段对比需要另外提供真实的 raw 预测，才能生成 `stage_comparison.csv`；普通模式 B 的最终检测框不自动等于“NMS 前候选”。指标口径见 [METRICS.md](model_diagnostics/docs/METRICS.md)，数据格式与 adapter 接口见 [完整教程](model_diagnostics/docs/README.md)。
+前后处理阶段对比需要另外提供真实的 raw 预测，才能生成 `stage_comparison.csv`；普通 `ultralytics_model` 的最终检测框不自动等于“NMS 前候选”。指标口径见 [METRICS.md](model_diagnostics/docs/METRICS.md)，数据格式与 adapter 接口见 [完整教程](model_diagnostics/docs/README.md)。
 
 ### 3. 特征图、CAM 与检测阶段追踪
 
