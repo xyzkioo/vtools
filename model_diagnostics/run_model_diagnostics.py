@@ -59,6 +59,8 @@ def _project_root(settings: Mapping[str, Any]) -> Path:
 
 def _add_python_paths(settings: Mapping[str, Any], project_root: Path) -> None:
     """Apply the same project/python_paths behavior as vtools config loading."""
+    from vtools_runtime.ultralytics import add_repo_to_path
+
     project = _mapping(settings.get("project"), "project")
     values = [PROJECT_ROOT, project_root]
     if project.get("ultralytics_repo"):
@@ -71,6 +73,7 @@ def _add_python_paths(settings: Mapping[str, Any], project_root: Path) -> None:
         path = _resolve(value, project_root)
         if path is not None and path.is_dir() and str(path) not in sys.path:
             sys.path.insert(0, str(path))
+    add_repo_to_path(settings, project_root)
 
 
 def _adapter_spec(value: Any, project_root: Path) -> Optional[str]:

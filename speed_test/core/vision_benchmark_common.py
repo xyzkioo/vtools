@@ -578,7 +578,10 @@ class UltralyticsAdapter(BaseAdapter):
         try:
             from ultralytics import YOLO
         except ImportError as error:
-            raise ImportError("使用 ultralytics adapter 前请安装 ultralytics") from error
+            raise ImportError(
+                "使用 ultralytics adapter 前未找到 Ultralytics；请设置 VTOOLS_ULTRALYTICS_REPO，"
+                "或在 project.ultralytics_repo 中填写你的 Fork 源码目录"
+            ) from error
         return YOLO(str(weights), task=self.task)
 
     def forward_model(self, model: Any) -> Any:

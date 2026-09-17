@@ -9,9 +9,9 @@ project:
   # vtools 项目根目录。
   root: ../..
 
-  # 本地 Ultralytics 源码目录。相对路径会按 project.root 解析。
-  # 如果只使用 pip 安装的 ultralytics，也可以删除这一项。
-  ultralytics_repo: ultralytics
+  # 可选：Ultralytics 源码目录。相对路径会按 project.root 解析。
+  # 留空时使用当前 Python 环境中的 ultralytics；非 Ultralytics adapter 不需要它。
+  ultralytics_repo: null
 
   # 其他自定义模型、模块或 adapter 所在目录，可填写多个路径。
   python_paths: []

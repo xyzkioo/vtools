@@ -1,0 +1,4 @@
+# Optional dependency group for the built-in Ultralytics adapter.
+# The repository fork can be used instead with:
+# python -m pip install -e ./ultralytics-cn
+ultralytics>=8.0

@@ -24,7 +24,7 @@ python run_tools.py --tool diagnostics --config model_diagnostics/config/config.
 
 ```bash
 # 以下命令在 vtools 仓库根目录执行
-python env_test/check_install.py --source ./ultralytics-cn
+python env_test/check_install.py
 ```
 
 如果还没有安装诊断依赖，请先执行：
@@ -32,6 +32,10 @@ python env_test/check_install.py --source ./ultralytics-cn
 ```bash
 python -m pip install -r ./model_diagnostics/requirements.txt
 ```
+
+仅使用 `predictions_file` 或 `custom_adapter` 时不需要安装 Ultralytics。使用
+`ultralytics_model` 时，再安装官方包，或在配置的 `project.ultralytics_repo`
+中填写仓库内 fork 的目录；不要求执行 `pip install -e`。
 
 环境检查脚本会检查 PyTorch、CUDA 和 `YOLO` 的训练、推理、验证接口。
 

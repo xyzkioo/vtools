@@ -140,32 +140,49 @@ python -m pip install --upgrade pip setuptools wheel
 
 需要运行模型时，先根据本机系统、显卡和驱动，在 [PyTorch 官方安装页](https://pytorch.org/get-started/locally/) 选择配套的 PyTorch / torchvision 安装命令。只使用 CPU 时选择 CPU 构建；GPU 机器应选择支持该显卡的 CUDA 构建，不必照搬上表的 CUDA 版本。
 
-### 3. 安装本地源码与诊断依赖
+### 3. 安装 vtools 基础依赖
 
 ```bash
-python -m pip install -e ./ultralytics-cn
 python -m pip install -r ./model_diagnostics/requirements.txt
 ```
 
-`-e` 表示可编辑安装：之后修改 `ultralytics-cn/ultralytics/` 源码，重新启动 Python 进程即可使用修改后的代码。外层文件夹叫 `ultralytics-cn`，Python 导入名仍然是 `ultralytics`。
+vtools 不会强制安装 Ultralytics。只使用已有预测文件、通用诊断、基础 UI 或自定义 adapter 时，不需要安装它。
 
-已有环境的依赖确实完整、只想切换到本地源码时，可以将第一条命令换成：
+需要内置 Ultralytics adapter、YOLO 压缩、可视化或 K230 转换时，再选择一个运行时：
+
+```bash
+# 使用官方 PyPI 版本
+python -m pip install -r ./requirements-ultralytics.txt
+
+# 或使用仓库内的 fork
+python -m pip install -e ./ultralytics-cn
+```
+
+仓库内的 `ultralytics-cn` 保持 Python 包名 `ultralytics`，但只是可选运行时。未安装时，相关工具会在真正执行模型阶段报告缺少依赖，其他工具仍可使用。
+
+已有环境的依赖确实完整、只想切换到本地 fork 源码时，可以使用：
 
 ```bash
 python -m pip install -e ./ultralytics-cn --no-deps
 ```
 
-`--no-deps` 不会补齐缺失依赖，空环境不要使用。若只使用 `predictions_file`，安装 `model_diagnostics/requirements.txt` 即可，读取 NDJSON 等额外转换流程除外。
+`--no-deps` 不会补齐缺失依赖，适合已有 PyTorch、OpenCV 等依赖的环境。也可以完全不安装，配置 `project.ultralytics_repo: ./ultralytics-cn`，vtools 会在运行时直接从该源码目录加载 fork。
 
 ### 4. 确认安装与源码来源
+
+```bash
+python env_test/check_install.py
+```
+
+脚本会报告解释器、核心依赖、Ultralytics 实际导入位置、pip 依赖冲突、CUDA 状态，并从 YAML 构建模型执行合成输入前向传播。默认不需要自己的数据集或训练权重；无可用 CUDA 时可使用 CPU。
+
+如果选择检查本地 fork，使用：
 
 ```bash
 python env_test/check_install.py --source ./ultralytics-cn
 ```
 
-脚本会报告解释器、核心依赖、Ultralytics 实际导入位置、pip 依赖冲突、CUDA 状态，并从 YAML 构建模型执行合成输入前向传播。默认不需要自己的数据集或训练权重；无可用 CUDA 时可使用 CPU。
-
-导入路径应指向：
+这时导入路径应指向：
 
 ```text
 /path/to/vtools/ultralytics-cn/ultralytics/__init__.py
@@ -267,11 +284,13 @@ python model_diagnostics/run_model_diagnostics.py
 
 这个入口用于回答“问题从哪一层开始出现”以及“候选框在哪个阶段被删掉”。它和 Ultralytics 已有的训练曲线、验证指标、预测保存功能分开，输出一份可离线打开的 `index.html`。
 
-先安装可视化的轻量依赖，并确保当前环境使用仓库内的 Ultralytics 源码：
+先安装可视化的轻量依赖。Ultralytics adapter 是可选运行时，可以使用官方包，也可以使用仓库内的 fork：
 
 ```bash
 python -m pip install -r ./model_visualization/requirements.txt
-python -m pip install -e ./ultralytics-cn
+# 二选一：
+python -m pip install -r ./requirements-ultralytics.txt
+# python -m pip install -e ./ultralytics-cn
 ```
 
 复制 [model_visualization/config/config.yaml](model_visualization/config/config.yaml) 为自己的配置，至少修改 `model.weights` 和 `input.source`，然后运行：

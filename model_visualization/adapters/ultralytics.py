@@ -47,12 +47,14 @@ class UltralyticsAdapter:
     def _load(self) -> None:
         import torch
 
-        repo = self.project.get("ultralytics_repo")
-        if repo:
-            path = Path(str(repo)).expanduser().resolve()
-            if path.is_dir() and str(path) not in sys.path:
-                sys.path.insert(0, str(path))
-        from ultralytics import YOLO
+        from vtools_runtime.ultralytics import add_repo_to_path, import_error_message
+
+        project_root = Path(str(self.project.get("root", Path.cwd()))).expanduser().resolve()
+        repo = add_repo_to_path(self.config, project_root)
+        try:
+            from ultralytics import YOLO
+        except ImportError as error:
+            raise ImportError(import_error_message(repo)) from error
 
         from ..core.common import resolve_device
 
