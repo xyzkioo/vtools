@@ -85,6 +85,22 @@ class WebWorkbenchTests(unittest.TestCase):
             _executable, args, _config = core.build_command({"tool_id": "benchmark", "values": {"backend": "checkpoint"}})
             self.assertEqual(Path(args[0]).name, "inspect_checkpoint.py")
 
+    def test_frozen_workbench_wraps_tool_scripts(self) -> None:
+        with patch.object(core.sys, "frozen", True, create=True), patch.object(core.sys, "executable", sys.executable):
+            executable, args, _config = core.build_command({"tool_id": "environment", "values": {"skip_model": True}})
+        self.assertEqual(Path(executable).resolve(), Path(sys.executable).resolve())
+        self.assertEqual(args[0], "--run-script")
+        self.assertEqual(Path(args[1]).name, "check_install.py")
+
+    def test_frozen_model_run_uses_writable_results_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(core.sys, "frozen", True, create=True), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": directory}):
+                _executable, args, _config = core.build_command({"tool_id": "diagnostics", "values": {}})
+            run_dir = Path(args[args.index("--run-dir") + 1])
+            self.assertEqual(run_dir.parent, Path(directory) / "diagnostics")
+            self.assertTrue(run_dir.parent.is_dir())
+            self.assertFalse(run_dir.exists())
+
     def test_result_preview_does_not_escape_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "runs"
@@ -157,6 +173,36 @@ class WebWorkbenchTests(unittest.TestCase):
                     break
         self.assertEqual(manager.state()["status"], "stopped")
         self.assertNotEqual(manager.state()["exit_code"], 0)
+
+    def test_log_open_failure_reaps_started_process(self) -> None:
+        manager = TaskManager()
+        started = []
+        from vtools_ui.webapp import tasks
+        real_popen = tasks.subprocess.Popen
+        real_open = Path.open
+
+        def capture(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            started.append(process)
+            return process
+
+        def fail_log(path, *args, **kwargs):
+            if path.suffix == ".log":
+                raise OSError("disk full")
+            return real_open(path, *args, **kwargs)
+
+        with patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, ["-c", "import time; time.sleep(30)"], None)), patch("vtools_ui.webapp.tasks.add_history"), patch.object(tasks.subprocess, "Popen", side_effect=capture), patch.object(Path, "open", fail_log):
+            manager.start({"tool_id": "environment"})
+            cursor = 0
+            for _ in range(10):
+                events, done = manager.events_after(cursor, timeout=2)
+                cursor += len(events)
+                if done:
+                    break
+        self.assertEqual(manager.state()["status"], "failed")
+        self.assertEqual(manager.state()["exit_code"], 127)
+        self.assertEqual(len(started), 1)
+        self.assertIsNotNone(started[0].poll())
 
     def test_successful_process_reports_logs_and_exit_status(self) -> None:
         manager = TaskManager()

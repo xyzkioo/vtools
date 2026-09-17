@@ -3,7 +3,8 @@ import {
   Activity, ArrowRight, BarChart3, Boxes, CheckCircle2, ChevronDown, Clock3,
   FileCode2, FileImage, FileText, Folder, FolderOpen, HardDrive, Home, Layers3,
   LoaderCircle, Play, RefreshCw, Search, Settings2, ShieldCheck, Square,
-  TerminalSquare, WandSparkles, X, AlertCircle, Database, Copy,
+  TerminalSquare, WandSparkles, X, AlertCircle, Database, Copy, ZoomIn, ZoomOut,
+  Maximize2, RotateCcw,
 } from 'lucide-react'
 
 type Field = { key: string; label: string; kind: string; required?: boolean; default?: unknown; options?: string[]; hint?: string; when?: Record<string, string> }
@@ -36,6 +37,12 @@ async function api<T>(path: string, body?: object, method = body ? 'POST' : 'GET
 const q = (value: string) => encodeURIComponent(value)
 const active = (state: RunState | null) => Boolean(state && ['starting', 'running', 'stopping'].includes(state.status))
 const statusText: Record<string, string> = { starting: '正在启动', running: '运行中', stopping: '正在停止', succeeded: '已完成', failed: '运行失败', stopped: '已停止' }
+const completionNotice = (state: RunState) => {
+  if (state.status === 'succeeded') return state.result_dir ? `任务已完成，结果已保存到：${state.result_dir}` : '任务已完成'
+  if (state.status === 'stopped') return '任务已停止'
+  if (state.status === 'failed') return state.exit_code === 127 ? '任务启动失败，请检查 Python 解释器和依赖' : `任务运行失败（退出码 ${state.exit_code ?? '未知'}）`
+  return statusText[state.status] || state.status
+}
 const prettyBackend: Record<string, string> = { pytorch: 'PyTorch 测速', tensorrt: 'TensorRT 测速', consistency: '输出一致性', all: '一键测速', checkpoint: 'Checkpoint 检查' }
 
 function Icon({ name, size = 19 }: { name: string; size?: number }) {
@@ -188,6 +195,8 @@ function App() {
   const [resultFilter, setResultFilter] = useState('all')
   const [selectedFile, setSelectedFile] = useState<Result | null>(null)
   const [preview, setPreview] = useState('')
+  const [imageScale, setImageScale] = useState(1)
+  const [imageFit, setImageFit] = useState(true)
   const [resultsBusy, setResultsBusy] = useState(false)
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null)
   const logRef = useRef<HTMLPreElement>(null)
@@ -250,7 +259,15 @@ function App() {
             if (event.kind === 'log') setLog(previous => previous + String(event.payload))
             else if (event.kind === 'state') setRun(event.payload as RunState)
           }
-          if (data.done) { refreshHistory(); break }
+          if (data.done) {
+            const current = await api<{ state: RunState }>('runs/current')
+            if (!cancelled) {
+              setRun(current.state)
+              setNotice(completionNotice(current.state))
+              refreshHistory()
+            }
+            break
+          }
         } catch (err) { setNotice(String(err)); break }
       }
     }
@@ -273,7 +290,7 @@ function App() {
     } catch (err) { setNotice(String(err)) }
   }
   async function stop() {
-    try { const data = await api<{ state: RunState }>('runs/stop', {}); setRun(data.state) }
+    try { const data = await api<{ state: RunState }>('runs/stop', {}); setRun(data.state); setNotice(data.state.status === 'stopped' ? '任务已停止' : '正在停止任务') }
     catch (err) { setNotice(String(err)) }
   }
   async function saveSettings() {
@@ -284,7 +301,7 @@ function App() {
     } catch (err) { setNotice(String(err)) }
   }
   async function selectFile(file: Result) {
-    setSelectedFile(file); setPreview('')
+    setSelectedFile(file); setPreview(''); setImageScale(1); setImageFit(true)
     if (file.kind !== 'text') return
     try { const data = await api<{ text: string; truncated: boolean }>(`results/preview?path=${q(file.path)}`); setPreview(data.text + (data.truncated ? '\n\n—— 仅预览前 256 KB ——' : '')) }
     catch (err) { setPreview(String(err)) }
@@ -292,6 +309,18 @@ function App() {
   async function openFile(file: Result) {
     try { await api('results/open', { path: file.path, folder: true }) }
     catch (err) { setNotice(String(err)) }
+  }
+  function zoomImage(delta: number) {
+    setImageFit(false)
+    setImageScale(previous => Math.min(4, Math.max(0.25, Number((previous + delta).toFixed(2)))))
+  }
+  function fitImage() {
+    setImageFit(true)
+    setImageScale(1)
+  }
+  function resetImage() {
+    setImageFit(false)
+    setImageScale(1)
   }
   const visibleFiles = useMemo(() => files.filter(file => resultFilter === 'all' || file.kind === resultFilter), [files, resultFilter])
   const resultTree = useMemo(() => {
@@ -358,7 +387,7 @@ function App() {
           {run?.tool_id === page && run.result_dir && !active(run) && <div className="result-callout"><CheckCircle2 size={20} /><span>本次结果：{run.result_dir}</span><button className="link-button" onClick={() => { setResultRoot(run.result_dir!); setPage('results') }}>查看结果 <ArrowRight size={16} /></button></div>}
         </>}
 
-        {page === 'results' && <><div className="page-heading"><div className="eyebrow">OUTPUT LIBRARY</div><h1>结果查看</h1><p>浏览运行目录中的报告、图片和模型产物。</p></div><div className="card results-toolbar"><PathField value={resultRoot} onChange={setResultRoot} kind="dir" /><button className="button secondary" onClick={() => refreshResults(resultRoot)}><RefreshCw size={16} /> {resultsBusy ? '扫描中' : '刷新'}</button></div><div className="result-layout"><div className="card result-list"><div className="result-list-head"><strong>文件列表 <span>{visibleFiles.length}</span></strong><select value={resultFilter} onChange={event => setResultFilter(event.target.value)}><option value="all">全部</option><option value="image">图片</option><option value="text">文档</option><option value="model">模型</option></select></div><div className="result-scroll"><ResultFolderTree node={resultTree} selectedFile={selectedFile} onSelect={selectFile} />{!files.length && <div className="empty-state">当前目录没有可预览的结果文件。</div>}</div></div><div className="card preview-panel">{selectedFile ? <><div className="preview-head"><div><div className="eyebrow">FILE PREVIEW</div><h2>{selectedFile.relative.split(/[\\/]/).at(-1)}</h2><p>{selectedFile.relative} · {(selectedFile.size / 1024).toFixed(1)} KB</p></div><button className="button secondary" onClick={() => openFile(selectedFile)}><FolderOpen size={16} /> 打开所在目录</button></div>{selectedFile.kind === 'image' ? <div className="image-preview"><img src={`/api/results/preview?path=${q(selectedFile.path)}&token=${q(token)}`} alt={selectedFile.relative} /></div> : selectedFile.kind === 'text' ? <pre className="text-preview">{preview || '正在读取…'}</pre> : <div className="empty-state model-preview"><Boxes size={46} /><strong>模型产物</strong><p>可从所在目录用合适的工具打开此文件。</p></div>}</> : <div className="empty-state preview-empty"><FileImage size={42} /><strong>选择文件查看预览</strong><p>支持图片、JSON、CSV、YAML 和文本。</p></div>}</div></div></>}
+        {page === 'results' && <><div className="page-heading"><div className="eyebrow">OUTPUT LIBRARY</div><h1>结果查看</h1><p>浏览运行目录中的报告、图片和模型产物。</p></div><div className="card results-toolbar"><PathField value={resultRoot} onChange={setResultRoot} kind="dir" /><button className="button secondary" onClick={() => refreshResults(resultRoot)}><RefreshCw size={16} /> {resultsBusy ? '扫描中' : '刷新'}</button></div><div className="result-layout"><div className="card result-list"><div className="result-list-head"><strong>文件列表 <span>{visibleFiles.length}</span></strong><select value={resultFilter} onChange={event => setResultFilter(event.target.value)}><option value="all">全部</option><option value="image">图片</option><option value="text">文档</option><option value="model">模型</option></select></div><div className="result-scroll"><ResultFolderTree node={resultTree} selectedFile={selectedFile} onSelect={selectFile} />{!files.length && <div className="empty-state">当前目录没有可预览的结果文件。</div>}</div></div><div className="card preview-panel">{selectedFile ? <><div className="preview-head"><div><div className="eyebrow">FILE PREVIEW</div><h2>{selectedFile.relative.split(/[\\/]/).at(-1)}</h2><p>{selectedFile.relative} · {(selectedFile.size / 1024).toFixed(1)} KB</p></div><div className="preview-actions"><button className="button secondary" onClick={() => openFile(selectedFile)}><FolderOpen size={16} /> 打开所在目录</button>{selectedFile.kind === 'image' && <div className="image-controls" aria-label="图片缩放"><button className="icon-button" onClick={() => zoomImage(-0.25)} disabled={imageScale <= 0.25} title="缩小" aria-label="缩小"><ZoomOut size={16} /></button><span>{Math.round(imageScale * 100)}%</span><button className="icon-button" onClick={() => zoomImage(0.25)} disabled={imageScale >= 4} title="放大" aria-label="放大"><ZoomIn size={16} /></button><button className={`icon-button ${imageFit ? 'selected' : ''}`} onClick={fitImage} title="适应窗口" aria-label="适应窗口"><Maximize2 size={16} /></button><button className="icon-button" onClick={resetImage} title="重置比例" aria-label="重置比例"><RotateCcw size={16} /></button></div>}</div></div>{selectedFile.kind === 'image' ? <div className={`image-preview ${imageFit ? 'fit' : 'free'}`}><img style={{ transform: `scale(${imageScale})` }} src={`/api/results/preview?path=${q(selectedFile.path)}&token=${q(token)}`} alt={selectedFile.relative} /></div> : selectedFile.kind === 'text' ? <pre className="text-preview">{preview || '正在读取…'}</pre> : <div className="empty-state model-preview"><Boxes size={46} /><strong>模型产物</strong><p>可从所在目录用合适的工具打开此文件。</p></div>}</> : <div className="empty-state preview-empty"><FileImage size={42} /><strong>选择文件查看预览</strong><p>支持图片、JSON、CSV、YAML 和文本。</p></div>}</div></div></>}
 
         {page === 'history' && <><div className="page-heading"><div className="eyebrow">ACTIVITY LOG</div><h1>任务记录</h1><p>查看每次运行的状态、配置和输出位置。</p></div><div className="card history-card"><div className="history-head"><strong>全部任务 <span>{historyRows.length}</span></strong><button className="link-button" onClick={refreshHistory}><RefreshCw size={16} /> 刷新</button></div><div className="table-wrap"><table><thead><tr><th>时间</th><th>任务</th><th>状态</th><th>配置</th><th>结果</th></tr></thead><tbody>{historyRows.map((row, index) => <tr key={row.id || index}><td>{row.time}</td><td><strong>{catalog[row.task]?.title || row.task}</strong></td><td><span className={`pill ${row.status === '成功' ? 'good' : row.status === '失败' ? 'bad' : ''}`}>{row.status}</span></td><td title={row.config} className="truncate">{row.config}</td><td>{row.result_dir ? <button className="link-button" onClick={() => { setResultRoot(row.result_dir!); setPage('results') }}>查看结果 <ArrowRight size={15} /></button> : '—'}</td></tr>)}</tbody></table>{!historyRows.length && <div className="empty-state">暂无任务记录。</div>}</div></div></>}
 

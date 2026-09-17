@@ -5,7 +5,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import inspect
+import os
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -27,9 +29,13 @@ def resolve_device(value: Any = "auto"):
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if text.isdigit():
         text = f"cuda:{text}"
-    if text.startswith("cuda") and not torch.cuda.is_available():
-        return torch.device("cpu")
-    return torch.device(text)
+    device = torch.device(text)
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(f"请求了 {text}，但当前环境没有可用的 CUDA 设备")
+        if device.index is not None and device.index >= torch.cuda.device_count():
+            raise RuntimeError(f"请求了 {text}，但当前只有 {torch.cuda.device_count()} 个 CUDA 设备")
+    return device
 
 
 def _load_adapter(spec: Any):
@@ -153,13 +159,18 @@ def load_factory(spec: str, config: Mapping[str, Any] | None = None) -> Any:
 def save_model(model: Any, path: str | Path, adapter: Any = None) -> Path:
     target = Path(path).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    if adapter is not None and hasattr(adapter, "save_model"):
-        _call(adapter.save_model, model, target)
-    else:
-        torch = require_torch()
-        torch.save(model, target)
-    if not target.is_file():
-        raise RuntimeError(f"模型保存失败：{target}")
+    with tempfile.TemporaryDirectory(prefix=f".{target.stem}.", dir=target.parent) as temporary_dir:
+        temporary = Path(temporary_dir) / target.name
+        if adapter is not None and hasattr(adapter, "save_model"):
+            _call(adapter.save_model, model, temporary)
+        else:
+            torch = require_torch()
+            torch.save(model, temporary)
+        if not temporary.is_file():
+            raise RuntimeError(f"模型保存失败：{target}")
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        temporary.replace(target)
     return target
 
 

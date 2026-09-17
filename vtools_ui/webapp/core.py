@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,13 @@ import yaml
 
 from .catalog import ROOT, TOOLS
 
-STATE_DIR = ROOT / ".vtools_ui"
+STATE_DIR = (
+    Path(os.environ.get("VTOOLS_USER_DATA", "")).expanduser()
+    if getattr(sys, "frozen", False) and os.environ.get("VTOOLS_USER_DATA")
+    else Path.home() / ".vtools_ui"
+    if getattr(sys, "frozen", False)
+    else ROOT / ".vtools_ui"
+)
 SETTINGS_PATH = STATE_DIR / "settings.json"
 HISTORY_PATH = STATE_DIR / "history.json"
 TEXT_SUFFIXES = {".json", ".csv", ".html", ".md", ".txt", ".yaml", ".yml"}
@@ -22,6 +29,23 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".ti
 MODEL_SUFFIXES = {".pt", ".pth", ".onnx", ".engine", ".kmodel"}
 SKIP_DIRS = {".git", ".vtools_ui", "__pycache__", "node_modules"}
 PREVIEW_BYTES = 256 * 1024
+
+
+def _default_python_executable() -> str:
+    """Use a real Python environment for jobs launched by a desktop bundle."""
+
+    if getattr(sys, "frozen", False):
+        for name in ("python", "python3"):
+            candidate = shutil.which(name)
+            if candidate:
+                return str(Path(candidate).resolve())
+    return sys.executable
+
+
+def _default_results_root() -> str:
+    """Keep packaged run output outside the read-only application directory."""
+
+    return str(STATE_DIR / "runs") if getattr(sys, "frozen", False) else str(ROOT)
 
 
 def project_path(raw: str) -> Path:
@@ -45,7 +69,11 @@ def _atomic_text(path: Path, content: str) -> None:
 
 
 def read_settings() -> dict[str, Any]:
-    defaults = {"results_root": str(ROOT), "history_limit": 40, "python_executable": sys.executable}
+    defaults = {
+        "results_root": _default_results_root(),
+        "history_limit": 40,
+        "python_executable": _default_python_executable(),
+    }
     if SETTINGS_PATH.exists():
         try:
             loaded = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
@@ -76,6 +104,8 @@ def save_settings(changes: dict[str, Any]) -> dict[str, Any]:
     settings = read_settings()
     if "results_root" in changes:
         settings["results_root"] = str(project_path(str(changes["results_root"])))
+        if getattr(sys, "frozen", False):
+            Path(settings["results_root"]).mkdir(parents=True, exist_ok=True)
     if "python_executable" in changes:
         candidate = project_path(str(changes["python_executable"]))
         if not candidate.is_file():
@@ -336,8 +366,16 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
             if backend == "checkpoint":
                 raise ValueError("该测速类型请在 YAML 中设置模块")
             args += ["--enable" if enabled else "--disable", module_id]
-    if not Path(args[0]).is_file():
+        if getattr(sys, "frozen", False) and backend != "checkpoint":
+            results_root = project_path(str(settings["results_root"]))
+            tool_root = results_root / tool_id
+            tool_root.mkdir(parents=True, exist_ok=True)
+            args += ["--run-dir", str(tool_root / f"run-{uuid.uuid4().hex}")]
+    script = Path(args[0])
+    if not script.is_file():
         raise ValueError(f"入口文件不存在：{args[0]}")
+    if getattr(sys, "frozen", False) and executable.resolve() == Path(sys.executable).resolve():
+        args = ["--run-script", *args]
     return str(executable), args, config
 
 

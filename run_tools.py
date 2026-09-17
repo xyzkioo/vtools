@@ -16,6 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="vtools 模块化功能入口")
     parser.add_argument("--tool", choices=["diagnostics", "pytorch", "tensorrt", "consistency", "visualization", "compression"], default=None)
     parser.add_argument("--config", type=Path, help="对应子项目配置；省略时使用默认配置")
+    parser.add_argument("--run-dir", type=Path, help="指定本次运行的结果目录（测速一键入口会在各阶段复用）")
     parser.add_argument("--only", action="append")
     parser.add_argument("--enable", action="append")
     parser.add_argument("--disable", action="append")
@@ -89,6 +90,8 @@ def main() -> int:
         default_config = ROOT / "model_compression" / "config" / "config.yaml"
     old_argv = sys.argv[:]
     sys.argv = [module_name, "--config", str(selected_config or default_config)]
+    if args.run_dir:
+        sys.argv.extend(["--run-dir", str(args.run_dir)])
     if tool == "diagnostics" and args.predictions:
         sys.argv.extend(["--predictions", str(args.predictions)])
     if tool == "diagnostics" and args.weights:

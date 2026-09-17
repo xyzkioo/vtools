@@ -38,6 +38,20 @@ class UnifiedEntry(unittest.TestCase):
         child_config = captured[captured.index("--config") + 1]
         self.assertEqual(Path(child_config), run_tools.ROOT / "model_diagnostics" / "config" / "config.yaml")
 
+    def test_run_directory_is_forwarded_to_child(self):
+        captured = []
+
+        def child_main():
+            captured.extend(sys.argv)
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run1"
+            with patch.object(sys, "argv", ["run_tools", "--tool", "compression", "--run-dir", str(run_dir)]), \
+                    patch.object(run_tools.importlib, "import_module", return_value=SimpleNamespace(main=child_main)):
+                self.assertEqual(run_tools.main(), 0)
+            self.assertEqual(Path(captured[captured.index("--run-dir") + 1]), run_dir)
+
 
 if __name__ == "__main__":
     unittest.main()

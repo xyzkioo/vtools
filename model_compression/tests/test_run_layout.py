@@ -1,13 +1,57 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
-from model_compression.core.run_manager import prepare_run_directory
+from model_compression.core.run_manager import prepare_run_directory, write_json
+from model_compression.core.model_runtime import resolve_device, save_model
 from model_compression.run_model_compression import _build_summary
 
 
 class RunLayoutTests(unittest.TestCase):
+    def test_explicit_run_directory_cannot_overwrite_old_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "run1"
+            target.mkdir()
+            with self.assertRaises(FileExistsError):
+                prepare_run_directory({"run": {"root": tmp}}, target)
+
+    def test_absolute_run_directory_does_not_create_configured_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            configured_root = Path(tmp) / "bundle" / "runs"
+            target = Path(tmp) / "user" / "run1"
+            self.assertEqual(prepare_run_directory({"run": {"root": str(configured_root)}}, target), target)
+            self.assertFalse(configured_root.exists())
+
+    def test_failed_json_write_preserves_previous_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "summary.json"
+            target.write_text("old", encoding="utf-8")
+            with patch("model_compression.core.run_manager.json.dump", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    write_json(target, {"new": True})
+            self.assertEqual(target.read_text(encoding="utf-8"), "old")
+
+    def test_failed_model_save_preserves_previous_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "model.pt"
+            target.write_bytes(b"old")
+
+            def fail_after_partial(_model, path):
+                Path(path).write_bytes(b"partial")
+                raise OSError("disk full")
+
+            with patch("model_compression.core.model_runtime.require_torch", return_value=type("Torch", (), {"save": staticmethod(fail_after_partial)})()):
+                with self.assertRaises(OSError):
+                    save_model(object(), target)
+            self.assertEqual(target.read_bytes(), b"old")
+
+    def test_explicit_cuda_does_not_silently_use_cpu(self):
+        with patch("torch.cuda.is_available", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "CUDA"):
+                resolve_device("cuda:0")
+
     def test_prepare_run_creates_only_shared_layout_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = prepare_run_directory({"run": {"root": tmp, "name": "auto"}})

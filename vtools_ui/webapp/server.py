@@ -35,6 +35,8 @@ class WorkbenchServer(ThreadingHTTPServer):
         self.manager = manager
         self.token = secrets.token_urlsafe(32)
         self.results_root = project_path(str(read_settings()["results_root"]))
+        if getattr(sys, "frozen", False):
+            self.results_root.mkdir(parents=True, exist_ok=True)
 
 
 class ApiHandler(BaseHTTPRequestHandler):

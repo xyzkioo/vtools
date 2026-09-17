@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - compatibility with unusual launchers
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="模型压缩、实验分支与知识蒸馏")
     parser.add_argument("--config", type=Path, default=None, help="YAML 配置；省略时读取 config/config.yaml")
-    parser.add_argument("--run-dir", default=None, help="复用或指定运行目录")
+    parser.add_argument("--run-dir", default=None, help="指定新的运行目录；已存在时拒绝覆盖")
     parser.add_argument("--only", action="append", help="只运行指定模块，可重复或逗号分隔")
     parser.add_argument("--enable", action="append", help="临时启用模块")
     parser.add_argument("--disable", action="append", help="临时关闭模块")

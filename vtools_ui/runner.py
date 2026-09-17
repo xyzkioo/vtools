@@ -1,4 +1,8 @@
-"""Cross-platform process runner used by the desktop workbench."""
+"""Legacy Qt process runner kept for compatibility.
+
+The new web workbench uses :mod:`vtools_ui.webapp.tasks`; this runner remains
+available for older imports and the legacy Qt regression tests.
+"""
 
 from __future__ import annotations
 

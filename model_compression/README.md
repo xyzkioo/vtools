@@ -20,6 +20,8 @@ python run_tools.py --tool compression --config model_compression/config/config.
 python model_compression/run_model_compression.py
 ```
 
+显式指定 `--device cuda:0` 等 CUDA 设备时，若设备不可用会报错；`auto` 才会在无 CUDA 时选择 CPU。`--run-dir` 需要指向尚不存在的目录，避免覆盖旧实验结果。
+
 默认会在 `model_compression/runs/runN/` 生成 `effective_config.json` 和扁平化的 `summary.json`。模型文件统一位于 `artifacts/structured_pruning`、`artifacts/unstructured_pruning`、`artifacts/distillation`、`artifacts/quantization` 或 `artifacts/multi_processing`；不再创建 `store/registry.json`，也不写入分散的模块 JSON。分类流程没有配置数据集时，基线仍会记录参数量并将评测标记为跳过；YOLO 检测基线需要填写 `dataset.data` 才能进行 mAP 评估。执行内容只由 `modules` 开关决定。
 
 典型运行目录如下：

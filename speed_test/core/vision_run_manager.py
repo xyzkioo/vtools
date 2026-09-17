@@ -183,7 +183,7 @@ def prepare_run_directory(
     if "run" not in config:
         return None
     values = _run_values(config)
-    if not bool(values.get("enabled", True)):
+    if not bool(values.get("enabled", True)) and requested is None:
         return None
 
     project_root = _project_root(config)

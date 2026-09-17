@@ -30,3 +30,24 @@
 ## 验收边界
 
 Ubuntu 可在现有 `yolo` 环境运行无硬件检查。Windows 的桌面窗口、文件选择和子进程停止路径必须在 Windows 机器上另行实测；GPU、TensorRT、nncase 与真实权重路径也需对应环境，不能由静态测试代替。
+
+## 图片预览
+
+结果页选择图片后提供缩小、放大、适应窗口和重置比例。适应窗口是默认状态；放大后预览区域保留滚动条，不改变原始结果文件。
+
+## 分发包
+
+`packaging/vtools_ui.spec` 和 `packaging/build_desktop.py` 生成目录包，前端静态资源、工具脚本和配置文件随包提供。PyInstaller 需要在 Windows、Ubuntu 分别执行，包内任务仍受目标机器的 GPU、TensorRT、nncase 和模型文件条件限制。
+构建清单只收录版本控制中的工具源码及配置和前端构建产物，不收录本地权重、数据集和未跟踪文件。打包版默认将模型任务结果写到用户目录的 `.vtools_ui/runs/`；服务端生成每次独立的 `--run-dir`，结果浏览器使用同一根目录。
+
+## 当前验收记录
+
+| 范围 | 状态 |
+|---|---|
+| 浏览器模式、任务 API、配置编辑和结果预览 | 已通过：58 个 Python 测试，前端构建通过 |
+| Ubuntu 无硬件桌面启动 | 已通过进程烟测；GBM/OpenGL 回退提示不影响启动 |
+| 1280×800、1080×680、125%/150% 等效视口 | 已检查，无横向溢出，长表单和配置弹窗可滚动 |
+| Windows 桌面窗口、原生文件选择、停止任务 | 待 Windows 机器实测 |
+| CPU 环境、ONNX/TensorRT API 导入 | 已通过环境检查；没有执行 TensorRT 推理 |
+| GPU、nncase、真实权重 | 待对应硬件和模型实测；当前 `torch.cuda.is_available()` 为 `False` |
+| PyInstaller 最终目录包 | Ubuntu 目录包已重新生成；`--help`、包内工具入口及内容清单检查通过，早前完成浏览器和桌面启动烟测；Windows 需在 Windows 机器上构建 |

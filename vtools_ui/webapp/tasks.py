@@ -60,6 +60,7 @@ class TaskManager:
         log_file = log_dir / f"{run_id}.log"
         command_display = subprocess.list2cmdline([executable, *args])
         self._emit("log", f"$ {command_display}\n")
+        process: subprocess.Popen[bytes] | None = None
         try:
             log_dir.mkdir(parents=True, exist_ok=True)
             kwargs: dict[str, Any] = {"cwd": ROOT, "stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "bufsize": 0}
@@ -96,11 +97,18 @@ class TaskManager:
                     self._emit("log", tail)
                 self._capture_result(line_buffer + tail + "\n")
             exit_code = process.wait()
-            if process.stdout:
-                process.stdout.close()
         except (OSError, ValueError) as exc:
             exit_code = 127
-            self._emit("log", f"无法启动任务：{exc}\n")
+            if process is not None:
+                self._terminate_process(process)
+            self._emit("log", f"任务执行或日志写入失败：{exc}\n")
+        finally:
+            if process is not None:
+                if process.stdout:
+                    process.stdout.close()
+                if process.poll() is None:
+                    self._terminate_process(process)
+                process.wait()
         with self._lock:
             stopped = self._stopping
             if self._state and self._state["id"] == run_id:
@@ -147,21 +155,31 @@ class TaskManager:
             self._stopping = True
             self._state["status"] = "stopping"
         self._emit("state", self.state())
-        if process and process.poll() is None:
+        if process:
+            self._terminate_process(process)
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
             if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                process.kill()
             else:
                 try:
-                    os.killpg(process.pid, signal.SIGTERM)
+                    os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+            process.wait()
 
     def close(self) -> None:
         self.stop()

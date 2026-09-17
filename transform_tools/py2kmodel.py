@@ -41,32 +41,43 @@ def export_onnx(pt_path=PT_PATH, onnx_path=ONNX_PATH, target_size=TARGET_SIZE, r
         print("ONNX 已存在，跳过导出。若需重新导出请删除旧文件。")
         return
 
-    model = YOLO(pt_path)
-    exported = model.export(
-        format="onnx",
-        imgsz=target_size,
-        opset=12,
-        simplify=False,
-        half=False,
-        nms=False,
-        dynamic=False
-    )
-    exported_path = Path(str(exported))
-    if exported_path.exists() and exported_path.resolve() != Path(onnx_path).expanduser().resolve():
-        Path(onnx_path).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(exported_path, onnx_path)
-    if not os.path.exists(onnx_path):
-        raise FileNotFoundError(f"导出后未找到 ONNX 文件: {onnx_path}")
-    print(f"✅ ONNX 已导出: {onnx_path}")
+    target = Path(onnx_path).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source = Path(pt_path).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"未找到模型权重: {source}")
+    # Ultralytics writes the export next to its input weight. Export from a
+    # temporary copy so a failed rebuild cannot overwrite an existing ONNX.
+    with tempfile.TemporaryDirectory(prefix=f".{target.stem}.", dir=target.parent) as workdir:
+        staged_weights = Path(workdir) / source.name
+        shutil.copy2(source, staged_weights)
+        model = YOLO(str(staged_weights))
+        exported = model.export(
+            format="onnx",
+            imgsz=target_size,
+            opset=12,
+            simplify=False,
+            half=False,
+            nms=False,
+            dynamic=False
+        )
+        exported_path = Path(str(exported)).expanduser().resolve()
+        if not exported_path.is_file() or not exported_path.is_relative_to(Path(workdir)):
+            raise RuntimeError(f"导出结果不在临时目录内: {exported_path}")
+        print(f"✅ ONNX 已导出: {exported_path}")
 
-    onnx_model = onnx.load(onnx_path)
-    onnx_model = onnx.shape_inference.infer_shapes(onnx_model)
-    input_shapes = {node.name: [1, 3, target_size, target_size]
-                    for node in onnx_model.graph.input}
-    onnx_model, check = onnxsim.simplify(onnx_model, input_shapes=input_shapes)
-    if not check:
-        raise RuntimeError("模型简化校验失败")
-    onnx.save_model(onnx_model, onnx_path)
+        onnx_model = onnx.load(str(exported_path))
+        onnx_model = onnx.shape_inference.infer_shapes(onnx_model)
+        input_shapes = {node.name: [1, 3, target_size, target_size]
+                        for node in onnx_model.graph.input}
+        onnx_model, check = onnxsim.simplify(onnx_model, input_shapes=input_shapes)
+        if not check:
+            raise RuntimeError("模型简化校验失败")
+        staged_output = Path(workdir) / "simplified.onnx"
+        onnx.save_model(onnx_model, str(staged_output))
+        with staged_output.open("rb") as handle:
+            os.fsync(handle.fileno())
+        staged_output.replace(target)
     print(f"✅ ONNX 已简化: {onnx_path}")
 
 # ================== 步骤2：量化生成 kmodel ==================

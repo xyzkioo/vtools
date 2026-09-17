@@ -1,4 +1,8 @@
-"""PySide6 desktop shell for vtools.
+"""Legacy PySide6 desktop shell for vtools.
+
+The supported entry point is now ``vtools_ui.webapp.server``. This module is
+kept as a compatibility surface for existing imports and regression tests; it
+is not imported by ``python -m vtools_ui``.
 
 The UI intentionally stays independent from the model/runtime dependencies. It
 starts existing vtools entry points in a child process, so a TensorRT or CUDA

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
-from ..core.model_runtime import evaluate_classification, extract_logits, require_torch, resolve_device
+from ..core.model_runtime import evaluate_classification, extract_logits, require_torch, resolve_device, save_model
 
 
 def validate_distillation_config(config: Mapping[str, Any]) -> tuple[float, float]:
@@ -105,11 +105,11 @@ def train_distillation(
             on_epoch(row)
         accuracy = validation.get("accuracy") if isinstance(validation, Mapping) else None
         if output:
-            torch.save({"model": student, "epoch": epoch, "history": history}, output / "last.pt")
+            save_model({"model": student, "epoch": epoch, "history": history}, output / "last.pt")
         if accuracy is not None and (best_accuracy is None or float(accuracy) > best_accuracy):
             best_accuracy, best_epoch = float(accuracy), epoch
             if output:
-                torch.save({"model": student, "epoch": epoch, "history": history}, output / "best.pt")
+                save_model({"model": student, "epoch": epoch, "history": history}, output / "best.pt")
     return {
         "status": "succeeded",
         "temperature": temperature,
