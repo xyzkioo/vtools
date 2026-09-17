@@ -4,7 +4,8 @@ mode: visualize                 # list_layers 或 visualize
 
 project:
   root: ../..
-  ultralytics_repo: ultralytics-cn
+  # 可选：外部 Ultralytics Fork。留空时自动检查 vtools 同级目录。
+  ultralytics_repo: null
 
 model:
   adapter: ultralytics

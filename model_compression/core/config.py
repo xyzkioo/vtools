@@ -133,6 +133,8 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
 def apply_python_paths(config: Mapping[str, Any]) -> None:
     """将项目根目录和自定义源码目录加入 ``sys.path``。"""
 
+    from vtools_runtime.ultralytics import add_repo_to_path
+
     import sys
 
     project = _mapping(config.get("project"), "project")
@@ -140,6 +142,7 @@ def apply_python_paths(config: Mapping[str, Any]) -> None:
     for value in paths:
         if value and Path(str(value)).is_dir() and str(value) not in sys.path:
             sys.path.insert(0, str(value))
+    add_repo_to_path(config, Path(str(project.get("root", "."))))
 
 
 __all__ = ["DEFAULT_CONFIG_PATH", "apply_python_paths", "load_config"]

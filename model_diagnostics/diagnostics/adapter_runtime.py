@@ -213,7 +213,10 @@ class VToolsDetectionAdapter:
         try:
             from ultralytics import YOLO
         except ImportError as exc:
-            raise ImportError("使用 adapter: ultralytics 前请安装 ultralytics") from exc
+            raise ImportError(
+                "使用 adapter: ultralytics 前未找到 Ultralytics；请设置 VTOOLS_ULTRALYTICS_REPO，"
+                "或在 project.ultralytics_repo 中填写你的 Fork 源码目录"
+            ) from exc
         yolo = YOLO(str(weights), task="detect")
         self.runtime_state = {
             "adapter": "ultralytics",

@@ -511,7 +511,8 @@ def _convert_ultralytics_ndjson(path: Path) -> Path:
         from ultralytics.data.utils import convert_ndjson_to_yolo_if_needed
     except ImportError as exc:
         raise RuntimeError(
-            "读取 Ultralytics NDJSON 需要安装 ultralytics；也可以先用其转换器生成 data.yaml"
+            "读取 Ultralytics NDJSON 需要 Ultralytics；请设置 VTOOLS_ULTRALYTICS_REPO，"
+            "或先用你的 Fork 转换生成 data.yaml"
         ) from exc
     converted = convert_ndjson_to_yolo_if_needed(str(path))
     converted_path = Path(str(converted))
