@@ -773,75 +773,6 @@ def candidate_coverage(
     return result
 
 
-def _average_precision(tp_flags: Sequence[bool], scores: Sequence[float], total_gt: int) -> Optional[float]:
-    if total_gt <= 0:
-        return None
-    order = sorted(range(len(scores)), key=lambda i: (-scores[i], i))
-    tp_cum, fp_cum = 0, 0
-    recalls: List[float] = []
-    precisions: List[float] = []
-    for index in order:
-        if tp_flags[index]:
-            tp_cum += 1
-        else:
-            fp_cum += 1
-        recalls.append(tp_cum / total_gt)
-        precisions.append(tp_cum / (tp_cum + fp_cum))
-    # 101-point interpolated AP is explicit and reproducible across frameworks.
-    samples = []
-    for step in range(101):
-        recall_level = step / 100.0
-        candidates = [p for r, p in zip(recalls, precisions) if r >= recall_level]
-        samples.append(max(candidates) if candidates else 0.0)
-    return sum(samples) / len(samples)
-
-
-def average_precision_for_iou(ds: Dataset, iou_threshold: float) -> Tuple[Optional[float], Dict[int, Optional[float]]]:
-    classes = sorted({gt.class_id for values in ds.gt.values() for gt in _active_gt(values)})
-    per_class: Dict[int, Optional[float]] = {}
-    for class_id in classes:
-        all_predictions: List[Instance] = []
-        total_gt = 0
-        matched: Dict[str, set] = {}
-        for image_id, gts in ds.gt.items():
-            valid = [gt for gt in _active_gt(gts) if gt.class_id == class_id]
-            total_gt += len(valid)
-            matched[image_id] = set()
-            all_predictions.extend([p for p in ds.predictions.get(image_id, []) if p.class_id == class_id])
-        # Store TP flags in the same order as all_predictions.  Matching itself is
-        # performed in descending confidence order within each image.
-        scores = [_pred_score(p) for p in all_predictions]
-        flags = [False] * len(all_predictions)
-        by_image: Dict[str, List[Tuple[int, Instance]]] = defaultdict(list)
-        for idx, pred in enumerate(all_predictions):
-            by_image[pred.image_id].append((idx, pred))
-        for image_id, image_preds in by_image.items():
-            gts = [gt for gt in _active_gt(ds.gt.get(image_id, [])) if gt.class_id == class_id]
-            used = set()
-            for pred_idx, pred in sorted(image_preds, key=lambda x: (-_pred_score(x[1]), x[0])):
-                candidates = [(box_iou(pred.bbox, gt.bbox), gi) for gi, gt in enumerate(gts) if gi not in used]
-                best_iou, best_gt = max(candidates, key=lambda x: x[0]) if candidates else (0.0, -1)
-                if best_iou >= iou_threshold:
-                    flags[pred_idx] = True
-                    used.add(best_gt)
-        per_class[class_id] = _average_precision(flags, scores, total_gt)
-    values = [x for x in per_class.values() if x is not None]
-    return (_mean(values), per_class) if values else (None, per_class)
-
-
-def compute_ap_metrics(ds: Dataset, iou_thresholds: Sequence[float]) -> Dict[str, Any]:
-    result: Dict[str, Any] = {}
-    per_iou = []
-    for threshold in iou_thresholds:
-        ap, per_class = average_precision_for_iou(ds, threshold)
-        result[f"AP{int(round(threshold * 100)):02d}"] = ap
-        result[f"AP{int(round(threshold * 100)):02d}_per_class"] = {str(k): v for k, v in per_class.items()}
-        if ap is not None:
-            per_iou.append(ap)
-    result["mAP50_95"] = _mean(per_iou)
-    return result
-
-
 def _target_attributes(gt: Instance, info: Optional[ImageInfo], image_gts: Sequence[Instance], area_quantiles: Tuple[Optional[float], Optional[float], Optional[float]], config: Mapping[str, Any]) -> Dict[str, Any]:
     width = info.width if info and info.width else None
     height = info.height if info and info.height else None
@@ -1382,7 +1313,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     ds.diagnostic_per_prediction = summary["per_prediction"]
     ds.diagnostic_error_events = summary.get("error_events", [])
     overlap = overlap_analysis(ds, config) if modules.get("diagnostics.overlap") else None
-    ap: Dict[str, Any] = {}
     sweep: list[dict[str, Any]] = threshold_sweep(ds, config) if modules.get("diagnostics.threshold_sweep") else []
     budget: list[dict[str, Any]] = fp_budget_rows(sweep, config.get("fp_budgets_per_image", DEFAULT_CONFIG["fp_budgets_per_image"])) if sweep else []
     groups: list[dict[str, Any]] = group_metrics(summary["per_gt"]) if modules.get("diagnostics.groups") else []

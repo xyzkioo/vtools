@@ -13,6 +13,14 @@ python run_tools.py --tool visualization --config model_visualization/config/con
 这个目录只负责“看模型内部发生了什么”，不重复 Ultralytics 已有的训练曲线、验证指标和普通预测保存。
 首版适配本仓库的 Ultralytics/YOLO26 检测模型，其他 PyTorch 模型可按 `adapters/ultralytics.py` 的边界扩展。
 
+普通预测热图直接使用 Ultralytics 的 `visualize=True`：
+
+```bash
+yolo predict model=/absolute/path/to/best.pt source=/absolute/path/to/image.jpg visualize=True
+```
+
+本工具的 CAM 仅用于指定层、指定 raw candidate 或 final detection 的解释，或与阶段追踪结果对齐；普通 LayerCAM 不需要再跑一遍这里的 CAM 流程。
+
 ## 快速运行
 
 在仓库根目录执行：

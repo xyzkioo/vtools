@@ -22,7 +22,7 @@ input:
 
 modules:
   visualization.features: true
-  visualization.cam: false
+  visualization.cam: false       # 普通预测热图使用 Ultralytics predict visualize=True；这里仅用于指定目标解释
   visualization.stage_trace: false
 
 layers:

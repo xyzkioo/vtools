@@ -44,7 +44,7 @@ modules:
   diagnostics.localization: true
   diagnostics.overlap: true
   diagnostics.groups: true
-  diagnostics.threshold_sweep: false
+  diagnostics.threshold_sweep: false  # 仅用于 FP/图预算；常规阈值曲线使用 Ultralytics val
   diagnostics.bootstrap: false
   diagnostics.stage_comparison: false
   output.bad_cases: true

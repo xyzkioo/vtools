@@ -14,8 +14,9 @@ python run_tools.py --tool diagnostics --config model_diagnostics/config/config.
 
 当前诊断入口按模块执行：`diagnostics.missed`、`diagnostics.classification`、
 `diagnostics.background`、`diagnostics.duplicate`、`diagnostics.localization`、
-`diagnostics.overlap` 和 `output.bad_cases/images/html` 都可独立开关。mAP、AP50、
-阈值扫描等常规评估交给 Ultralytics 原生验证，诊断流程不会重复计算。
+`diagnostics.overlap` 和 `output.bad_cases/images/html` 都可独立开关。mAP、AP50 和
+常规 Precision/Recall 阈值曲线交给 Ultralytics 原生验证，诊断流程不会重复计算。
+对 Ultralytics 权重需要逐图 TP/FP/FN 或匹配图片时，直接运行 `yolo val model=/absolute/path/to/best.pt data=/absolute/path/to/data.yaml plots=True visualize=True`；本工具用于进一步区分漏检、错分类、重复框和定位偏差等原因。对已有预测文件或自定义 adapter，本工具仍会计算诊断匹配所需的工作点计数；可选 `diagnostics.threshold_sweep` 主要输出 FP/图预算，不作为标准 AP/mAP 的替代。
 
 ## 使用前检查
 

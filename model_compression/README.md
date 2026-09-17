@@ -12,6 +12,8 @@ python run_tools.py --tool compression --config model_compression/config/config.
 
 每次运行都是独立实验：先做基线，再按模块顺序执行量化、剪枝或蒸馏。运行目录保存完整配置、汇总结果和全部模型产物；跨运行继续处理时，把上一次运行的产物路径填入 `model.weights`。它和 `speed_test/` 的职责分开：这里负责产生优化后的模型与评估结果，目标硬件测速仍使用通用测速工具完成。
 
+YOLO 检测模型的知识蒸馏使用 Ultralytics 原生 `model.train(..., distill_model=teacher.pt)`；本工具的 `distillation.classification` 只处理分类 logits。检测压缩的基线和产物精度通过 Ultralytics `YOLO.val()` 评估，结构化剪枝前后的固定输入计时仅用于同一次实验内比较，正式部署测速仍使用目标硬件上的测速工具。
+
 ## 快速开始
 
 先安装 YAML 依赖和与本机匹配的 PyTorch。然后复制并修改 [config/config.yaml](config/config.yaml) 中的 `model.weights`，在仓库根目录运行：

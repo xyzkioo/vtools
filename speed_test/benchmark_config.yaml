@@ -1,5 +1,7 @@
 # 通用 PyTorch 视觉模型测速配置
 #
+# 普通 YOLO 格式导出和整模型 benchmark 优先使用 Ultralytics 原生入口；
+# 本配置的 ONNX/engine 路径用于固定输入测速及 PyTorch/TensorRT 输出一致性检查。
 # 日常只需要修改本文件；从图形界面选择测速工具后加载此配置。
 # 所有相对路径都相对于 project.root 解析。
 

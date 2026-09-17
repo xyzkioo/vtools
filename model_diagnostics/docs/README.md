@@ -24,7 +24,7 @@ python model_diagnostics/run_model_diagnostics.py --help
 ### 模块开关
 
 `config/config.yaml` 的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50 和
-阈值曲线交给 Ultralytics 原生 `val`；诊断入口不会重复计算。未列出的模块视为关闭，
+Precision/Recall 阈值曲线交给 Ultralytics 原生 `val`；诊断入口不计算 AP/mAP。仅在显式启用 `diagnostics.threshold_sweep` 时，额外按 FP/图预算扫描诊断工作点。未列出的模块视为关闭，
 因此可以只打开需要的功能：
 
 ```yaml

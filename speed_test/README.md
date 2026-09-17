@@ -1,5 +1,12 @@
 # 通用 PyTorch 视觉模型测速
 
+仅需比较 YOLO 标准导出格式的精度和整模型推理速度时，优先使用 Ultralytics 原生 `yolo benchmark`；仅需生成标准 ONNX/TensorRT 模型时，优先使用 `yolo export`。本工具用于固定输入的纯模型/engine 调用计时、自定义模型 adapter，以及 PyTorch 与 TensorRT 同一张量或检测结果的一致性检查。原生 benchmark 的端到端推理时间与本工具的 `model_call`、`engine_call` 口径不同，不应直接比较。
+
+```bash
+yolo benchmark model=/absolute/path/to/best.pt data=/absolute/path/to/data.yaml imgsz=832
+yolo export model=/absolute/path/to/best.pt format=onnx imgsz=832
+```
+
 ## 入口
 
 ```bash

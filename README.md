@@ -4,6 +4,8 @@
 
 项目以桌面 UI 为主要入口，YAML 配置和命令行用于自动化。测速与诊断支持通过 adapter（模型适配器）接入自定义模型；内置 Ultralytics 接口可直接使用兼容的 YOLO 权重。
 
+普通 YOLO 训练、验证、逐图 TP/FP/FN、预测热图、标准格式导出和整模型 benchmark 优先使用 `ultralytics-cn/` 的原生入口。vtools 聚焦错误原因、指定层和候选框追踪、自定义模型、固定输入与跨后端对比，以及 K230 转换；同名指标应先核对输入和计时口径。
+
 ## 统一入口
 
 从仓库根目录启动桌面界面或统一命令行入口：
@@ -42,8 +44,8 @@ python -m vtools_ui
 | [ultralytics-cn/](ultralytics-cn/) | Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](ultralytics-cn/README.zh-CN.md)、[安装配置](ultralytics-cn/pyproject.toml) |
 | [env_test/](env_test/) | 检查 Python、依赖、实际导入的源码路径、CUDA、模型构建与前向传播 | [check_install.py](env_test/check_install.py)、[安装与检验向导](env_test/README.md) |
 | [model_diagnostics/](model_diagnostics/) | 目标检测错误分析：漏检、错分类、多余框、重复框、定位偏差、框重叠和差图；常规 mAP 等交给 Ultralytics 验证 | [run_model_diagnostics.py](model_diagnostics/run_model_diagnostics.py)、[完整说明](model_diagnostics/docs/README.md) |
-| [model_visualization/](model_visualization/) | 通用特征图、聚合激活图、可选 Grad-CAM/LayerCAM，以及检测头 raw candidate→top-k→final 阶段追踪 | [run_visualization.py](model_visualization/run_visualization.py)、[配置](model_visualization/config/config.yaml) |
-| [speed_test/](speed_test/) | PyTorch / TensorRT 测速、checkpoint 可恢复性检查、转换前后输出一致性检查；功能由 `benchmark_config.yaml` 的 `modules` 控制 | [run_all.py](speed_test/run_all.py)、[使用说明](speed_test/README.md) |
+| [model_visualization/](model_visualization/) | 指定层特征、指定候选 Grad-CAM/LayerCAM，以及检测头 raw candidate→top-k→final 阶段追踪；普通热图使用 Ultralytics `predict visualize=True` | [run_visualization.py](model_visualization/run_visualization.py)、[配置](model_visualization/config/config.yaml) |
+| [speed_test/](speed_test/) | 固定输入的 PyTorch / TensorRT 调用计时、checkpoint 可恢复性检查、转换前后输出一致性检查；普通 YOLO benchmark 和导出使用 Ultralytics | [run_all.py](speed_test/run_all.py)、[使用说明](speed_test/README.md) |
 | [transform_tools/](transform_tools/) | NDJSON 数据集转 YOLO、Ultralytics 权重转 ONNX / K230 `.kmodel`、ONNX 与 `.kmodel` 输出对比 | [脚本与环境说明](transform_tools/REQUIREMENT.md) |
 | [model_compression/](model_compression/) | 基线评测、动态 INT8、非结构化剪枝、YOLO 结构化通道缩放和分类知识蒸馏；按运行目录保存实验产物 | [使用说明](model_compression/README.md) |
 | [模型勘误方法.md](模型勘误方法.md) | 模型问题排查的思路与参考方法 | 阅读文档 |

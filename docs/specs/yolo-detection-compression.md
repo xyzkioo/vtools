@@ -1,7 +1,7 @@
 # YOLO 目标检测压缩 Spec
 
-状态：P0 检测基线/非结构化剪枝已接入，结构化通道缩放和 `torch-pruning` 依赖感知通道剪枝已接入并支持可选微调和固定输入测速；已用真实 YOLO 权重和多框数据集完成 CPU 烟测。TensorRT 量化和检测蒸馏仍在后续阶段。  
-日期：2026-09-13  
+状态：P0 检测基线/非结构化剪枝已接入，结构化通道缩放和 `torch-pruning` 依赖感知通道剪枝已接入并支持可选微调和固定输入测速；已用真实 YOLO 权重和多框数据集完成 CPU 烟测。TensorRT 量化仍在后续阶段；检测蒸馏优先使用 Ultralytics 原生接口。
+日期：2026-09-17
 范围：`vtools_ui/`、`run_tools.py`、`model_compression/`。  
 关联：[原分类压缩 Spec](model-compression.md)。本文新增检测流程，分类流程继续保留。
 
@@ -19,7 +19,7 @@
 | P0.5：结构化通道缩放 | 根据 Ultralytics YAML 的规模表重建 dense 网络、迁移匹配权重、可选微调、mAP 与固定输入延迟对比 | 生成更小结构的 `.pt`，重载后完成检测评估并记录参数量、文件大小和延迟 |
 | P0.6：依赖感知通道剪枝 | 使用 `torch-pruning.DependencyGraph` 删除主干/颈部阶段通道，同步调整卷积、BN、Concat 和残差依赖 | 生成可重载的 dense `.pt`，检测头输出契约保持不变，并记录被剪层与真实延迟 |
 | P1：部署量化 | TensorRT FP16/INT8、校准集选择、引擎验证、目标设备测速 | 实际生成部署产物并实测大小、精度、延迟 |
-| P2：检测蒸馏 | 教师/学生检测模型、检测损失与特征蒸馏、最佳学生导出 | 教师冻结、学生更新、重载与 mAP 验收通过 |
+| P2：检测蒸馏接入 | 调用 Ultralytics `distill_model` 训练，记录教师/学生来源和验证结果 | 原生训练产物可重载，并完成同一数据集上的 mAP 验收 |
 
 非结构化 P0 属于稀疏化压缩：权重变为零，不保证普通稠密 PT 文件变小、参数总数变少或推理加速。结构化 P0.5 通过 YAML 的 depth/width scale 重建更小的 dense 网络，参数量和文件大小应下降，但实际延迟仍必须在目标设备上实测。界面和报告必须区分两种结果，不能将置零冒充通道删除。
 
@@ -61,7 +61,7 @@ names:
 
 压缩页面增加模型任务选择：`YOLO 目标检测` / `图像分类`。检测模式显示权重、检测数据集 YAML、设备、剪枝比例、评估输入尺寸；分类模式保留 ImageFolder 入口。
 
-检测模式常用模块：基线评估、非结构化剪枝、结构化通道缩放、依赖感知通道剪枝。结构化方法由 `compression.structured.method` 选择：`scale` 使用 YOLO 规模重建，`torch_pruning` 使用依赖图物理删除通道。分类动态 INT8 和分类蒸馏在检测模式禁用；后续检测量化、检测蒸馏使用独立模块 ID。
+检测模式常用模块：基线评估、非结构化剪枝、结构化通道缩放、依赖感知通道剪枝。结构化方法由 `compression.structured.method` 选择：`scale` 使用 YOLO 规模重建，`torch_pruning` 使用依赖图物理删除通道。分类动态 INT8 和分类蒸馏在检测模式禁用；后续检测量化使用独立模块 ID。检测蒸馏调用 Ultralytics 原生 `distill_model`，如需接入工作台，仅包装配置、运行目录和报告。
 
 命令示例（P0）：
 
@@ -236,15 +236,9 @@ INT8 必须显式提供校准数据，默认只用训练划分，记录抽样规
 
 TensorRT 路径需要匹配的 NVIDIA GPU、CUDA、TensorRT；Windows/Ubuntu UI 均可用，不代表所有环境都能构建引擎。引擎版本不允许继续送入 PT 剪枝/训练模块。
 
-### 5.4 P2：检测知识蒸馏（待实现）
+### 5.4 P2：检测知识蒸馏（原生接口）
 
-新增模块 ID：`distillation.detection`。建议新增 `model_compression/modules/detection_distillation.py`，继承 `ultralytics.models.yolo.detect.train.DetectionTrainer`，复用其 `build_dataset()`、`get_model()`、`get_validator()`。
-
-通过 `YOLO(student_weights).train(trainer=DetectionDistillationTrainer, data=..., ...)` 接入训练。教师独立加载、冻结、`eval()`、`no_grad()`；学生保留原生检测损失入口 `DetectionModel.loss(batch, preds)`，包括当前模型匹配的检测头损失。
-
-首选明确层对齐的特征蒸馏：为配置指定的 teacher/student 层注册 forward hooks，用投影层对齐通道和空间尺寸，损失为 `L_detect + lambda_feature * L_feature`。不同检测头结构不得直接假设 logits 对齐，更不能套用分类 CE + KL。
-
-必须单独处理 hooks 生命周期、混合精度、EMA、保存后的投影层处理和恢复训练；按检测 mAP 选择最佳学生，分别记录教师来源和学生初始化来源。此方案属于后续开发，不宣称现有分类蒸馏已经支持检测。
+Ultralytics 已提供 `YOLO(student_weights).train(data=..., distill_model=teacher_weights, ...)`。检测蒸馏先直接使用该接口，不在 vtools 中另建检测 Trainer、特征 hooks、损失和 checkpoint 逻辑。若将其加入压缩工作台，新增代码只负责参数传递、运行目录、模型来源记录和训练后 `YOLO.val()` 验收；分类 `distillation.classification` 不用于检测模型。
 
 ## 6. P0 配置示例
 
