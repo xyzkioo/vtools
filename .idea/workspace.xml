@@ -4,24 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="72f548e0-05cd-4c51-90e8-b6d862735971" name="更改" comment="改一下readme">
-      <change afterPath="$PROJECT_DIR$/.idea/ultralytics.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/ultralytics@1.iml" beforeDir="false" />
+    <list default="true" id="72f548e0-05cd-4c51-90e8-b6d862735971" name="更改" comment="ui的bug修复">
+      <change beforePath="$PROJECT_DIR$/.idea/modules.xml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/ultralytics.iml" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/specs/web-workbench.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/specs/web-workbench.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/specs/yolo-detection-compression.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/specs/yolo-detection-compression.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/env_test/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/env_test/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/env_test/check_install.py" beforeDir="false" afterPath="$PROJECT_DIR$/env_test/check_install.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packaging/build_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/packaging/build_desktop.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packaging/vtools_ui.spec" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_optional_ultralytics.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_optional_ultralytics.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_web_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_web_ui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_runtime/ultralytics.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_runtime/ultralytics.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/catalog.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/catalog.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/core.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/core.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model_diagnostics/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/model_diagnostics/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -291,7 +282,15 @@
       <option name="project" value="LOCAL" />
       <updated>1789651106393</updated>
     </task>
-    <option name="localTasksCounter" value="11" />
+    <task id="LOCAL-00011" summary="ui的bug修复">
+      <option name="closed" value="true" />
+      <created>1789659724913</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1789659724913</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -316,6 +315,7 @@
     <MESSAGE value="这次工作区主要完成了浅色跨平台工作台改造。&#10;主要改动：&#10;- 新增 React + TypeScript + Vite 前端，默认浅色主题、响应式布局、任务状态栏和运行详情。&#10;- 新增 Python 本地 API 服务，绑定 127.0.0.1 随机端口并使用会话令牌。&#10;- 使用 pywebview 提供桌面窗口，保留 python -m vtools_ui 启动方式。&#10;- 支持自动寻找带 pywebview 的 Conda 环境，解决 base 环境依赖不完整的问题。&#10;- 迁移检测诊断、模型可视化、测速、压缩、格式转换、数据工具和环境检查。&#10;- 新增结构化命令构建器和独立子进程任务管理，支持日志、停止、退出码、历史记录。&#10;- 新增配置编辑器：常用字段、全部字段、YAML 原文三种视图，保存前校验并生成 .bak。&#10;- 结果查看支持图片、JSON、CSV、YAML、HTML、文本和模型文件。&#10;- 修复结果目录多级子文件夹显示问题，改为递归目录树。&#10;- 增加桌面文件选择器，支持选择文件、目录和保存文件。&#10;- 修复窗口底部巨大白条和页面高度问题。&#10;- 调整诊断配置模式字段和错误图片名称，例如 mixed_000001_xxx.jpg。&#10;- 更新根目录 README、UI README 和相关 Spec。&#10;- 新增 Web UI 后端测试和回归测试。" />
     <MESSAGE value="对ui进行了进一步优化，加上了可以一键启动的bag" />
     <MESSAGE value="改一下readme" />
-    <option name="LAST_COMMIT_MESSAGE" value="改一下readme" />
+    <MESSAGE value="ui的bug修复" />
+    <option name="LAST_COMMIT_MESSAGE" value="ui的bug修复" />
   </component>
 </project>

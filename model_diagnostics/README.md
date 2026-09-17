@@ -55,6 +55,30 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 
 完整指标、数据格式、适配器钩子和确认方法见 [docs/README.md](docs/README.md)。
 
+## 训练前检查数据集
+
+从仓库根目录运行独立的只读检查入口：
+
+```bash
+python model_diagnostics/check_dataset.py --help
+python model_diagnostics/check_dataset.py --data /path/to/dataset/data.yaml
+```
+
+`--data` 和可选的 `--output-root` 相对路径都按当前工作目录解析；`data.yaml` 内的
+`path` 优先相对 YAML 所在目录解析，`train`、`val`、`test` 再相对数据集根目录解析。
+默认在 `model_diagnostics/runs/dataset_quality/runN/` 生成独立结果，原始图片和标签不会修改。
+可以用 `--sample-count 0` 关闭每个划分默认 8 张的标注抽样图。
+
+检查内容包括损坏或单色图片、缺失或空标签、非法类别和检测框、完全相同图片、
+跨划分路径或内容泄漏、类别数量、图片和标注框短边分布、框宽高比分布，以及
+IoU≥0.5 的标注框对数。重复图片采用文件 SHA-256，只检测字节完全相同的图片；
+单色图片和缺失标签仅提示复查，因为也可能是合法背景图。重叠框只是遮挡线索，
+不能证明真实遮挡。当前只支持本地 YOLO 检测数据集的五列框标签。
+
+结果包含 `summary.json`、逐项路径和标签行号的 `issues.csv`、`report.md` 与 `samples/*.png`。
+发现 `error` 级问题时退出码为 1；扫描本身失败时退出码为 2，并在已创建的运行目录
+写入 `status: failed` 的 `summary.json`。`warning` 与 `info` 会进入报告，但不使命令失败。
+
 ### 配置模块开关
 
 `config/config.yaml` 中的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50
