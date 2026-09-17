@@ -50,7 +50,7 @@ class WebWorkbenchTests(unittest.TestCase):
             target = Path(directory) / "config.yaml"
             target.write_text(raw, encoding="utf-8")
             core.save_config(str(target), changed["text"])
-            self.assertEqual(target.with_suffix(".yaml.bak").read_text(encoding="utf-8"), raw)
+            self.assertFalse(target.with_suffix(".yaml.bak").exists())
             self.assertFalse(core.load_config(str(target))["data"]["modules"]["diagnostics.missed"])
 
     def test_module_edits_are_incremental_and_empty_is_explicit(self) -> None:

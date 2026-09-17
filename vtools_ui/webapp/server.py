@@ -16,6 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from vtools_ui import __version__
+
 from .catalog import ROOT, public_catalog
 from .core import (
     IMAGE_SUFFIXES, TEXT_SUFFIXES, clear_history, environments, flatten_config, history, list_results,
@@ -23,6 +25,7 @@ from .core import (
     result_file, save_config, save_settings,
 )
 from .tasks import TaskManager
+from .updater import check_update, install_update
 
 DIST = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -82,14 +85,16 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             try:
                 self._api_get(parsed.path, query)
-            except (ValueError, OSError, json.JSONDecodeError) as exc:
+            except (ValueError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
                 self._error(exc)
             return
         self._static(parsed.path)
 
     def _api_get(self, path: str, query: dict[str, list[str]]) -> None:
         if path == "/api/bootstrap":
-            self._json({"catalog": public_catalog(), "settings": read_settings(), "history": history(), "state": self.server.manager.state()})
+            self._json({"catalog": public_catalog(), "settings": read_settings(), "history": history(), "state": self.server.manager.state(), "version": __version__})
+        elif path == "/api/update/check":
+            self._json(check_update())
         elif path == "/api/environments":
             self._json({"environments": environments()})
         elif path == "/api/config":
@@ -151,6 +156,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._json(patch_config(str(body.get("text", "")), str(body.get("path", "")), body.get("value")))
             elif path == "/api/config/save":
                 self._json(save_config(str(body.get("path", "")), str(body.get("text", ""))))
+            elif path == "/api/update/install":
+                state = self.server.manager.state()
+                if state and state.get("status") in {"starting", "running", "stopping"}:
+                    raise ValueError("请先结束正在运行的任务再安装更新")
+                self._json(install_update())
             elif path == "/api/runs":
                 self._json({"state": self.server.manager.start(body)})
             elif path == "/api/runs/stop":
@@ -162,7 +172,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._json({"ok": True})
             else:
                 self._json({"error": "接口不存在"}, HTTPStatus.NOT_FOUND)
-        except (ValueError, RuntimeError, OSError, json.JSONDecodeError) as exc:
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
             self._error(exc)
 
     @staticmethod

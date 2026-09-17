@@ -233,20 +233,6 @@ def save_config(path: str, text: str) -> dict[str, Any]:
     target = project_path(path)
     if target.exists() and not target.is_file():
         raise ValueError("配置路径不是文件")
-    if target.exists():
-        backup = target.with_suffix(target.suffix + ".bak")
-        backup_temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile("wb", dir=target.parent, prefix=f".{backup.name}.", delete=False) as handle:
-                backup_temporary = Path(handle.name)
-                with target.open("rb") as original:
-                    shutil.copyfileobj(original, handle)
-                handle.flush()
-                os.fsync(handle.fileno())
-            backup_temporary.replace(backup)
-        finally:
-            if backup_temporary is not None:
-                backup_temporary.unlink(missing_ok=True)
     _atomic_text(target, text)
     return {"path": str(target), "data": data}
 

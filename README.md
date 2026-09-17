@@ -31,7 +31,9 @@ python -m pip install -r vtools_ui/requirements.txt
 python -m vtools_ui
 ```
 
-需要交付给没有 Node 环境的使用者时，可按 [桌面包构建说明](packaging/README.md) 生成 Windows 或 Ubuntu 目录包。PyInstaller 必须在目标平台分别构建。
+需要交付给没有 Node 环境的使用者时，可按 [桌面包构建说明](packaging/README.md) 生成 Windows 或 Ubuntu 目录包，并在 Ubuntu 上封装为可从应用菜单点击启动的 `.deb`。PyInstaller 必须在目标平台分别构建。
+
+Ubuntu 安装版从 0.3.1 起可在工作台“设置 → 软件更新”检查 GitHub Releases 并安装新版；发布安装包的步骤见桌面包构建说明。
 
 当前版本已经接入检测诊断、模型可视化、PyTorch/TensorRT 测速、输出一致性、checkpoint 检查、模型压缩、K230 转换、视频抽帧、图片缩放和文件名转换。模型类工具继续以已有 YAML 为真实参数来源，独立脚本的常用参数由 UI 表单填写。
 

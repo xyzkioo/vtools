@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="72f548e0-05cd-4c51-90e8-b6d862735971" name="更改" comment="改一下readme">
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packaging/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/packaging/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_web_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_web_ui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/core.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/core.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/dist/assets/index-DGxsxR4f.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/dist/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/dist/index.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/src/App.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/src/App.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/server.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "xyzkioo"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/xyzkioo/vtools.git",
+    "accountId": "c2ff480e-dfea-4c38-adca-0fc63a84f14c"
+  }
+}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 6
+}</component>
+  <component name="ProjectId" id="3JOyG8UDk6YIvsYx7eDABLtqZJr" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;node.js.detected.package.jshint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.jshint&quot;: &quot;&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;python.packages.toolwindow.project.migrated.to.right.top.v2&quot;: &quot;true&quot;
+  }
+}</component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/docs" />
+      <recent name="$PROJECT_DIR$/others/video_frame_extractor" />
+      <recent name="$PROJECT_DIR$/others/image_resize" />
+      <recent name="$PROJECT_DIR$/others" />
+    </key>
+  </component>
+  <component name="RunManager">
+    <configuration default="true" type="PythonConfigurationType" factoryName="Python">
+      <module name="vtools" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="DEBUG_JUST_MY_CODE" value="false" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration default="true" type="Tox" factoryName="Tox">
+      <module name="vtools" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="DEBUG_JUST_MY_CODE" value="false" />
+      <option name="RUN_TOOL" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration default="true" type="docs" factoryName="Docutils task">
+      <module name="vtools" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="DEBUG_JUST_MY_CODE" value="false" />
+      <option name="RUN_TOOL" value="" />
+      <option name="docutils_input_file" value="" />
+      <option name="docutils_output_file" value="" />
+      <option name="docutils_params" value="" />
+      <option name="docutils_task" value="" />
+      <option name="docutils_open_in_browser" value="false" />
+      <method v="2" />
+    </configuration>
+    <configuration default="true" type="docs" factoryName="Sphinx task">
+      <module name="vtools" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="DEBUG_JUST_MY_CODE" value="false" />
+      <option name="RUN_TOOL" value="" />
+      <option name="docutils_input_file" value="" />
+      <option name="docutils_output_file" value="" />
+      <option name="docutils_params" value="" />
+      <option name="docutils_task" value="" />
+      <option name="docutils_open_in_browser" value="false" />
+      <method v="2" />
+    </configuration>
+    <configuration default="true" type="tests" factoryName="Doctests">
+      <module name="vtools" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="DEBUG_JUST_MY_CODE" value="false" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="" />
+      <option name="CLASS_NAME" value="" />
+      <option name="METHOD_NAME" value="" />
+      <option name="FOLDER_NAME" value="" />
+      <option name="TEST_TYPE" value="TEST_SCRIPT" />
+      <option name="PATTERN" value="" />
+      <option name="USE_PATTERN" value="false" />
+      <method v="2" />
+    </configuration>
+    <configuration default="true" type="tests" factoryName="Autodetect">
+      <module name="vtools" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="" />
+      <option name="IS_MODULE_SDK" value="false" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="DEBUG_JUST_MY_CODE" value="false" />
+      <option name="RUN_TOOL" value="" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;&quot;" />
+      <option name="_new_targetType" value="&quot;PATH&quot;" />
+      <method v="2" />
+    </configuration>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-eff1e8def5f5-5bd6d13a2a75-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-262.10315.174" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="默认任务">
+      <changelist id="72f548e0-05cd-4c51-90e8-b6d862735971" name="更改" comment="ui更新 开发指南 修复了一些已知bug" />
+      <created>1789546312214</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1789546312214</updated>
+    </task>
+    <task id="LOCAL-00001" summary="compression：&#10;1.当前输出文件过于分散，除 effective_config.json 外的多个 JSON 内容与 summary.json 重复，增加了结果管理和理解成本。&#10;2.命名不够清晰：pruning 太笼统，容易让人误以为只代表非结构化剪枝&#10;3.将模型产物统一放入 artifacts/，按结构化剪枝、非结构化剪枝、蒸馏、量化和多重处理划分五个子目录，公共配置与评估结果仍保留在运行目录根部。&#10;4.summary.json 应进行扁平化和去重：删除重复的 metadata、version_id、branch、sha256 等内部字段，公共模型信息只保留一份，并按 baseline、unstructured_pruning、structured_pruning、distillation、quantization 和 multi_processing 分类保存各自参数、指标及产物路径；完整配置继续保留在 effective_config.json&#10;5.store/registry.json 必要性不高，因为每个 runN/summary.json 已经记录了模型产物、指标和运行信息；如果不需要跨运行版本追踪、分支管理或自动选择父模型，可以移除 store/，只保留各个 runN/ 目录">
+      <option name="closed" value="true" />
+      <created>1789560440693</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1789560440693</updated>
+    </task>
+    <task id="LOCAL-00002" summary="diagnostics：&#10;- port.md、summary.json、config_used.json 等内容存在重复。&#10;- run_manifest.json 和 run_metadata.json 都是运行信息，文件分散。&#10;- 差图文件名过长，且没有按错误类型分类。&#10;- 详细 CSV、预测结果和概要统计混在一起，不方便 Agent 和人分别使用。&#10;- overlap_summary.json 与多个 overlap_*.csv 内容重复。&#10;改进方案：&#10;- 删除 report.md。&#10;- 删除 config_used.json，把实际配置合并到 run_info.json。&#10;- 合并 run_manifest.json 和 run_metadata.json 为 run_info.json。&#10;- 删除 overlap_summary.json，保留对应的重叠分析 CSV。&#10;- 精简 summary.json，只保存整体指标、错误数量、错误图片数量和警告。&#10;- 将详细统计文件放入 raw_data/。&#10;- 将差图按错误类型放入 background/、classification/、duplicate/、localization/ 和 mixed/。&#10;- 多种错误同时出现的图片放入 mixed/，不重复复制。&#10;- 图片改用简洁名称，同时在 bad_cases.csv 中保留原始图片路径和新图片路径，确保可追溯。">
+      <option name="closed" value="true" />
+      <created>1789567008288</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1789567008288</updated>
+    </task>
+    <task id="LOCAL-00003" summary="visualization&#10;1. 预测文件重复&#10;   canonical/final_predictions.json 是所有图片的汇总文件，而 final_predictions_图片名.json 已保存了单张图片的相同预测结果，造成重复存储。&#10;2. 文件名和文件夹名过长&#10;   输出路径直接使用完整图片名加哈希，导致 canonical、stage_trace、cams、features 等目录下的路径很长，不便于查看和使用。&#10;期望调整：&#10;- 删除汇总版 raw_predictions.json 和 final_predictions.json&#10;- 保留按图片拆分的 JSON 文件&#10;- 缩短所有输出文件夹和文件名&#10;- 在 JSON 内容中保留完整图片名和原始路径&#10;- 同步修正 index.html、run_metadata.json、文档及相关读取逻辑，确保短路径仍可正确追溯和打开">
+      <option name="closed" value="true" />
+      <created>1789567575162</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1789567575162</updated>
+    </task>
+    <task id="LOCAL-00004" summary="这次工作区主要完成了浅色跨平台工作台改造。&#10;主要改动：&#10;- 新增 React + TypeScript + Vite 前端，默认浅色主题、响应式布局、任务状态栏和运行详情。&#10;- 新增 Python 本地 API 服务，绑定 127.0.0.1 随机端口并使用会话令牌。&#10;- 使用 pywebview 提供桌面窗口，保留 python -m vtools_ui 启动方式。&#10;- 支持自动寻找带 pywebview 的 Conda 环境，解决 base 环境依赖不完整的问题。&#10;- 迁移检测诊断、模型可视化、测速、压缩、格式转换、数据工具和环境检查。&#10;- 新增结构化命令构建器和独立子进程任务管理，支持日志、停止、退出码、历史记录。&#10;- 新增配置编辑器：常用字段、全部字段、YAML 原文三种视图，保存前校验并生成 .bak。&#10;- 结果查看支持图片、JSON、CSV、YAML、HTML、文本和模型文件。&#10;- 修复结果目录多级子文件夹显示问题，改为递归目录树。&#10;- 增加桌面文件选择器，支持选择文件、目录和保存文件。&#10;- 修复窗口底部巨大白条和页面高度问题。&#10;- 调整诊断配置模式字段和错误图片名称，例如 mixed_000001_xxx.jpg。&#10;- 更新根目录 README、UI README 和相关 Spec。&#10;- 新增 Web UI 后端测试和回归测试。">
+      <option name="closed" value="true" />
+      <created>1789576322482</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1789576322482</updated>
+    </task>
+    <task id="LOCAL-00005" summary="这次工作区主要完成了浅色跨平台工作台改造。&#10;主要改动：&#10;- 新增 React + TypeScript + Vite 前端，默认浅色主题、响应式布局、任务状态栏和运行详情。&#10;- 新增 Python 本地 API 服务，绑定 127.0.0.1 随机端口并使用会话令牌。&#10;- 使用 pywebview 提供桌面窗口，保留 python -m vtools_ui 启动方式。&#10;- 支持自动寻找带 pywebview 的 Conda 环境，解决 base 环境依赖不完整的问题。&#10;- 迁移检测诊断、模型可视化、测速、压缩、格式转换、数据工具和环境检查。&#10;- 新增结构化命令构建器和独立子进程任务管理，支持日志、停止、退出码、历史记录。&#10;- 新增配置编辑器：常用字段、全部字段、YAML 原文三种视图，保存前校验并生成 .bak。&#10;- 结果查看支持图片、JSON、CSV、YAML、HTML、文本和模型文件。&#10;- 修复结果目录多级子文件夹显示问题，改为递归目录树。&#10;- 增加桌面文件选择器，支持选择文件、目录和保存文件。&#10;- 修复窗口底部巨大白条和页面高度问题。&#10;- 调整诊断配置模式字段和错误图片名称，例如 mixed_000001_xxx.jpg。&#10;- 更新根目录 README、UI README 和相关 Spec。&#10;- 新增 Web UI 后端测试和回归测试。">
+      <option name="closed" value="true" />
+      <created>1789576328694</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1789576328694</updated>
+    </task>
+    <task id="LOCAL-00006" summary="对ui进行了进一步优化，加上了可以一键启动的bag">
+      <option name="closed" value="true" />
+      <created>1789643044842</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1789643044843</updated>
+    </task>
+    <task id="LOCAL-00007" summary="改一下readme">
+      <option name="closed" value="true" />
+      <created>1789644984314</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1789644984314</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="compression：&#10;1.当前输出文件过于分散，除 effective_config.json 外的多个 JSON 内容与 summary.json 重复，增加了结果管理和理解成本。&#10;2.命名不够清晰：pruning 太笼统，容易让人误以为只代表非结构化剪枝&#10;3.将模型产物统一放入 artifacts/，按结构化剪枝、非结构化剪枝、蒸馏、量化和多重处理划分五个子目录，公共配置与评估结果仍保留在运行目录根部。&#10;4.summary.json 应进行扁平化和去重：删除重复的 metadata、version_id、branch、sha256 等内部字段，公共模型信息只保留一份，并按 baseline、unstructured_pruning、structured_pruning、distillation、quantization 和 multi_processing 分类保存各自参数、指标及产物路径；完整配置继续保留在 effective_config.json&#10;5.store/registry.json 必要性不高，因为每个 runN/summary.json 已经记录了模型产物、指标和运行信息；如果不需要跨运行版本追踪、分支管理或自动选择父模型，可以移除 store/，只保留各个 runN/ 目录" />
+    <MESSAGE value="diagnostics：&#10;- port.md、summary.json、config_used.json 等内容存在重复。&#10;- run_manifest.json 和 run_metadata.json 都是运行信息，文件分散。&#10;- 差图文件名过长，且没有按错误类型分类。&#10;- 详细 CSV、预测结果和概要统计混在一起，不方便 Agent 和人分别使用。&#10;- overlap_summary.json 与多个 overlap_*.csv 内容重复。&#10;改进方案：&#10;- 删除 report.md。&#10;- 删除 config_used.json，把实际配置合并到 run_info.json。&#10;- 合并 run_manifest.json 和 run_metadata.json 为 run_info.json。&#10;- 删除 overlap_summary.json，保留对应的重叠分析 CSV。&#10;- 精简 summary.json，只保存整体指标、错误数量、错误图片数量和警告。&#10;- 将详细统计文件放入 raw_data/。&#10;- 将差图按错误类型放入 background/、classification/、duplicate/、localization/ 和 mixed/。&#10;- 多种错误同时出现的图片放入 mixed/，不重复复制。&#10;- 图片改用简洁名称，同时在 bad_cases.csv 中保留原始图片路径和新图片路径，确保可追溯。" />
+    <MESSAGE value="visualization&#10;1. 预测文件重复&#10;   canonical/final_predictions.json 是所有图片的汇总文件，而 final_predictions_图片名.json 已保存了单张图片的相同预测结果，造成重复存储。&#10;2. 文件名和文件夹名过长&#10;   输出路径直接使用完整图片名加哈希，导致 canonical、stage_trace、cams、features 等目录下的路径很长，不便于查看和使用。&#10;期望调整：&#10;- 删除汇总版 raw_predictions.json 和 final_predictions.json&#10;- 保留按图片拆分的 JSON 文件&#10;- 缩短所有输出文件夹和文件名&#10;- 在 JSON 内容中保留完整图片名和原始路径&#10;- 同步修正 index.html、run_metadata.json、文档及相关读取逻辑，确保短路径仍可正确追溯和打开" />
+    <MESSAGE value="大改了ui，不用qt用vulkan" />
+    <MESSAGE value="这次工作区主要完成了浅色跨平台工作台改造。&#10;主要改动：&#10;- 新增 React + TypeScript + Vite 前端，默认浅色主题、响应式布局、任务状态栏和运行详情。&#10;- 新增 Python 本地 API 服务，绑定 127.0.0.1 随机端口并使用会话令牌。&#10;- 使用 pywebview 提供桌面窗口，保留 python -m vtools_ui 启动方式。&#10;- 支持自动寻找带 pywebview 的 Conda 环境，解决 base 环境依赖不完整的问题。&#10;- 迁移检测诊断、模型可视化、测速、压缩、格式转换、数据工具和环境检查。&#10;- 新增结构化命令构建器和独立子进程任务管理，支持日志、停止、退出码、历史记录。&#10;- 新增配置编辑器：常用字段、全部字段、YAML 原文三种视图，保存前校验并生成 .bak。&#10;- 结果查看支持图片、JSON、CSV、YAML、HTML、文本和模型文件。&#10;- 修复结果目录多级子文件夹显示问题，改为递归目录树。&#10;- 增加桌面文件选择器，支持选择文件、目录和保存文件。&#10;- 修复窗口底部巨大白条和页面高度问题。&#10;- 调整诊断配置模式字段和错误图片名称，例如 mixed_000001_xxx.jpg。&#10;- 更新根目录 README、UI README 和相关 Spec。&#10;- 新增 Web UI 后端测试和回归测试。" />
+    <MESSAGE value="对ui进行了进一步优化，加上了可以一键启动的bag" />
+    <MESSAGE value="改一下readme" />
+    <option name="LAST_COMMIT_MESSAGE" value="改一下readme" />
+  </component>
+</project>

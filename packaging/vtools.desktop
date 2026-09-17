@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=vtools 工作台
+Comment=视觉模型诊断、可视化与测速
+Exec=/opt/vtools/vtools
+Icon=vtools
+Terminal=false
+Categories=Science;
+StartupNotify=true

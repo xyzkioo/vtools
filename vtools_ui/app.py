@@ -707,8 +707,6 @@ class ConfigEditorDialog(QDialog):
             self._commit_config_tab()
             text = yaml.safe_dump(self.data, allow_unicode=True, sort_keys=False)
             path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists():
-                shutil.copy2(path, path.with_name(path.name + ".bak"))
             temporary = path.with_name(path.name + ".tmp")
             temporary.write_text(text, encoding="utf-8")
             temporary.replace(path)

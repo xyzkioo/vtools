@@ -32,7 +32,9 @@ npm install
 npm run build
 ```
 
-需要生成可分发的桌面目录包时，参见 [桌面包构建说明](../packaging/README.md)。Ubuntu 目录包在本机生成和检查；Windows 仍需在 Windows 机器上构建。目录包不是 `.deb` 或 `.AppImage` 安装器。打包版默认把模型运行结果放在 `~/.vtools_ui/runs/`，不会写入包内。
+需要生成可分发的桌面目录包或 Ubuntu `.deb` 安装包时，参见 [桌面包构建说明](../packaging/README.md)。安装 `.deb` 后可在应用菜单点击“vtools 工作台”启动。Windows 仍需在 Windows 机器上构建。打包版默认把模型运行结果放在 `~/.vtools_ui/runs/`，不会写入包内。
+
+Linux 安装版会在启动时检查 GitHub Releases 的新版本。“设置 → 软件更新”可重新检查并下载安装；需要系统管理员授权。尚未发布到 GitHub 的构建不会被自动更新器发现。
 
 Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。pywebview 的 PySide6 适配依赖由 `requirements.txt` 安装；Windows 使用系统 WebView2 运行时。首次安装后若窗口仍显示旧内容，请完全关闭再启动。
 
@@ -41,7 +43,7 @@ Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。p
 - 模型工具：检测诊断、模型可视化、PyTorch/TensorRT 测速、输出一致性、一键测速、checkpoint 检查和模型压缩。
 - 转换和数据工具：NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验、视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。
 - 环境检查：检查 Python、PyTorch、CUDA 和本地 Ultralytics 源码。
-- 配置编辑：常用字段、全部标量字段与 YAML 原文共享编辑状态。YAML 是模型工具的完整参数来源；保存前校验并保留 `.bak` 备份。对模块按钮的修改是本次运行的增量覆盖，不会关闭未显示的模块。
+- 配置编辑：常用字段、全部标量字段与 YAML 原文共享编辑状态。YAML 是模型工具的完整参数来源；保存前校验并原子写入，不再生成 `.bak` 备份。对模块按钮的修改是本次运行的增量覆盖，不会关闭未显示的模块。
 - 结果查看：扫描选定目录中的 runs、results、reports 和 outputs，以可展开的多级目录树浏览任意深度的子文件夹；预览诊断的 `summary.json`、`raw_data/`、差图，可视化单图 JSON、图片和 `index.html`，以及压缩的 `summary.json`、`effective_config.json` 和 `artifacts/`。图片支持缩小、放大、适应窗口和重置比例；文本最多预览前 256 KB；模型文件可打开所在目录。任务完成后可直接跳转至结果目录。
 - 历史与设置：历史保存于 `.vtools_ui/history.json`，新增的任务日志保存在 `.vtools_ui/logs/`；结果目录、历史数量和任务解释器保存在 `.vtools_ui/settings.json`。首次启动会读取旧 Qt 工作台的 QSettings 值。
 
