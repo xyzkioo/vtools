@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-检查 vtools 中的精简版 Ultralytics 是否安装并能运行。
+检查 vtools 使用的 Ultralytics 运行时是否可用并能运行。
 
 这个脚本专门解决一个容易误判的问题：电脑上同时存在 pip 版
-``ultralytics`` 和仓库里的本地源码时，``import ultralytics`` 到底加载了哪一份。
+``ultralytics`` 和外部 Fork 源码时，``import ultralytics`` 到底加载了哪一份。
 脚本会在隔离的 Python 子进程中检查真实导入路径，避免当前工作目录或临时的
 ``sys.path`` 修改把未安装的源码误判为已安装。
 
 常用命令：
 
-    python env_test/check_install.py --source ./ultralytics-cn
-    python env_test/check_install.py --source ./ultralytics-cn --weights ./best.pt
+    python env_test/check_install.py
+    python env_test/check_install.py --source ../ultralytics-ezcn --weights ./best.pt
 
 退出码为 0 表示必需检查通过；非 0 表示至少有一项必需检查失败。
 """
@@ -89,7 +89,7 @@ def parse_args() -> argparse.Namespace:
         "--source",
         type=Path,
         default=None,
-        help="源码项目根目录，例如 ./ultralytics-cn；也可填写包含 ultralytics/ 的目录。",
+        help="外部 Ultralytics 项目根目录，例如 ../ultralytics-ezcn；也可填写包含 ultralytics/ 的目录。",
     )
     parser.add_argument(
         "--weights",
@@ -170,14 +170,15 @@ def normalise_source_root(path: Path) -> Path:
 
 
 def infer_source_root(script_dir: Path) -> Optional[Path]:
-    """在 vtools 克隆目录中自动寻找 ultralytics-cn。"""
+    """在 vtools 克隆目录及其同级目录中自动寻找 Ultralytics Fork。"""
     repo_root = script_dir.parent
-    candidates = (
-        repo_root / "ultralytics-cn",
-        repo_root / "ultralytics",
-        repo_root.parent / "ultralytics-cn",
-        repo_root.parent / "ultralytics",
-    )
+    candidates = []
+    configured = os.environ.get("VTOOLS_ULTRALYTICS_REPO")
+    if configured:
+        configured_path = Path(configured).expanduser()
+        candidates.append(configured_path if configured_path.is_absolute() else repo_root / configured_path)
+    for parent in (repo_root, repo_root.parent):
+        candidates.extend(parent / name for name in ("ultralytics-cn", "ultralytics-ezcn", "ultralytics"))
     for candidate in candidates:
         root = normalise_source_root(candidate)
         if (root / "ultralytics" / "__init__.py").is_file():
@@ -200,14 +201,22 @@ def isolated_environment() -> Dict[str, str]:
     return env
 
 
-def run_isolated_probe(code: str, timeout: int = 180) -> Tuple[int, str, str]:
+def run_isolated_probe(
+    code: str,
+    timeout: int = 180,
+    python_paths: Sequence[Path] = (),
+) -> Tuple[int, str, str]:
     """在临时工作目录运行当前 Python，返回 returncode/stdout/stderr。"""
     with tempfile.TemporaryDirectory(prefix="vtools-install-check-") as temp_dir:
         try:
+            environment = isolated_environment()
+            paths = [str(Path(path).expanduser().resolve()) for path in python_paths]
+            if paths:
+                environment["PYTHONPATH"] = os.pathsep.join(paths)
             completed = subprocess.run(
                 [sys.executable, "-c", code],
                 cwd=temp_dir,
-                env=isolated_environment(),
+                env=environment,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -244,7 +253,11 @@ def format_versions(info: Dict[str, Any]) -> str:
     return ", ".join(f"{key}={value}" for key, value in versions.items() if value) or "未读取到版本"
 
 
-def run_import_probe(module_name: str, distribution_name: str) -> Tuple[Optional[Dict[str, Any]], str]:
+def run_import_probe(
+    module_name: str,
+    distribution_name: str,
+    source_root: Optional[Path] = None,
+) -> Tuple[Optional[Dict[str, Any]], str]:
     code = textwrap.dedent(
         f"""
         import importlib
@@ -313,7 +326,8 @@ def run_import_probe(module_name: str, distribution_name: str) -> Tuple[Optional
         print({PROBE_MARKER!r} + json.dumps(result, ensure_ascii=False))
         """
     )
-    returncode, stdout, stderr = run_isolated_probe(code)
+    paths = (source_root,) if source_root is not None else ()
+    returncode, stdout, stderr = run_isolated_probe(code, python_paths=paths)
     result = extract_probe_json(stdout)
     if result is None:
         return None, compact_error(stderr, stdout)
@@ -371,6 +385,7 @@ def run_model_probe(
     weights_path: Optional[Path],
     device: str,
     input_size: int,
+    source_root: Optional[Path] = None,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     yaml_literal = repr(str(yaml_path)) if yaml_path else "None"
     weights_literal = repr(str(weights_path)) if weights_path else "None"
@@ -450,7 +465,8 @@ def run_model_probe(
     )
     code = code.replace("result[\"yaml\"] = {\"ok\": True, \"output\": describe_output(output)}", "result[\"yaml\"] = {\"ok\": True, \"output\": describe_output(output)}")
     code = helper_source + "\n" + code
-    returncode, stdout, stderr = run_isolated_probe(code, timeout=300)
+    paths = (source_root,) if source_root is not None else ()
+    returncode, stdout, stderr = run_isolated_probe(code, timeout=300, python_paths=paths)
     result = extract_probe_json(stdout)
     if result is None:
         return None, compact_error(stderr, stdout)
@@ -520,7 +536,6 @@ def main() -> int:
         reporter.passed("输入尺寸", f"合成输入 {input_size}×{input_size}。")
 
     source_root: Optional[Path]
-    source_was_explicit = args.source is not None
     if args.source is not None:
         source_root = normalise_source_root(resolve_path(args.source, call_dir))
     else:
@@ -530,8 +545,8 @@ def main() -> int:
     if source_root is None:
         reporter.warned(
             "本地源码目录",
-            "没有自动找到 ultralytics-cn；将只检查当前 Python 中安装的包。",
-            "若要强制确认本地源码，请加 --source /path/to/ultralytics-cn。",
+            "没有自动找到外部 Ultralytics 源码；将只检查当前 Python 中安装的包。",
+            "若要强制确认本地源码，请加 --source /path/to/ultralytics-ezcn。",
         )
     elif expected_file is None:
         reporter.failed(
@@ -548,7 +563,7 @@ def main() -> int:
             detail += "\n警告：该目录没有 pyproject.toml。"
         reporter.passed("本地源码目录", "已找到可检查的源码。", detail)
 
-    info, probe_error = run_import_probe(args.module, args.distribution)
+    info, probe_error = run_import_probe(args.module, args.distribution, source_root)
     if info is None:
         reporter.failed("导入包", "隔离子进程无法读取包信息。", probe_error)
         return finish(reporter, args)
@@ -698,6 +713,7 @@ def main() -> int:
             weights_path,
             device,
             input_size,
+            source_root,
         )
         if model_info is None:
             reporter.failed("模型构建/前向", "模型子进程没有返回结果。", model_error)

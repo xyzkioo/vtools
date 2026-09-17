@@ -294,7 +294,10 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
             args.append("--recursive" if values.get("recursive") else "--no-recursive")
         title = variant["title"]
     elif tool_id == "environment":
-        args = [str(ROOT / tool["script"]), "--source", _field_path(values.get("source") or "ultralytics-cn"), "--device", _option(values.get("device"), ["auto", "cpu", "cuda:0"], "设备"), "--input-size", str(values.get("size") or 64)]
+        args = [str(ROOT / tool["script"])]
+        if values.get("source") and str(values["source"]).strip():
+            args += ["--source", _field_path(values["source"])]
+        args += ["--device", _option(values.get("device"), ["auto", "cpu", "cuda:0"], "设备"), "--input-size", str(values.get("size") or 64)]
         for key, flag in (("weights", "--weights"), ("yaml", "--yaml")):
             if values.get(key):
                 args += [flag, _field_path(values[key])]

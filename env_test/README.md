@@ -1,17 +1,17 @@
-# Ultralytics 本地源码安装与环境检验向导
+# Ultralytics 外部源码安装与环境检验向导
 
-这个文件夹用于确认 `vtools/ultralytics-cn/` 这份精简版 Ultralytics 是否安装成功，以及当前 Python 是否真的加载了本地源码。
+这个文件夹用于确认独立 Ultralytics Fork 是否可用，以及当前 Python 是否真的加载了指定的源码。
 
 ## 入口
 
 ```bash
-python env_test/check_install.py --source ./ultralytics-cn
+python env_test/check_install.py
 python env_test/check_install.py --help
 ```
 
 仓库中有两种容易混淆的东西：
 
-- **项目目录名**：当前是 `ultralytics-cn`，可以改成别的名字；
+- **外部项目目录名**：推荐在 `vtools` 同级使用 `ultralytics-ezcn`，也可以改成别的名字；
 - **Python 包名和导入名**：当前仍是 `ultralytics`，代码使用 `from ultralytics import YOLO`。
 
 建议先保留 Python 包名和导入名，只改变外层目录名。这样已有训练脚本、`.pt` 权重和 Ultralytics 的内部模块路径可以继续使用。
@@ -21,11 +21,10 @@ python env_test/check_install.py --help
 从 GitHub 下载或克隆后，目录应类似这样：
 
 ```text
-vtools/
-├── env_test/
-│   ├── check_install.py
-│   └── README.md
-└── ultralytics-cn/
+workspace/
+├── vtools/
+│   └── env_test/
+└── ultralytics-ezcn/
     ├── pyproject.toml
     └── ultralytics/
         ├── __init__.py
@@ -34,7 +33,7 @@ vtools/
         └── cfg/
 ```
 
-如果你把 `ultralytics-cn` 改名为 `ultralytics-custom`，只需要把下面命令中的目录名替换掉。`--source` 必须指向包含 `pyproject.toml` 和包目录的项目根目录。
+如果本地目录仍叫 `ultralytics-cn` 或改成了 `ultralytics-custom`，只需要把下面命令中的目录名替换掉。`--source` 必须指向包含 `pyproject.toml` 和包目录的外部项目根目录；检查脚本会把它临时加入隔离子进程，不要求先执行安装。
 
 ## 二、已有 Conda 环境安装（推荐）
 
@@ -43,7 +42,7 @@ vtools/
 ```bash
 cd /path/to/vtools
 conda activate yolo
-python -m pip install -e ./ultralytics-cn
+python -m pip install -e ../ultralytics-ezcn
 ```
 
 `-e` 是可编辑安装。源码修改后，重新启动 Python 进程即可生效。
@@ -51,7 +50,7 @@ python -m pip install -e ./ultralytics-cn
 如果这个环境的依赖已经完整，不想让 pip 改动已有的 PyTorch、NumPy 或 CUDA 组合，可以使用：
 
 ```bash
-python -m pip install -e ./ultralytics-cn --no-deps
+python -m pip install -e ../ultralytics-ezcn --no-deps
 ```
 
 `--no-deps` 只安装本地源码的入口，不会补齐缺失依赖；空环境不要使用它。
@@ -72,10 +71,10 @@ python -m pip install --upgrade pip setuptools wheel
 
 ```bash
 cd /path/to/vtools
-python -m pip install -e ./ultralytics-cn
+python -m pip install -e ../ultralytics-ezcn
 ```
 
-本仓库 `pyproject.toml` 声明的基础范围包括 Python `>=3.8`、PyTorch `>=1.8.0`、torchvision `>=0.9.0`、NumPy、OpenCV、Pillow、PyYAML、Matplotlib、Requests、psutil、polars、nvidia-ml-py 和 ultralytics-thop。实际使用时，PyTorch 与 torchvision 必须互相匹配。
+Fork 的 `pyproject.toml` 声明的基础范围包括 Python `>=3.8`、PyTorch `>=1.8.0`、torchvision `>=0.9.0`、NumPy、OpenCV、Pillow、PyYAML、Matplotlib、Requests、psutil、polars、nvidia-ml-py 和 ultralytics-thop。实际使用时，PyTorch 与 torchvision 必须互相匹配。
 
 当前已经验证过的组合是：Ubuntu 22.04.5、Python 3.10.20、PyTorch 2.12.0+cu130、RTX 5060 Laptop 8 GB、默认输入 832×832。这个组合用于参考，不要求所有电脑完全相同。
 
@@ -84,14 +83,14 @@ python -m pip install -e ./ultralytics-cn
 在 `vtools` 根目录运行：
 
 ```bash
-python env_test/check_install.py --source ./ultralytics-cn
+python env_test/check_install.py --source ../ultralytics-ezcn
 ```
 
 脚本会检查：
 
 1. 当前使用的 Python 解释器；
 2. `ultralytics` 的真实导入文件和版本；
-3. 是否导入了 `ultralytics-cn/ultralytics/`，避免误用 pip 版；
+3. 是否导入了 `../ultralytics-ezcn/ultralytics/`，避免误用 pip 版；
 4. PyTorch、torchvision、NumPy、PyYAML、OpenCV、Pillow；
 5. pip 依赖冲突；
 6. `yolo26.yaml` 是否能构建模型并完成一次 Tensor 前向传播；
@@ -101,8 +100,8 @@ python env_test/check_install.py --source ./ultralytics-cn
 
 ```text
 [通过] 源码来源: Python 实际加载的是指定的本地源码。
-       期望：/path/to/vtools/ultralytics-cn/ultralytics/__init__.py
-       实际：/path/to/vtools/ultralytics-cn/ultralytics/__init__.py
+       期望：/path/to/ultralytics-ezcn/ultralytics/__init__.py
+       实际：/path/to/ultralytics-ezcn/ultralytics/__init__.py
 ```
 
 如果实际路径包含 `site-packages/ultralytics/`，说明当前仍然使用 pip 版。重新执行：
@@ -110,8 +109,8 @@ python env_test/check_install.py --source ./ultralytics-cn
 ```bash
 conda activate yolo
 cd /path/to/vtools
-python -m pip install -e ./ultralytics-cn
-python env_test/check_install.py --source ./ultralytics-cn
+python -m pip install -e ../ultralytics-ezcn
+python env_test/check_install.py --source ../ultralytics-ezcn
 ```
 
 ## 五、检查自己的权重
@@ -120,7 +119,7 @@ python env_test/check_install.py --source ./ultralytics-cn
 
 ```bash
 python env_test/check_install.py \
-    --source ./ultralytics-cn \
+    --source ../ultralytics-ezcn \
     --weights /absolute/path/to/best.pt
 ```
 
@@ -130,7 +129,7 @@ python env_test/check_install.py \
 
 ```bash
 python env_test/check_install.py \
-    --source ./ultralytics-cn \
+    --source ../ultralytics-ezcn \
     --weights /absolute/path/to/best.pt \
     --skip-model
 ```
@@ -141,7 +140,7 @@ python env_test/check_install.py \
 
 | 参数 | 作用 |
 | --- | --- |
-| `--source PATH` | 指定本地源码项目根目录；推荐始终填写 |
+| `--source PATH` | 指定外部源码项目根目录；留空时自动查找同级 Fork |
 | `--weights PATH` | 加载并预测指定 `.pt` |
 | `--yaml PATH` | 指定要构建的模型 YAML |
 | `--device auto/cpu/cuda:0` | 选择运行设备；默认自动选择 |
@@ -156,7 +155,7 @@ TensorRT 不是普通 PyTorch 训练的必需项。只有需要导出或 TensorR
 
 ```bash
 python env_test/check_install.py \
-    --source ./ultralytics-cn \
+    --source ../ultralytics-ezcn \
     --check-export
 ```
 
@@ -167,14 +166,14 @@ python env_test/check_install.py \
 这是推荐做法。例如：
 
 ```text
-ultralytics-cn/  →  ultralytics-custom/
+ultralytics-ezcn/  →  ultralytics-custom/
 ```
 
 安装命令改为：
 
 ```bash
-python -m pip install -e ./ultralytics-custom
-python env_test/check_install.py --source ./ultralytics-custom
+python -m pip install -e ../ultralytics-custom
+python env_test/check_install.py --source ../ultralytics-custom
 ```
 
 代码仍然使用：
@@ -189,7 +188,7 @@ from ultralytics import YOLO
 
 ```bash
 python env_test/check_install.py \
-    --source ./ultralytics-cn \
+    --source ../ultralytics-ezcn \
     --distribution ultralytics-vtools
 ```
 
@@ -203,7 +202,7 @@ python env_test/check_install.py \
 
 ```bash
 python env_test/check_install.py \
-    --source ./ultralytics-custom \
+    --source ../ultralytics-custom \
     --module ultralytics_custom \
     --distribution ultralytics-vtools
 ```

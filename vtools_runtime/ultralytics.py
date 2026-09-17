@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
+CHECKOUT_NAMES = ("ultralytics-cn", "ultralytics-ezcn", "ultralytics")
+
+
 def _as_path(value: Any, base: Path) -> Path | None:
     if value is None or not str(value).strip():
         return None
@@ -29,7 +32,7 @@ def find_repo(settings: Mapping[str, Any] | None, project_root: Path) -> Path | 
         if path is not None:
             candidates.append(path)
     for parent in (project_root, project_root.parent):
-        candidates.extend(parent / name for name in ("ultralytics-cn", "ultralytics"))
+        candidates.extend(parent / name for name in CHECKOUT_NAMES)
     seen: set[Path] = set()
     for candidate in candidates:
         candidate = candidate.resolve()
@@ -51,7 +54,7 @@ def add_repo_to_path(settings: Mapping[str, Any] | None, project_root: Path) -> 
 def import_error_message(repo: Path | None) -> str:
     if repo is None:
         return (
-            "未找到 Ultralytics。请将你的 Fork 放在 vtools 同级的 ultralytics-cn/ 目录，"
+            "未找到 Ultralytics。请将你的 Fork 放在 vtools 同级的 ultralytics-cn/ 或 ultralytics-ezcn/ 目录，"
             "或设置 VTOOLS_ULTRALYTICS_REPO，或填写 project.ultralytics_repo。"
         )
     return f"无法从 {repo} 导入 Ultralytics，请检查该 Fork 的依赖和源码完整性"

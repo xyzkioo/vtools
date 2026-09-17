@@ -4,7 +4,7 @@
 
 项目以桌面 UI 为主要入口，YAML 配置和命令行用于自动化。测速与诊断支持通过 adapter（模型适配器）接入自定义模型；内置 Ultralytics 接口可直接使用兼容的 YOLO 权重。
 
-普通 YOLO 训练、验证、逐图 TP/FP/FN、预测热图、标准格式导出和整模型 benchmark 优先使用 `ultralytics-cn/` 的原生入口。vtools 聚焦错误原因、指定层和候选框追踪、自定义模型、固定输入与跨后端对比，以及 K230 转换；同名指标应先核对输入和计时口径。
+普通 YOLO 训练、验证、逐图 TP/FP/FN、预测热图、标准格式导出和整模型 benchmark 优先使用独立 Ultralytics Fork 的原生入口。vtools 聚焦错误原因、指定层和候选框追踪、自定义模型、固定输入与跨后端对比，以及 K230 转换；同名指标应先核对输入和计时口径。
 
 ## 统一入口
 
@@ -43,7 +43,7 @@ Ubuntu 安装版从 0.3.1 起可在工作台“设置 → 软件更新”检查 
 | --- | --- | --- |
 | [vtools_ui/](vtools_ui/) | React + pywebview 跨平台桌面工作台；统一工具导航、配置选择、运行日志和任务记录 | [桌面 UI 说明](vtools_ui/README.md) |
 | [AGENTS.md](AGENTS.md) | AI coding agent 和协作者的目录边界、入口、配置、验证与交付约定 | 编辑代码前先阅读 |
-| [ultralytics-cn/](ultralytics-cn/) | Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](ultralytics-cn/README.zh-CN.md)、[安装配置](ultralytics-cn/pyproject.toml) |
+| [Ultralytics Fork](https://github.com/xyzkioo/ultralytics-ezcn) | 独立维护的 Ultralytics 8.4.128 中文注释精简版；保留模型构建、训练、验证、推理和按需导出所需的运行时源码 | [源码说明](https://github.com/xyzkioo/ultralytics-ezcn/blob/main/README.zh-CN.md)、[安装配置](https://github.com/xyzkioo/ultralytics-ezcn/blob/main/pyproject.toml) |
 | [env_test/](env_test/) | 检查 Python、依赖、实际导入的源码路径、CUDA、模型构建与前向传播 | [check_install.py](env_test/check_install.py)、[安装与检验向导](env_test/README.md) |
 | [model_diagnostics/](model_diagnostics/) | 目标检测错误分析：漏检、错分类、多余框、重复框、定位偏差、框重叠和差图；常规 mAP 等交给 Ultralytics 验证 | [run_model_diagnostics.py](model_diagnostics/run_model_diagnostics.py)、[完整说明](model_diagnostics/docs/README.md) |
 | [model_visualization/](model_visualization/) | 指定层特征、指定候选 Grad-CAM/LayerCAM，以及检测头 raw candidate→top-k→final 阶段追踪；普通热图使用 Ultralytics `predict visualize=True` | [run_visualization.py](model_visualization/run_visualization.py)、[配置](model_visualization/config/config.yaml) |
@@ -57,9 +57,9 @@ Ubuntu 安装版从 0.3.1 起可在工作台“设置 → 软件更新”检查 
 
 | 位置 | 作用 |
 | --- | --- |
-| `ultralytics-cn/ultralytics/nn/` | 网络模块、检测头、模型解析与构建 |
-| `ultralytics-cn/ultralytics/cfg/models/` | 各模型系列的网络结构 YAML |
-| `ultralytics-cn/ultralytics/models/`、`engine/`、`data/`、`utils/` | 模型任务接口、训练/验证/预测流程、数据增强、损失与指标 |
+| `../ultralytics-ezcn/ultralytics/nn/` | 网络模块、检测头、模型解析与构建 |
+| `../ultralytics-ezcn/ultralytics/cfg/models/` | 各模型系列的网络结构 YAML |
+| `../ultralytics-ezcn/ultralytics/models/`、`engine/`、`data/`、`utils/` | 模型任务接口、训练/验证/预测流程、数据增强、损失与指标 |
 | `model_diagnostics/config/` | 诊断配置；日常主要修改 `config.yaml` |
 | `model_diagnostics/diagnostics/`、`adapters/` | 评估引擎、模型运行器、自定义适配器模板 |
 | `model_diagnostics/docs/`、`data/` | 使用教程、指标解释和输入数据格式说明 |
@@ -70,7 +70,7 @@ Ubuntu 安装版从 0.3.1 起可在工作台“设置 → 软件更新”检查 
 | `model_compression/core/`、`modules/` | 配置、运行目录、量化、剪枝和蒸馏执行 |
 | `model_compression/config/`、`adapters/`、`tests/` | 配置、模型与数据 adapter 模板、离线回归测试 |
 
-**范围说明：** 当前 `model_diagnostics` 评估的是目标检测框，不评估实例分割掩码。其他模型接入需要提供统一预测文件或实现相应 adapter。网络结构阅读可从 `ultralytics-cn` 入手；通用模型可视化独立放在 `model_visualization/`，首版内置 Ultralytics/YOLO26 适配器。
+**范围说明：** 当前 `model_diagnostics` 评估的是目标检测框，不评估实例分割掩码。其他模型接入需要提供统一预测文件或实现相应 adapter。网络结构阅读可从同级的 `../ultralytics-ezcn` 入手；通用模型可视化独立放在 `model_visualization/`，首版内置 Ultralytics/YOLO26 适配器。
 
 ## 环境要求
 
@@ -78,7 +78,7 @@ Ubuntu 安装版从 0.3.1 起可在工作台“设置 → 软件更新”检查 
 
 日常使用建议采用 **Python 3.10 + 独立 Conda 环境**。仓库主要在 Ubuntu 22.04 / Linux x86_64 下使用；其他系统需要调整路径，并确认对应依赖能够安装。
 
-本地 Ultralytics 的 `pyproject.toml` 声明 Python `>=3.8`、PyTorch `>=1.8.0`、torchvision `>=0.9.0` 等基础约束，**这些下限不等于整套工具和 YOLO26 在所有版本组合上均已验证**。完整限制以 [pyproject.toml](ultralytics-cn/pyproject.toml) 为准，PyTorch 与 torchvision 应配套安装。
+Ultralytics Fork 的 `pyproject.toml` 声明 Python `>=3.8`、PyTorch `>=1.8.0`、torchvision `>=0.9.0` 等基础约束，**这些下限不等于整套工具和 YOLO26 在所有版本组合上均已验证**。完整限制以 [Fork 的 pyproject.toml](https://github.com/xyzkioo/ultralytics-ezcn/blob/main/pyproject.toml) 为准，PyTorch 与 torchvision 应配套安装。
 
 以下为仓库现有环境文档记录的已验证组合，供复现参考，并非每台电脑都必须完全一致：
 
@@ -102,10 +102,10 @@ Ubuntu 安装版从 0.3.1 起可在工作台“设置 → 软件更新”检查 
 | 功能 | 所需依赖 |
 | --- | --- |
 | 已有预测文件的检测诊断（`predictions_file`） | 评估核心使用 Python 标准库；YAML 配置需要 PyYAML，读取 YOLO 图片尺寸需要 Pillow；无需为此加载 PyTorch 模型 |
-| 本地 YOLO 模型开发、训练、推理、诊断（`ultralytics_model`） | 配套的 PyTorch / torchvision，以及本地 `ultralytics-cn` 声明的依赖 |
+| 本地 YOLO 模型开发、训练、推理、诊断（`ultralytics_model`） | 配套的 PyTorch / torchvision，以及所选 Ultralytics 运行时声明的依赖 |
 | 自定义模型诊断（`custom_adapter`） | 诊断基础依赖，加上 adapter 所用框架和模型依赖 |
 | PyTorch 测速 | PyTorch、NumPy、PyYAML 和模型 adapter 依赖；内置图片流程还需要 OpenCV |
-| 特征图 / 阶段可视化 | PyTorch、NumPy、PyYAML、OpenCV、Pillow；使用本地 Ultralytics 权重时还需 `ultralytics-cn` 的依赖 |
+| 特征图 / 阶段可视化 | PyTorch、NumPy、PyYAML、OpenCV、Pillow；使用本地 Ultralytics 权重时还需对应 Fork 的依赖 |
 | TensorRT 测速与一致性检查 | NVIDIA GPU、兼容驱动、TensorRT Python API；导出/检查另需 ONNX，导出链路可能需要 onnxscript |
 | 模型压缩与知识蒸馏 | PyYAML、与设备匹配的 PyTorch；分类 ImageFolder 另需 torchvision，YOLO 检测压缩使用匹配的 Ultralytics 环境 |
 | NDJSON 转 YOLO | Ultralytics 及其依赖；下载清单中的图片需要网络 |
@@ -124,6 +124,9 @@ Ubuntu 安装版从 0.3.1 起可在工作台“设置 → 软件更新”检查 
 ```bash
 git clone https://github.com/xyzkioo/vtools.git
 cd vtools
+
+# 可选：将独立 Ultralytics Fork 克隆到 vtools 同级目录
+git clone https://github.com/xyzkioo/ultralytics-ezcn.git ../ultralytics-ezcn
 ```
 
 ### 2. 准备 Python 和 PyTorch
@@ -148,25 +151,58 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 
 vtools 不会强制安装 Ultralytics。只使用已有预测文件、通用诊断、基础 UI 或自定义 adapter 时，不需要安装它。
 
-需要内置 Ultralytics adapter、YOLO 压缩、可视化或 K230 转换时，再选择一个运行时：
+需要内置 Ultralytics adapter、YOLO 压缩、可视化或 K230 转换时，再选择一个运行时。Fork 是独立仓库，不会被 vtools 强制安装：
 
 ```bash
 # 使用官方 PyPI 版本
 python -m pip install -r ./requirements-ultralytics.txt
 
-# 或使用仓库内的 fork
-python -m pip install -e ./ultralytics-cn
+# 或安装同级的独立 Fork（可编辑安装）
+python -m pip install -e ../ultralytics-ezcn
 ```
 
-仓库内的 `ultralytics-cn` 保持 Python 包名 `ultralytics`，但只是可选运行时。未安装时，相关工具会在真正执行模型阶段报告缺少依赖，其他工具仍可使用。
+Fork 保持 Python 包名 `ultralytics`，但只是可选运行时。未安装时，相关工具会在真正执行模型阶段报告缺少依赖，其他工具仍可使用。
 
-已有环境的依赖确实完整、只想切换到本地 fork 源码时，可以使用：
+如果不想安装 Fork，只需在使用模型的配置中指定源码目录：
+
+```yaml
+project:
+  ultralytics_repo: ../ultralytics-ezcn
+```
+
+也可以用环境变量临时指定：
 
 ```bash
-python -m pip install -e ./ultralytics-cn --no-deps
+export VTOOLS_ULTRALYTICS_REPO=../ultralytics-ezcn
 ```
 
-`--no-deps` 不会补齐缺失依赖，适合已有 PyTorch、OpenCV 等依赖的环境。也可以完全不安装，配置 `project.ultralytics_repo: ./ultralytics-cn`，vtools 会在运行时直接从该源码目录加载 fork。
+相对路径按 `project.root` 解析；本地目录也可以继续命名为 `ultralytics-cn`，只要把示例路径替换成实际目录即可。
+
+### 独立 Fork 接入 vtools
+
+推荐保持两个仓库并列，不要把 Ultralytics 源码复制进 vtools：
+
+```text
+workspace/
+├── vtools/
+└── ultralytics-ezcn/
+```
+
+vtools 会按以下顺序使用 Ultralytics：
+
+1. 配置中的 `project.ultralytics_repo`；
+2. 环境变量 `VTOOLS_ULTRALYTICS_REPO`；
+3. vtools 本身或其同级目录下的 `ultralytics-cn/`、`ultralytics-ezcn/`、`ultralytics/`。
+
+因此，Fork 不安装到当前 Python 环境也可以直接用于模型诊断、可视化、测速和压缩。模型工具使用的配置示例：
+
+```yaml
+project:
+  root: ../..
+  ultralytics_repo: ../ultralytics-ezcn
+```
+
+启动桌面工作台后，环境检查中的“源码目录”可以留空，让程序自动发现 Fork；填写目录时则会强制验证该目录，并临时加入检查进程。实际加载的 Python 文件会在结果日志中显示，便于确认没有误用 `site-packages` 里的官方版本。
 
 ### 4. 确认安装与源码来源
 
@@ -176,22 +212,22 @@ python env_test/check_install.py
 
 脚本会报告解释器、核心依赖、Ultralytics 实际导入位置、pip 依赖冲突、CUDA 状态，并从 YAML 构建模型执行合成输入前向传播。默认不需要自己的数据集或训练权重；无可用 CUDA 时可使用 CPU。
 
-如果选择检查本地 fork，使用：
+如果要确认同级 Fork，使用：
 
 ```bash
-python env_test/check_install.py --source ./ultralytics-cn
+python env_test/check_install.py --source ../ultralytics-ezcn
 ```
 
 这时导入路径应指向：
 
 ```text
-/path/to/vtools/ultralytics-cn/ultralytics/__init__.py
+/path/to/ultralytics-ezcn/ultralytics/__init__.py
 ```
 
 如果实际导入另一份 `site-packages/ultralytics/`，本地源码来源检查会判为失败。需要检查自己的权重时运行：
 
 ```bash
-python env_test/check_install.py --source ./ultralytics-cn --weights /path/to/best.pt
+python env_test/check_install.py --source ../ultralytics-ezcn --weights /path/to/best.pt
 ```
 
 通过基础检验表示安装、导入和基本前向链路可用；自己的权重、数据集和部署后端仍需分别验证。`--check-export` 可额外检查 ONNX / TensorRT 导入，`--strict` 可将部分警告提升为失败。
@@ -204,14 +240,14 @@ python env_test/check_install.py --source ./ultralytics-cn --weights /path/to/be
 
 | 要修改的内容 | 文件 |
 | --- | --- |
-| YOLO26 检测 / 实例分割结构 | `ultralytics-cn/ultralytics/cfg/models/26/yolo26.yaml`、`yolo26-seg.yaml` |
-| 卷积、特征提取与融合模块 | `ultralytics-cn/ultralytics/nn/modules/conv.py`、`block.py` |
-| 检测头 / 分割头 | `ultralytics-cn/ultralytics/nn/modules/head.py` |
-| 模块导出与模型解析 | `ultralytics-cn/ultralytics/nn/modules/__init__.py`、`ultralytics-cn/ultralytics/nn/tasks.py` 中的 `parse_model()` |
-| 损失函数 / 标签分配 | `ultralytics-cn/ultralytics/utils/loss.py`、`tal.py` |
-| 数据增强 | `ultralytics-cn/ultralytics/data/augment.py` |
+| YOLO26 检测 / 实例分割结构 | `../ultralytics-ezcn/ultralytics/cfg/models/26/yolo26.yaml`、`yolo26-seg.yaml` |
+| 卷积、特征提取与融合模块 | `../ultralytics-ezcn/ultralytics/nn/modules/conv.py`、`block.py` |
+| 检测头 / 分割头 | `../ultralytics-ezcn/ultralytics/nn/modules/head.py` |
+| 模块导出与模型解析 | `../ultralytics-ezcn/ultralytics/nn/modules/__init__.py`、`../ultralytics-ezcn/ultralytics/nn/tasks.py` 中的 `parse_model()` |
+| 损失函数 / 标签分配 | `../ultralytics-ezcn/ultralytics/utils/loss.py`、`tal.py` |
+| 数据增强 | `../ultralytics-ezcn/ultralytics/data/augment.py` |
 
-新增模块后，需要同步检查模块导出、`tasks.py` 导入、YAML 引用和通道/参数解析。训练、验证和预测示例见 [源码 README](ultralytics-cn/README.zh-CN.md)。
+新增模块后，需要同步检查模块导出、`tasks.py` 导入、YAML 引用和通道/参数解析。训练、验证和预测示例见 [Fork 源码 README](https://github.com/xyzkioo/ultralytics-ezcn/blob/main/README.zh-CN.md)。
 
 ### 2. 目标检测诊断
 
@@ -231,8 +267,8 @@ python env_test/check_install.py --source ./ultralytics-cn --weights /path/to/be
 mode: ultralytics_model
 
 project:
-  root: ..
-  ultralytics_repo: ultralytics-cn
+  root: ../..
+  ultralytics_repo: ../ultralytics-ezcn
 
 run:
   root: model_diagnostics/runs
@@ -284,13 +320,13 @@ python model_diagnostics/run_model_diagnostics.py
 
 这个入口用于回答“问题从哪一层开始出现”以及“候选框在哪个阶段被删掉”。它和 Ultralytics 已有的训练曲线、验证指标、预测保存功能分开，输出一份可离线打开的 `index.html`。
 
-先安装可视化的轻量依赖。Ultralytics adapter 是可选运行时，可以使用官方包，也可以使用仓库内的 fork：
+先安装可视化的轻量依赖。Ultralytics adapter 是可选运行时，可以使用官方包，也可以使用同级的独立 Fork：
 
 ```bash
 python -m pip install -r ./model_visualization/requirements.txt
 # 二选一：
 python -m pip install -r ./requirements-ultralytics.txt
-# python -m pip install -e ./ultralytics-cn
+# python -m pip install -e ../ultralytics-ezcn
 ```
 
 复制 [model_visualization/config/config.yaml](model_visualization/config/config.yaml) 为自己的配置，至少修改 `model.weights` 和 `input.source`，然后运行：
@@ -330,8 +366,8 @@ TensorRT engine 仍由已有的 `rebuild_engine` 开关控制：成功构建后�
 
 ```yaml
 project:
-  root: ..
-  ultralytics_repo: ultralytics-cn
+  root: ../..
+  ultralytics_repo: ../ultralytics-ezcn
 
 run:
   enabled: true
@@ -503,7 +539,7 @@ Ultralytics 训练/验证/预测自己的输出目录另由调用参数 `project
 ## 文档索引与许可证
 
 - [本地源码安装与环境检验](env_test/README.md)
-- [Ultralytics 精简版与网络修改说明](ultralytics-cn/README.zh-CN.md)
+- [Ultralytics Fork 与网络修改说明](https://github.com/xyzkioo/ultralytics-ezcn/blob/main/README.zh-CN.md)
 - [目标检测诊断完整教程](model_diagnostics/docs/README.md)
 - [诊断指标解释](model_diagnostics/docs/METRICS.md)
 - [测速工具使用教程](speed_test/README.md)
@@ -515,4 +551,4 @@ Ultralytics 训练/验证/预测自己的输出目录另由调用参数 `project
 - [数据和模型转换说明](transform_tools/REQUIREMENT.md)
 - [模型勘误方法](模型勘误方法.md)
 
-根目录许可证见 [LICENSE](LICENSE)；`ultralytics-cn/` 保留 [Ultralytics AGPL-3.0 许可证](ultralytics-cn/LICENSE) 及源码中的原有授权声明。
+根目录许可证见 [LICENSE](LICENSE)；独立 Ultralytics Fork 保留 [Ultralytics AGPL-3.0 许可证](https://github.com/xyzkioo/ultralytics-ezcn/blob/main/LICENSE) 及源码中的原有授权声明。

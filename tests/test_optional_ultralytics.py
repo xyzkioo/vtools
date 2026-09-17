@@ -19,6 +19,15 @@ class OptionalUltralyticsDiscoveryTests(unittest.TestCase):
             (fork / "__init__.py").touch()
             self.assertEqual(find_repo({}, root), fork.parent)
 
+    def test_discovers_ezcn_named_sibling_fork(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "vtools"
+            fork = Path(directory) / "ultralytics-ezcn" / "ultralytics"
+            (root / "placeholder").mkdir(parents=True)
+            fork.mkdir(parents=True)
+            (fork / "__init__.py").touch()
+            self.assertEqual(find_repo({}, root), fork.parent)
+
     def test_explicit_path_beats_sibling_and_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "vtools"

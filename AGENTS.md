@@ -6,7 +6,7 @@
 
 vtools 是一个以 Python 和 YAML 为核心的视觉模型工具集，包含检测诊断、模型可视化、PyTorch/TensorRT 测速、模型压缩、K230 转换、数据文件处理和 PySide6 桌面工作台。
 
-内置的 `ultralytics-cn/` 是上游 Ultralytics 源码副本。修改该目录时，优先遵循 `ultralytics-cn/AGENTS.md`（如果存在）及 `ultralytics-cn/README.zh-CN.md` 中的约定；不要把 vtools 的工具逻辑复制进上游包内部。
+Ultralytics Fork 是 vtools 同级的独立仓库，不属于 vtools 的源码提交范围。修改 Fork 时遵循其仓库内的约定；不要把 vtools 的工具逻辑复制进上游包内部。vtools 通过 `project.ultralytics_repo`、`VTOOLS_ULTRALYTICS_REPO` 或同级目录发现它。
 
 ## 核心原则
 
@@ -17,7 +17,7 @@ vtools 是一个以 Python 和 YAML 为核心的视觉模型工具集，包含�
 5. 运行失败必须可见。不要把导入错误、配置错误、输出写入失败或子任务失败静默转换成成功；返回码、summary 和报告应反映真实状态。
 6. 输出文件要可复查。运行目录使用唯一目录；写 JSON、CSV、图片或模型时避免半成品覆盖已有结果，失败应清理临时文件。
 7. 不修改用户输入和权重。除非用户明确要求，工具只读取输入文件；生成物写入对应的 `runs/`、`outputs/` 或用户指定目录。
-8. 新增 YOLO 功能前，先检查本仓库 `ultralytics-cn/` 的公共 API 和对应文档。常规训练、验证指标与逐图 TP/FP/FN、普通 CAM、标准格式导出和整模型 benchmark 优先调用 Ultralytics；vtools 只实现错误原因、指定候选与层的追踪、自定义模型、跨后端一致性及 K230 等额外需求。确需独立实现时，在相应 README 说明原生接口不能满足的具体输出或计时边界。
+8. 新增 YOLO 功能前，先检查外部 Ultralytics Fork 的公共 API 和对应文档。常规训练、验证指标与逐图 TP/FP/FN、普通 CAM、标准格式导出和整模型 benchmark 优先调用 Ultralytics；vtools 只实现错误原因、指定候选与层的追踪、自定义模型、跨后端一致性及 K230 等额外需求。确需独立实现时，在相应 README 说明原生接口不能满足的具体输出或计时边界。
 
 ## 目录与真实入口
 

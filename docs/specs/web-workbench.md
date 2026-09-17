@@ -37,7 +37,7 @@ Ubuntu 可在现有 `yolo` 环境运行无硬件检查。Windows 的桌面窗口
 
 ## 分发包
 
-`packaging/vtools_ui.spec` 和 `packaging/build_desktop.py` 生成目录包，前端静态资源、工具脚本和配置文件随包提供。PyInstaller 需要在 Windows、Ubuntu 分别执行，包内任务仍受目标机器的 GPU、TensorRT、nncase 和模型文件条件限制。
+`packaging/build_desktop.py` 使用 PyInstaller 命令行生成目录包，前端静态资源、工具脚本、配置文件和 `vtools_runtime` 随包提供。PyInstaller 需要在 Windows、Ubuntu 分别执行，包内任务仍受目标机器的 GPU、TensorRT、nncase 和模型文件条件限制。
 构建清单只收录版本控制中的工具源码及配置和前端构建产物，不收录本地权重、数据集和未跟踪文件。打包版默认将模型任务结果写到用户目录的 `.vtools_ui/runs/`；服务端生成每次独立的 `--run-dir`，结果浏览器使用同一根目录。
 
 ## 当前验收记录

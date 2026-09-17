@@ -75,7 +75,7 @@ TOOLS: dict[str, dict] = {
         "title": "环境检查", "group": "system", "description": "检查 Python、PyTorch、CUDA 和本地源码。",
         "script": "env_test/check_install.py",
         "fields": [
-            {"key": "source", "label": "源码目录", "kind": "dir", "default": "ultralytics-cn"},
+            {"key": "source", "label": "源码目录（可选）", "kind": "dir", "default": "", "hint": "留空时自动查找 vtools 同级的 Ultralytics Fork。"},
             {"key": "weights", "label": "模型权重", "kind": "file"},
             {"key": "yaml", "label": "模型 YAML", "kind": "file"},
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},

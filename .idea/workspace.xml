@@ -5,10 +5,23 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="72f548e0-05cd-4c51-90e8-b6d862735971" name="更改" comment="改一下readme">
+      <change afterPath="$PROJECT_DIR$/.idea/ultralytics.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/ultralytics@1.iml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model_diagnostics/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/model_diagnostics/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/model_visualization/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/model_visualization/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/speed_test/benchmark_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/speed_test/benchmark_config.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/specs/web-workbench.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/specs/web-workbench.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/specs/yolo-detection-compression.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/specs/yolo-detection-compression.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/env_test/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/env_test/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/env_test/check_install.py" beforeDir="false" afterPath="$PROJECT_DIR$/env_test/check_install.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packaging/build_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/packaging/build_desktop.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/packaging/vtools_ui.spec" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_optional_ultralytics.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_optional_ultralytics.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_web_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_web_ui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_runtime/ultralytics.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_runtime/ultralytics.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/catalog.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/catalog.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/core.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/core.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -23,18 +36,18 @@
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "xyzkioo"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;xyzkioo&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/xyzkioo/vtools.git",
-    "accountId": "c2ff480e-dfea-4c38-adca-0fc63a84f14c"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/xyzkioo/vtools.git&quot;,
+    &quot;accountId&quot;: &quot;c2ff480e-dfea-4c38-adca-0fc63a84f14c&quot;
   }
-}]]></component>
+}</component>
   <component name="ProjectColorInfo">{
   &quot;customColor&quot;: &quot;&quot;,
   &quot;associatedIndex&quot;: 6
@@ -51,7 +64,8 @@
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
-    "git-widget-placeholder": "ultralyticsa-cn",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/home/xyzkioo/PycharmProjects/ultralytics-cn",
     "node.js.detected.package.jshint": "true",
     "node.js.selected.package.jshint": "",
     "nodejs_package_manager_path": "npm",
@@ -261,7 +275,23 @@
       <option name="project" value="LOCAL" />
       <updated>1789647104708</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="改一下readme">
+      <option name="closed" value="true" />
+      <created>1789651099181</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1789651099181</updated>
+    </task>
+    <task id="LOCAL-00010" summary="改一下readme">
+      <option name="closed" value="true" />
+      <created>1789651106393</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1789651106393</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

@@ -191,7 +191,7 @@ group.prune()
 - 验证可发生融合、精度转换，必须评估模型副本；压缩原始结构，不压缩已被验证流程原地修改的副本。
 - 剪枝后精度评估针对保存并重新加载的文件，不能只评估内存对象。
 
-接口依据为仓库中的 `ultralytics-cn/ultralytics/engine/model.py` 和 `model_compression/modules/pruning.py`。实际任务使用环境内导入的 Ultralytics，必须记录其版本和 `__file__`；本地自定义 YOLO 层需要通过 `project.python_paths` 加入匹配源码。
+接口依据为外部 Ultralytics Fork 的 `ultralytics/engine/model.py` 和 `model_compression/modules/pruning.py`。实际任务使用环境内导入的 Ultralytics，必须记录其版本和 `__file__`；本地自定义 YOLO 层需要通过 `project.python_paths` 加入匹配源码。
 
 ### 5.2 P0.5：结构化通道缩放（已接入）
 

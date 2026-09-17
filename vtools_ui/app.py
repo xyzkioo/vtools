@@ -1422,7 +1422,8 @@ class EnvironmentPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.source = QLineEdit(str(ROOT / "ultralytics-cn"))
+        self.source = QLineEdit()
+        self.source.setPlaceholderText("留空自动查找 vtools 同级的 Ultralytics Fork")
         self.weights = QLineEdit()
         self.yaml = QLineEdit()
         self.device = QComboBox()
@@ -1480,7 +1481,9 @@ class EnvironmentPage(QWidget):
             edit.setText(path)
 
     def _run(self) -> None:
-        args = ["--source", self.source.text().strip(), "--device", self.device.currentText(), "--input-size", self.size.text().strip()]
+        args = ["--device", self.device.currentText(), "--input-size", self.size.text().strip()]
+        if self.source.text().strip():
+            args[0:0] = ["--source", self.source.text().strip()]
         if self.weights.text().strip(): args.extend(["--weights", self.weights.text().strip()])
         if self.yaml.text().strip(): args.extend(["--yaml", self.yaml.text().strip()])
         if self.export_check.isChecked(): args.append("--check-export")

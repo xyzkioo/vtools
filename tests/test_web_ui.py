@@ -92,6 +92,15 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(args[0], "--run-script")
         self.assertEqual(Path(args[1]).name, "check_install.py")
 
+    def test_environment_check_leaves_source_automatic_when_empty(self) -> None:
+        _executable, args, _config = core.build_command({"tool_id": "environment", "values": {"skip_model": True}})
+        self.assertNotIn("--source", args)
+        self.assertIn("--skip-model", args)
+
+    def test_environment_check_passes_explicit_source(self) -> None:
+        _executable, args, _config = core.build_command({"tool_id": "environment", "values": {"source": "../ultralytics-ezcn"}})
+        self.assertEqual(args[args.index("--source") + 1], str((core.ROOT.parent / "ultralytics-ezcn").resolve()))
+
     def test_frozen_model_run_uses_writable_results_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(core.sys, "frozen", True, create=True), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": directory}):
