@@ -6,18 +6,9 @@
   <component name="ChangeListManager">
     <list default="true" id="72f548e0-05cd-4c51-90e8-b6d862735971" name="更改" comment="改一下readme">
       <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/packaging/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/packaging/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_web_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_web_ui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/core.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/core.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/dist/assets/index-DGxsxR4f.js" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/dist/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/dist/index.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package-lock.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/package.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/frontend/src/App.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/frontend/src/App.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vtools_ui/webapp/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/vtools_ui/webapp/server.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model_diagnostics/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/model_diagnostics/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/model_visualization/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/model_visualization/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/speed_test/benchmark_config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/speed_test/benchmark_config.yaml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -25,6 +16,11 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="main" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="GitHubPullRequestSearchHistory"><![CDATA[{
@@ -48,20 +44,20 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;node.js.detected.package.jshint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.jshint&quot;: &quot;&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;python.packages.toolwindow.project.migrated.to.right.top.v2&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "ultralyticsa-cn",
+    "node.js.detected.package.jshint": "true",
+    "node.js.selected.package.jshint": "",
+    "nodejs_package_manager_path": "npm",
+    "python.packages.toolwindow.project.migrated.to.right.top.v2": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/docs" />
@@ -257,7 +253,15 @@
       <option name="project" value="LOCAL" />
       <updated>1789644984314</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="改一下readme">
+      <option name="closed" value="true" />
+      <created>1789647104708</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1789647104708</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

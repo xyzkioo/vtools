@@ -27,7 +27,9 @@ yolo predict model=/absolute/path/to/best.pt source=/absolute/path/to/image.jpg 
 
 ```bash
 python -m pip install -r model_visualization/requirements.txt
-python -m pip install -e ./ultralytics-cn
+# 二选一：
+python -m pip install -r requirements-ultralytics.txt
+# python -m pip install -e ./ultralytics-cn
 python model_visualization/run_visualization.py --config model_visualization/config/config.yaml
 ```
 
