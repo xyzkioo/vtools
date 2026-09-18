@@ -85,6 +85,27 @@ class WebWorkbenchTests(unittest.TestCase):
             _executable, args, _config = core.build_command({"tool_id": "benchmark", "values": {"backend": "checkpoint"}})
             self.assertEqual(Path(args[0]).name, "inspect_checkpoint.py")
 
+    def test_dataset_quality_is_an_independent_ui_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "data.yaml"
+            report_root = root / "quality-reports"
+            data.write_text("names: [cat]\nval: images/val\n", encoding="utf-8")
+            _executable, args, config = core.build_command({
+                "tool_id": "dataset_quality",
+                "values": {"data": str(data), "output_root": str(report_root), "sample_count": 0},
+            })
+        self.assertEqual(Path(args[0]).name, "check_dataset.py")
+        self.assertIn("--data", args)
+        self.assertEqual(args[args.index("--data") + 1], str(data.resolve()))
+        self.assertEqual(args[args.index("--output-root") + 1], str(report_root.resolve()))
+        self.assertEqual(args[args.index("--sample-count") + 1], "0")
+        self.assertIsNone(config)
+
+    def test_dataset_quality_requires_data_yaml(self) -> None:
+        with self.assertRaisesRegex(ValueError, "数据集 YAML"):
+            core.build_command({"tool_id": "dataset_quality", "values": {}})
+
     def test_frozen_workbench_wraps_tool_scripts(self) -> None:
         with patch.object(core.sys, "frozen", True, create=True), patch.object(core.sys, "executable", sys.executable):
             executable, args, _config = core.build_command({"tool_id": "environment", "values": {"skip_model": True}})
@@ -145,6 +166,7 @@ class WebWorkbenchTests(unittest.TestCase):
             response = urlopen(Request(url, headers={"X-Vtools-Token": server.token}), timeout=5)
             payload = json.load(response)
             self.assertIn("catalog", payload)
+            self.assertIn("dataset_quality", payload["catalog"])
             self.assertIn("settings", payload)
         finally:
             server.shutdown()

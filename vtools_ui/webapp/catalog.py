@@ -71,6 +71,19 @@ TOOLS: dict[str, dict] = {
             "filename": {"title": "文件名转换", "script": "others/filename_transform/image_filename_converter.py", "defaults": {"dataset": "auto", "template": "{index:04d}_{stem}", "start": "0"}, "fields": [("dir", "数据集目录", "dir", "--dir", True), ("dataset", "数据集格式", "select:auto|images|yolo|coco", "--dataset-format", True), ("labels", "YOLO 标签目录", "dir", "--labels-dir", False), ("coco", "COCO JSON", "file", "--coco-json", False), ("template", "命名模板", "text", "--template", False), ("prefix", "前缀", "text", "--prefix", False), ("suffix", "后缀", "text", "--suffix", False), ("start", "编号起始值", "number", "--start", False), ("digits", "编号位数", "number", "--digits", False), ("plan", "计划 CSV", "file", "--plan", False), ("recursive", "递归子目录", "bool", "--recursive", False), ("apply", "实际执行改名", "bool", "--apply", False)]},
         },
     },
+    "dataset_quality": {
+        "title": "数据集质量检查", "group": "utility",
+        "description": "训练前检查坏图、标签、尺寸、重复图片和数据划分泄漏。",
+        "script": "model_diagnostics/check_dataset.py",
+        "fields": [
+            {"key": "data", "label": "数据集 YAML", "kind": "file", "required": True,
+             "hint": "选择包含 train、val、test 和 names 的 Ultralytics data.yaml。"},
+            {"key": "output_root", "label": "报告输出目录", "kind": "dir",
+             "hint": "留空时写入 model_diagnostics/runs/dataset_quality。"},
+            {"key": "sample_count", "label": "每个划分抽样图数量", "kind": "number", "default": 8,
+             "hint": "设为 0 可关闭抽样图；问题明细仍会写入 CSV。"},
+        ],
+    },
     "environment": {
         "title": "环境检查", "group": "system", "description": "检查 Python、PyTorch、CUDA 和本地源码。",
         "script": "env_test/check_install.py",

@@ -56,6 +56,7 @@ function Icon({ name, size = 19 }: { name: string; size?: number }) {
     case 'compression': return <Boxes {...props} />
     case 'transform': return <WandSparkles {...props} />
     case 'data': return <Database {...props} />
+    case 'dataset_quality': return <Search {...props} />
     case 'results': return <FolderOpen {...props} />
     case 'history': return <Clock3 {...props} />
     case 'environment': return <ShieldCheck {...props} />
@@ -368,7 +369,7 @@ function App() {
   const navGroups = [
     { label: '工作台', items: [['home', '总览']] },
     { label: '模型工具', items: [['diagnostics', '检测诊断'], ['visualization', '模型可视化'], ['benchmark', '性能测速'], ['compression', '模型压缩']] },
-    { label: '数据与转换', items: [['transform', '格式转换'], ['data', '数据工具']] },
+    { label: '数据与转换', items: [['dataset_quality', '数据集质量检查'], ['transform', '格式转换'], ['data', '数据工具']] },
     { label: '记录与设置', items: [['results', '结果查看'], ['history', '任务记录'], ['environment', '环境检查'], ['settings', '设置']] },
   ]
   const pageTitle = page === 'home' ? '工作台' : page === 'results' ? '结果查看' : page === 'history' ? '任务记录' : page === 'settings' ? '设置' : tool?.title || '工作台'
@@ -393,7 +394,7 @@ function App() {
         {page === 'home' && <>
           <div className="welcome-banner"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>今天想分析什么？</h1><p>从模型诊断到结果对比，让每一步都清晰可见。</p><button className="button light" onClick={() => setPage('diagnostics')}>开始检测诊断 <ArrowRight size={17} /></button></div><div className="banner-art"><div className="orb orb-one" /><div className="orb orb-two" /><Layers3 size={105} strokeWidth={1} /></div></div>
           <div className="section-heading"><div><div className="eyebrow">QUICK START</div><h2>常用工具</h2></div></div>
-          <div className="quick-grid">{['diagnostics', 'visualization', 'benchmark', 'compression'].map((key, index) => <button className="quick-card" key={key} onClick={() => setPage(key)}><span className={`quick-icon tone-${index}`}><Icon name={key} size={24} /></span><strong>{catalog[key]?.title || key}</strong><span>{catalog[key]?.description}</span><ArrowRight className="quick-arrow" size={18} /></button>)}</div>
+          <div className="quick-grid">{['diagnostics', 'dataset_quality', 'visualization', 'benchmark', 'compression'].map((key, index) => <button className="quick-card" key={key} onClick={() => setPage(key)}><span className={`quick-icon tone-${index % 4}`}><Icon name={key} size={24} /></span><strong>{catalog[key]?.title || key}</strong><span>{catalog[key]?.description}</span><ArrowRight className="quick-arrow" size={18} /></button>)}</div>
           <div className="section-heading recent-heading"><div><div className="eyebrow">RECENT ACTIVITY</div><h2>最近任务</h2></div><button className="link-button" onClick={() => setPage('history')}>查看全部 <ArrowRight size={16} /></button></div>
           <div className="card recent-list">{historyRows.length ? historyRows.slice(0, 5).map((row, index) => <div className="recent-row" key={row.id || index}><span className={`status-icon ${row.status === '成功' ? 'good' : row.status === '失败' ? 'bad' : ''}`}>{row.status === '成功' ? <CheckCircle2 size={18} /> : <Clock3 size={18} />}</span><div><strong>{catalog[row.task]?.title || row.task}</strong><small>{row.config}</small></div><span className="recent-time">{row.time}</span><span className={`pill ${row.status === '成功' ? 'good' : row.status === '失败' ? 'bad' : ''}`}>{row.status}</span></div>) : <div className="empty-state">还没有任务记录。运行第一个工具后会显示在这里。</div>}</div>
         </>}

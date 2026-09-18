@@ -306,6 +306,32 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         if values.get("skip_model"):
             args.append("--skip-model")
         title = tool["title"]
+    elif tool.get("script"):
+        args = [str(ROOT / tool["script"])]
+        for field in tool.get("fields", []):
+            key = str(field.get("key", ""))
+            label = str(field.get("label", key))
+            kind = str(field.get("kind", "text"))
+            value = values.get(key)
+            required = bool(field.get("required", False))
+            if required and (value is None or str(value).strip() == ""):
+                raise ValueError(f"请填写{label}")
+            if value is None or str(value).strip() == "":
+                continue
+            flag = str(field.get("flag", "--" + key.replace("_", "-")))
+            if kind == "number":
+                try:
+                    number = int(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{label}必须是整数") from exc
+                if number < 0:
+                    raise ValueError(f"{label}不能为负数")
+                args += [flag, str(number)]
+            elif kind in {"file", "dir", "file_or_dir", "save_file"}:
+                args += [flag, _field_path(value)]
+            else:
+                args += [flag, str(value)]
+        title = tool["title"]
     else:
         config = _field_path(request.get("config_path") or tool["config"])
         if not Path(config).is_file():
