@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "vtools_ui" / "webapp" / "frontend" / "dist" / "index.html"
 SOURCE_DIRS = (
     "config", "model_diagnostics", "model_visualization", "speed_test",
-    "model_compression", "transform_tools", "others", "env_test",
+    "model_compression", "transform_tools", "others", "env_test", "vtools_runtime",
 )
 SOURCE_SUFFIXES = {".py", ".yaml", ".yml", ".json", ".cfg", ".txt", ".toml", ".typed"}
 EXCLUDED_DIRS = {
