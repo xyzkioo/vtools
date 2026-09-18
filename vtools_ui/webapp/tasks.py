@@ -38,7 +38,7 @@ class TaskManager:
         with self._lock:
             if len(self._events) <= cursor and self._state and self._state["status"] in {"starting", "running", "stopping"}:
                 self._lock.wait(timeout)
-            return self._events[cursor:], bool(self._state and self._state["status"] in {"succeeded", "failed", "stopped"})
+            return self._events[cursor:], bool(self._state and self._state["status"] in {"succeeded", "succeeded_with_issues", "failed", "stopped"})
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         executable, args, config = build_command(request)
@@ -113,14 +113,25 @@ class TaskManager:
             stopped = self._stopping
             if self._state and self._state["id"] == run_id:
                 self._state["exit_code"] = exit_code
-                self._state["status"] = "stopped" if stopped else "succeeded" if exit_code == 0 else "failed"
+                if stopped:
+                    status = "stopped"
+                elif exit_code == 0:
+                    status = "succeeded"
+                elif self._state["tool_id"] == "dataset_quality" and exit_code == 1:
+                    # The dataset audit uses exit code 1 to report findings after
+                    # a complete, valid scan. It is a warning result, not a run
+                    # failure; real execution errors use exit code 2.
+                    status = "succeeded_with_issues"
+                else:
+                    status = "failed"
+                self._state["status"] = status
                 self._state["log_path"] = str(log_file)
                 final = dict(self._state)
             else:
                 return
             self._process = None
         try:
-            add_history({"id": run_id, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "task": final["tool_id"], "status": {"succeeded": "成功", "failed": "失败", "stopped": "已停止"}[final["status"]], "config": final["config"] or "默认配置", "exit_code": exit_code, "result_dir": final["result_dir"], "log_path": str(log_file)})
+            add_history({"id": run_id, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "task": final["tool_id"], "status": {"succeeded": "成功", "succeeded_with_issues": "检查完成（有问题）", "failed": "失败", "stopped": "已停止"}[final["status"]], "config": final["config"] or "默认配置", "exit_code": exit_code, "result_dir": final["result_dir"], "log_path": str(log_file)})
         except OSError as exc:
             self._emit("log", f"任务记录写入失败：{exc}\n")
         self._emit("state", final)

@@ -251,6 +251,23 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(manager.state()["exit_code"], 0)
         self.assertIn("finished", "".join(output))
 
+    def test_dataset_quality_findings_are_completed_with_warning(self) -> None:
+        manager = TaskManager()
+        with patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, ["-c", "print('issues found'); raise SystemExit(1)"], None)), patch("vtools_ui.webapp.tasks.add_history") as add_history_mock:
+            manager.start({"tool_id": "dataset_quality"})
+            cursor = 0
+            completed = False
+            for _ in range(10):
+                events, done = manager.events_after(cursor, timeout=2)
+                cursor += len(events)
+                if done:
+                    completed = True
+                    break
+        self.assertEqual(manager.state()["status"], "succeeded_with_issues")
+        self.assertEqual(manager.state()["exit_code"], 1)
+        self.assertTrue(completed)
+        self.assertEqual(add_history_mock.call_args.args[0]["status"], "检查完成（有问题）")
+
     def test_result_directory_detected_from_file_report_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "summary.json"
