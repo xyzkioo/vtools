@@ -26,3 +26,6 @@ html,body,#root{background:var(--page)}
 .main-shell{min-height:0;background:var(--page)}
 .content{min-height:0}
 .task-console{flex:0 0 auto}
+
+/* Use the WebEngine viewport itself as the height source after Qt resizes. */
+html,body,#root,.app-shell{height:100vh;min-height:100vh}

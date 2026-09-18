@@ -12,7 +12,8 @@ TOOLS: dict[str, dict] = {
         "config": "model_diagnostics/config/config.yaml", "entry": "diagnostics",
         "fields": [
             {"key": "resource", "label": "模型权重或预测文件", "kind": "file", "hint": "支持 .pt、.pth、.onnx 或预测文件"},
-            {"key": "data", "label": "数据集 YAML", "kind": "file"},
+            {"key": "data", "label": "数据集 YAML", "kind": "file",
+             "hint": "此工具会加载模型进行检测诊断；只检查图片和标签请选左侧“数据集质量检查”。"},
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
         ],
         "modules": [("diagnostics.missed", "漏检与误检"), ("diagnostics.classification", "分类错误"), ("diagnostics.overlap", "重叠分析"), ("output.images", "差图输出")],

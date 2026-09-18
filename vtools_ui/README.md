@@ -43,6 +43,7 @@ Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。p
 - 模型工具：检测诊断、模型可视化、PyTorch/TensorRT 测速、输出一致性、一键测速、checkpoint 检查和模型压缩。
 - 转换和数据工具：独立的数据集质量检查、NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验、视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。
 - 数据集质量检查：在左侧“数据与转换 → 数据集质量检查”中选择 `data.yaml`，可设置报告目录和每个划分的标注抽样图数量；结果包含 `summary.json`、`issues.csv`、`report.md` 和抽样图，可直接跳转到结果查看。
+- 检测诊断会加载模型；打包版会从所选数据集或权重所在工作区寻找同级 Ultralytics Fork。只检查图片和标签时使用独立的数据集质量检查入口。
 - 环境检查：检查 Python、PyTorch、CUDA 和本地 Ultralytics 源码。
 - 配置编辑：常用字段、全部标量字段与 YAML 原文共享编辑状态。YAML 是模型工具的完整参数来源；保存前校验并原子写入，不再生成 `.bak` 备份。对模块按钮的修改是本次运行的增量覆盖，不会关闭未显示的模块。
 - 结果查看：扫描选定目录中的 runs、results、reports 和 outputs，以可展开的多级目录树浏览任意深度的子文件夹；预览诊断的 `summary.json`、`raw_data/`、差图，可视化单图 JSON、图片和 `index.html`，以及压缩的 `summary.json`、`effective_config.json` 和 `artifacts/`。图片支持缩小、放大、适应窗口和重置比例；文本最多预览前 256 KB；模型文件可打开所在目录。任务完成后可直接跳转至结果目录。

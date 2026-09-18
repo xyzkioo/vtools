@@ -43,6 +43,19 @@ class OptionalUltralyticsDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.assertIsNone(find_repo({}, Path(directory) / "vtools"))
 
+    def test_packaged_project_discovers_checkout_near_dataset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            packaged_root = base / "opt" / "vtools"
+            packaged_root.mkdir(parents=True)
+            dataset = base / "workspace" / "lychee_grow" / "dataset_v2" / "data.yaml"
+            dataset.parent.mkdir(parents=True)
+            dataset.touch()
+            fork = base / "workspace" / "ultralytics-cn" / "ultralytics"
+            fork.mkdir(parents=True)
+            (fork / "__init__.py").touch()
+            self.assertEqual(find_repo({}, packaged_root, (dataset,)), fork.parent)
+
 
 if __name__ == "__main__":
     unittest.main()

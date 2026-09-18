@@ -36,6 +36,8 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 仅使用 `predictions_file` 或 `custom_adapter` 时不需要安装 Ultralytics。使用
 `ultralytics_model` 时，再安装官方包，或在配置的 `project.ultralytics_repo`
 中填写仓库内 fork 的目录；不要求执行 `pip install -e`。
+打包版工作台在已选择绝对路径的数据集 YAML 或权重附近，也会查找同级的
+`ultralytics-cn`、`ultralytics-ezcn` 或 `ultralytics` 源码目录。
 
 环境检查脚本会检查 PyTorch、CUDA 和 `YOLO` 的训练、推理、验证接口。
 

@@ -280,7 +280,10 @@ def run(argv: list[str] | None = None) -> int:
         else:
             import webview
             bridge = DesktopBridge()
-            window = webview.create_window("vtools 工作台", url, js_api=bridge, width=1280, height=800, min_size=(1080, 680))
+            window = webview.create_window(
+                "vtools 工作台", url, js_api=bridge, width=1280, height=800,
+                min_size=(1080, 680), background_color="#f4f4f6",
+            )
             bridge.window = window
             window.events.shown += lambda: print("vtools 工作台窗口已显示。", flush=True)
             window.events.closed += manager.close

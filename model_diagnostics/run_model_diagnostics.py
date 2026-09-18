@@ -57,7 +57,9 @@ def _project_root(settings: Mapping[str, Any]) -> Path:
     return _resolve(project.get("root", "."), PROJECT_ROOT) or PROJECT_ROOT
 
 
-def _add_python_paths(settings: Mapping[str, Any], project_root: Path) -> None:
+def _add_python_paths(
+    settings: Mapping[str, Any], project_root: Path, input_paths: tuple[Path, ...] = (),
+) -> None:
     """Apply the same project/python_paths behavior as vtools config loading."""
     from vtools_runtime.ultralytics import add_repo_to_path
 
@@ -73,7 +75,7 @@ def _add_python_paths(settings: Mapping[str, Any], project_root: Path) -> None:
         path = _resolve(value, project_root)
         if path is not None and path.is_dir() and str(path) not in sys.path:
             sys.path.insert(0, str(path))
-    add_repo_to_path(settings, project_root)
+    add_repo_to_path(settings, project_root, input_paths)
 
 
 def _adapter_spec(value: Any, project_root: Path) -> Optional[str]:
@@ -418,7 +420,15 @@ def main() -> int:
         settings = dict(settings)
         settings["predictions_file"] = predictions_file
     project_root = _project_root(settings)
-    _add_python_paths(settings, project_root)
+    input_paths = tuple(
+        path for path in (
+            cli_args.data,
+            cli_args.weights,
+            _resolve(dataset_settings.get("data"), project_root),
+            _resolve(_mapping(settings.get("ultralytics_model"), "ultralytics_model").get("weights"), project_root),
+        ) if path is not None
+    )
+    _add_python_paths(settings, project_root, input_paths)
 
     selected_mode = _mode_entry(
         settings,

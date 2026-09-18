@@ -22,8 +22,12 @@ def _is_checkout(path: Path) -> bool:
     return (path / "ultralytics" / "__init__.py").is_file()
 
 
-def find_repo(settings: Mapping[str, Any] | None, project_root: Path) -> Path | None:
-    """Find a configured, environment-provided, or sibling checkout."""
+def find_repo(
+    settings: Mapping[str, Any] | None,
+    project_root: Path,
+    input_paths: tuple[Path, ...] = (),
+) -> Path | None:
+    """Find a checkout near the project or the selected model and dataset."""
     project = settings.get("project", {}) if isinstance(settings, Mapping) else {}
     configured = project.get("ultralytics_repo") if isinstance(project, Mapping) else None
     candidates: list[Path] = []
@@ -33,6 +37,12 @@ def find_repo(settings: Mapping[str, Any] | None, project_root: Path) -> Path | 
             candidates.append(path)
     for parent in (project_root, project_root.parent):
         candidates.extend(parent / name for name in CHECKOUT_NAMES)
+    # A packaged workbench lives under /opt/vtools while the user's data and
+    # Ultralytics checkout commonly share a separate workspace directory.
+    for input_path in input_paths:
+        path = input_path.expanduser().resolve()
+        for parent in path.parents:
+            candidates.extend(parent / name for name in CHECKOUT_NAMES)
     seen: set[Path] = set()
     for candidate in candidates:
         candidate = candidate.resolve()
@@ -44,8 +54,12 @@ def find_repo(settings: Mapping[str, Any] | None, project_root: Path) -> Path | 
     return None
 
 
-def add_repo_to_path(settings: Mapping[str, Any] | None, project_root: Path) -> Path | None:
-    repo = find_repo(settings, project_root)
+def add_repo_to_path(
+    settings: Mapping[str, Any] | None,
+    project_root: Path,
+    input_paths: tuple[Path, ...] = (),
+) -> Path | None:
+    repo = find_repo(settings, project_root, input_paths)
     if repo is not None and str(repo) not in sys.path:
         sys.path.insert(0, str(repo))
     return repo
