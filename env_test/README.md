@@ -142,7 +142,7 @@ python env_test/check_install.py \
 | --- | --- |
 | `--source PATH` | 指定外部源码项目根目录；留空时自动查找同级 Fork |
 | `--weights PATH` | 加载并预测指定 `.pt` |
-| `--yaml PATH` | 指定要构建的模型 YAML |
+| `--yaml PATH` | 指定要构建的模型结构 YAML（需包含 `backbone` 和 `head`）；数据集 `data.yaml` 不要填在这里 |
 | `--device auto/cpu/cuda:0` | 选择运行设备；默认自动选择 |
 | `--input-size 64` | 合成测试输入尺寸，脚本会调整为 32 的倍数 |
 | `--check-export` | 检查 ONNX、TensorRT Python API |

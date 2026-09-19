@@ -93,6 +93,11 @@
 
 - K230 转换自动探测 Conda 或系统 .NET 运行时并设置 `DOTNET_ROOT`，修复从桌面工作台启动时 nncase 报 `Failed to get hostfxr path` 的问题。
 
+### v0.3.23
+
+- 环境检查会从所选权重或数据集路径自动发现同级 `ultralytics-cn` Fork。
+- 误把数据集 `data.yaml` 填入模型结构 YAML 时给出明确提示并继续检查权重，不再因 `KeyError: backbone` 误报模型失败。
+
 ### v0.3.3
 
 - 新增独立的数据集质量检查工具，扫描坏图、标签问题、尺寸分布、重复图片和数据划分泄漏。

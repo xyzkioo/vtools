@@ -1425,6 +1425,7 @@ class EnvironmentPage(QWidget):
         self.source.setPlaceholderText("留空自动查找 vtools 同级的 Ultralytics Fork")
         self.weights = QLineEdit()
         self.yaml = QLineEdit()
+        self.yaml.setPlaceholderText("可选；已有 .pt 权重时留空，仅选择包含 backbone/head 的模型结构 YAML")
         self.device = QComboBox()
         self.device.addItems(["auto", "cpu", "cuda:0"])
         self.size = QLineEdit("64")

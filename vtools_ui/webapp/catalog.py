@@ -99,7 +99,8 @@ TOOLS: dict[str, dict] = {
         "fields": [
             {"key": "source", "label": "源码目录（可选）", "kind": "dir", "default": "", "hint": "留空时自动查找 vtools 同级的 Ultralytics Fork。"},
             {"key": "weights", "label": "模型权重", "kind": "file"},
-            {"key": "yaml", "label": "模型 YAML", "kind": "file"},
+            {"key": "yaml", "label": "模型结构 YAML（可选）", "kind": "file",
+             "hint": "可选：已有 .pt 权重时留空；只有从模型结构创建网络时才选择包含 backbone 和 head 的 YAML。数据集 data.yaml 请不要填在这里。"},
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
             {"key": "size", "label": "合成输入尺寸", "kind": "number", "default": "64"},
             {"key": "export", "label": "检查 ONNX / TensorRT 导入", "kind": "bool"},

@@ -169,7 +169,7 @@ def normalise_source_root(path: Path) -> Path:
     return path
 
 
-def infer_source_root(script_dir: Path) -> Optional[Path]:
+def infer_source_root(script_dir: Path, input_paths: Sequence[Path] = ()) -> Optional[Path]:
     """在 vtools 克隆目录及其同级目录中自动寻找 Ultralytics Fork。"""
     repo_root = script_dir.parent
     candidates = []
@@ -179,6 +179,12 @@ def infer_source_root(script_dir: Path) -> Optional[Path]:
         candidates.append(configured_path if configured_path.is_absolute() else repo_root / configured_path)
     for parent in (repo_root, repo_root.parent):
         candidates.extend(parent / name for name in ("ultralytics-cn", "ultralytics-ezcn", "ultralytics"))
+    # A frozen desktop app runs from /opt/vtools, while the user's weights and
+    # dataset usually live under a workspace containing the sibling Fork.
+    for input_path in input_paths:
+        path = input_path.expanduser().resolve()
+        for parent in path.parents:
+            candidates.extend(parent / name for name in ("ultralytics-cn", "ultralytics-ezcn", "ultralytics"))
     for candidate in candidates:
         root = normalise_source_root(candidate)
         if (root / "ultralytics" / "__init__.py").is_file():
@@ -539,7 +545,14 @@ def main() -> int:
     if args.source is not None:
         source_root = normalise_source_root(resolve_path(args.source, call_dir))
     else:
-        source_root = infer_source_root(script_dir)
+        source_root = infer_source_root(
+            script_dir,
+            tuple(
+                resolve_path(path, call_dir)
+                for path in (args.weights, args.yaml)
+                if path is not None
+            ),
+        )
 
     expected_file = source_package_file(source_root, args.module)
     if source_root is None:
@@ -676,6 +689,22 @@ def main() -> int:
     if yaml_path is not None and not yaml_path.is_file():
         reporter.failed("模型 YAML", f"文件不存在：{yaml_path}")
         yaml_path = None
+    if yaml_path is not None:
+        try:
+            import yaml
+
+            yaml_content = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            reporter.failed("模型 YAML", "无法读取 YAML 文件。", str(exc))
+            yaml_content = None
+        if isinstance(yaml_content, dict) and not {"backbone", "head"}.issubset(yaml_content):
+            is_dataset_yaml = bool({"train", "val", "names"} & set(yaml_content))
+            reporter.warned(
+                "模型 YAML",
+                "已忽略该文件：它是数据集 data.yaml，不是模型结构 YAML。" if is_dataset_yaml else "指定文件不是模型结构 YAML。",
+                "请在此处选择包含 backbone 和 head 的模型 YAML；数据集文件仍可用于其他工具。",
+            )
+            yaml_path = None
     if yaml_path is None and source_root is not None:
         candidate = source_root / "ultralytics" / "cfg" / "models" / "26" / "yolo26.yaml"
         if candidate.is_file():
