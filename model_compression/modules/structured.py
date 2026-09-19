@@ -9,8 +9,46 @@ from __future__ import annotations
 
 import copy
 import re
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
+
+
+@contextmanager
+def _ultralytics_amp_weights_dir(run_dir: Path) -> Iterator[Path]:
+    """Keep Ultralytics AMP-check downloads inside this writable run."""
+
+    cache_dir = (run_dir / "ultralytics-cache" / "weights").resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        import ultralytics.utils as ultralytics_utils  # type: ignore
+    except ImportError:  # The subsequent train call will report the dependency.
+        yield cache_dir
+        return
+
+    # check_amp imports WEIGHTS_DIR from ultralytics.utils inside the function,
+    # so changing checks.WEIGHTS_DIR has no effect. Redirect the actual source
+    # plus the download helper's in-memory setting. Use dict.__setitem__ to
+    # avoid persisting this task-local path to the user's settings file.
+    missing = object()
+    previous_dir = getattr(ultralytics_utils, "WEIGHTS_DIR", missing)
+    settings = getattr(ultralytics_utils, "SETTINGS", None)
+    previous_setting = settings.get("weights_dir", missing) if isinstance(settings, dict) else missing
+    ultralytics_utils.WEIGHTS_DIR = cache_dir
+    if isinstance(settings, dict):
+        dict.__setitem__(settings, "weights_dir", str(cache_dir))
+    try:
+        yield cache_dir
+    finally:
+        if previous_dir is missing:
+            delattr(ultralytics_utils, "WEIGHTS_DIR")
+        else:
+            ultralytics_utils.WEIGHTS_DIR = previous_dir
+        if isinstance(settings, dict):
+            if previous_setting is missing:
+                dict.__delitem__(settings, "weights_dir")
+            else:
+                dict.__setitem__(settings, "weights_dir", previous_setting)
 
 
 def _parameter_count(model: Any) -> int:
@@ -197,7 +235,8 @@ def finetune_structured_detector(
     for key in ("fraction", "warmup_bias_lr", "warmup_epochs"):
         if key in section:
             train_kwargs[key] = section[key]
-    detector.train(trainer=PreservedModelTrainer, **train_kwargs)
+    with _ultralytics_amp_weights_dir(run_dir):
+        detector.train(trainer=PreservedModelTrainer, **train_kwargs)
     trainer = getattr(detector, "trainer", None)
     best = getattr(trainer, "best", None) if trainer is not None else None
     if best and Path(best).is_file():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -17,9 +18,56 @@ from urllib.request import Request, urlopen
 from vtools_ui.webapp import core
 from vtools_ui.webapp.server import DesktopBridge, WorkbenchServer
 from vtools_ui.webapp.tasks import TaskManager
+from vtools_ui.process_environment import build_tool_environment
 
 
 class WebWorkbenchTests(unittest.TestCase):
+    def test_selected_python_receives_packaged_runtime_and_environment_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "_internal"
+            prefix = Path(directory) / "envs" / "vision"
+            executable = prefix / "bin" / "python3.10"
+            (prefix / "lib").mkdir(parents=True)
+            executable.parent.mkdir(parents=True, exist_ok=True)
+            executable.touch()
+            (prefix / "lib" / "libstdc++.so.6").touch()
+            (prefix / "conda-meta").mkdir()
+            inherited = {
+                "PATH": "/usr/bin",
+                "PYTHONPATH": "/existing/modules",
+                "LD_LIBRARY_PATH": "/opt/vtools/_internal",
+                "LD_LIBRARY_PATH_ORIG": "/system/lib",
+            }
+            environment = build_tool_environment(executable, root, inherited, frozen=True)
+
+        self.assertEqual(environment["PATH"].split(os.pathsep)[0], str(executable.parent.resolve()))
+        self.assertEqual(environment["PYTHONPATH"].split(os.pathsep)[0], str(root.resolve()))
+        self.assertEqual(environment["LD_LIBRARY_PATH"].split(os.pathsep), [str((prefix / "lib").resolve()), "/system/lib"])
+        self.assertEqual(environment["CONDA_PREFIX"], str(prefix.resolve()))
+        self.assertEqual(environment["CONDA_DEFAULT_ENV"], "vision")
+
+    def test_frozen_environment_scan_finds_conda_without_path_and_hides_workbench(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            conda = home / "miniconda3/bin/conda"
+            yolo = home / "miniconda3/envs/yolo/bin/python"
+            conda.parent.mkdir(parents=True)
+            yolo.parent.mkdir(parents=True)
+            conda.touch()
+            yolo.touch()
+            environments_file = home / ".conda/environments.txt"
+            environments_file.parent.mkdir()
+            environments_file.write_text(str(yolo.parent.parent) + "\n", encoding="utf-8")
+            with patch.object(core.sys, "frozen", True, create=True), \
+                    patch.object(core.sys, "executable", "/opt/vtools/vtools"), \
+                    patch.object(core.Path, "home", return_value=home), \
+                    patch.object(core.shutil, "which", return_value=None), \
+                    patch.object(core, "read_settings", return_value={"python_executable": "/opt/vtools/vtools"}), \
+                    patch.object(core.subprocess, "run", side_effect=OSError("unavailable")):
+                found = core.environments()
+
+        self.assertEqual(found, [{"label": "yolo", "path": str(yolo.resolve())}])
+
     def test_desktop_picker_uses_native_dialog_for_file_and_directory(self) -> None:
         class FileDialog(IntEnum):
             OPEN = 10
@@ -52,6 +100,94 @@ class WebWorkbenchTests(unittest.TestCase):
             core.save_config(str(target), changed["text"])
             self.assertFalse(target.with_suffix(".yaml.bak").exists())
             self.assertFalse(core.load_config(str(target))["data"]["modules"]["diagnostics.missed"])
+
+    def test_frozen_config_is_copied_to_user_directory_before_editing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            source = root / "model_compression" / "config" / "config.yaml"
+            source.parent.mkdir(parents=True)
+            source.write_text("model:\n  task: detect\n", encoding="utf-8")
+            user_dir = Path(directory) / "user"
+            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", user_dir), patch.object(core.sys, "frozen", True, create=True):
+                loaded = core.load_config("model_compression/config/config.yaml")
+            copied = user_dir / "configs" / "model_compression" / "config" / "config.yaml"
+            self.assertEqual(Path(loaded["path"]), copied)
+            self.assertEqual(copied.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
+
+    def test_frozen_config_save_also_redirects_direct_bundle_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            source = root / "config.yaml"
+            source.parent.mkdir(parents=True)
+            source.write_text("value: old\n", encoding="utf-8")
+            user_dir = Path(directory) / "user"
+            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", user_dir), patch.object(core.sys, "frozen", True, create=True):
+                core.save_config(str(source), "value: new\n")
+            copied = user_dir / "configs" / "config.yaml"
+            self.assertEqual(copied.read_text(encoding="utf-8"), "value: new\n")
+            self.assertEqual(source.read_text(encoding="utf-8"), "value: old\n")
+
+    def test_frozen_settings_move_old_bundle_results_root_to_user_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            state = Path(directory) / "user"
+            settings_file = state / "settings.json"
+            settings_file.parent.mkdir(parents=True)
+            settings_file.write_text(json.dumps({"results_root": str(root / "runs")}), encoding="utf-8")
+            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", state), patch.object(core, "SETTINGS_PATH", settings_file), patch.object(core.sys, "frozen", True, create=True):
+                settings = core.read_settings()
+            self.assertEqual(Path(settings["results_root"]), state / "runs")
+
+    def test_frozen_model_run_uses_user_copy_of_default_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            config = root / "model_diagnostics" / "config" / "config.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text("modules:\n  diagnostics.missed: true\n", encoding="utf-8")
+            (root / "run_tools.py").touch()
+            user_dir = Path(directory) / "user"
+            results = Path(directory) / "user-runs"
+            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", user_dir), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True):
+                _executable, args, _config = core.build_command({"tool_id": "diagnostics", "values": {}})
+            self.assertIn("--config", args)
+            self.assertEqual(Path(args[args.index("--config") + 1]), user_dir / "configs" / "model_diagnostics" / "config" / "config.yaml")
+
+    def test_frozen_dataset_quality_default_output_is_writable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            (root / "model_diagnostics").mkdir(parents=True)
+            (root / "model_diagnostics" / "check_dataset.py").touch()
+            results = Path(directory) / "user-runs"
+            with patch.object(core, "ROOT", root), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True):
+                _executable, args, _config = core.build_command({"tool_id": "dataset_quality", "values": {"data": str(Path(directory) / "data.yaml")}})
+            output = Path(args[args.index("--output-root") + 1])
+            self.assertEqual(output, results / "dataset_quality")
+            self.assertNotIn(root, output.parents)
+
+    def test_frozen_kmodel_defaults_write_to_user_results(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            (root / "transform_tools").mkdir(parents=True)
+            (root / "transform_tools" / "py2kmodel.py").touch()
+            results = Path(directory) / "user-runs"
+            with patch.object(core, "ROOT", root), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True):
+                _executable, args, _config = core.build_command({"tool_id": "transform", "variant": "kmodel", "values": {"pt": str(Path(directory) / "best.pt"), "calib": str(Path(directory) / "images")}})
+            output = Path(args[args.index("--output-dir") + 1])
+            self.assertEqual(output.parent.parent.parent, results)
+            self.assertNotIn(root, output.parents)
+
+    def test_kmodel_uses_one_output_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "converted"
+            _executable, args, _config = core.build_command({
+                "tool_id": "transform",
+                "variant": "kmodel",
+                "values": {"pt": str(root / "best.pt"), "output": str(output), "calib": str(root / "images")},
+            })
+        self.assertEqual(args[args.index("--output-dir") + 1], str(output.resolve()))
+        self.assertNotIn("--onnx", args)
+        self.assertNotIn("--kmodel", args)
 
     def test_module_edits_are_incremental_and_empty_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -267,6 +403,31 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(manager.state()["exit_code"], 1)
         self.assertTrue(completed)
         self.assertEqual(add_history_mock.call_args.args[0]["status"], "检查完成（有问题）")
+
+    def test_benchmark_difference_is_completed_with_warning(self) -> None:
+        manager = TaskManager()
+        with patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, ["-c", "raise SystemExit(1)"], None)), patch("vtools_ui.webapp.tasks.add_history") as add_history_mock:
+            manager.start({"tool_id": "benchmark"})
+            cursor = 0
+            for _ in range(10):
+                events, done = manager.events_after(cursor, timeout=2)
+                cursor += len(events)
+                if done:
+                    break
+        self.assertEqual(manager.state()["status"], "succeeded_with_issues")
+        self.assertEqual(add_history_mock.call_args.args[0]["status"], "完成（有差异）")
+
+    def test_benchmark_execution_error_remains_failed(self) -> None:
+        manager = TaskManager()
+        with patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, ["-c", "raise SystemExit(2)"], None)), patch("vtools_ui.webapp.tasks.add_history"):
+            manager.start({"tool_id": "benchmark"})
+            cursor = 0
+            for _ in range(10):
+                events, done = manager.events_after(cursor, timeout=2)
+                cursor += len(events)
+                if done:
+                    break
+        self.assertEqual(manager.state()["status"], "failed")
 
     def test_result_directory_detected_from_file_report_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

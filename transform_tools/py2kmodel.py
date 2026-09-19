@@ -15,6 +15,53 @@ TARGET_SIZE = 320   #尺寸不能错
 FILL_COLOR = (128, 128, 128)
 CALIB_SAMPLES = 200 #修正用的图片数量
 
+
+def output_paths(pt_path, output_dir=None, onnx_path=None, kmodel_path=None):
+    """Resolve converter outputs while preserving the legacy file arguments."""
+
+    if output_dir:
+        directory = Path(output_dir).expanduser().resolve()
+        stem = Path(pt_path).stem
+        onnx_path = onnx_path or directory / f"{stem}.onnx"
+        kmodel_path = kmodel_path or directory / f"{stem}.kmodel"
+    return str(onnx_path or ONNX_PATH), str(kmodel_path or KMODEL_PATH)
+
+
+def require_module(module_name, package_name=None):
+    """Import a conversion dependency with an actionable interpreter hint."""
+
+    try:
+        return __import__(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name != module_name:
+            raise
+        package = package_name or module_name
+        raise RuntimeError(
+            f"当前 Python 缺少依赖 '{package}'。\n"
+            f"实际使用的解释器: {sys.executable}\n"
+            f"请运行: {sys.executable} -m pip install {package}"
+        ) from None
+
+
+def load_yolo(pt_path):
+    """Load YOLO from the configured or nearby Ultralytics Fork."""
+
+    project_root = Path(__file__).resolve().parents[1]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from vtools_runtime.ultralytics import add_repo_to_path, import_error_message
+
+    repo = add_repo_to_path({}, project_root, (Path(pt_path),))
+    try:
+        module = __import__("ultralytics")
+    except ModuleNotFoundError as exc:
+        if exc.name != "ultralytics":
+            raise
+        raise RuntimeError(import_error_message(repo)) from None
+    if repo is not None:
+        print(f"使用 Ultralytics Fork: {repo}")
+    return module.YOLO
+
 # ================== 与板端 AI2D 一致的 Letterbox ==================
 def letterbox(img, target_size=640, color=FILL_COLOR):
     from PIL import Image
@@ -30,9 +77,9 @@ def letterbox(img, target_size=640, color=FILL_COLOR):
 
 # ================== 步骤1：导出 + 简化 ONNX ==================
 def export_onnx(pt_path=PT_PATH, onnx_path=ONNX_PATH, target_size=TARGET_SIZE, rebuild=False):
-    from ultralytics import YOLO
-    import onnx
-    import onnxsim
+    YOLO = load_yolo(pt_path)
+    onnx = require_module("onnx")
+    onnxsim = require_module("onnxsim")
     print("=" * 50)
     print("[1/2] 导出并简化 ONNX ...")
     if target_size < 1:
@@ -170,12 +217,14 @@ def quantize(onnx_path=ONNX_PATH, kmodel_path=KMODEL_PATH, calib_dir=CALIB_DIR, 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PyTorch/Ultralytics 模型转换为 K230 .kmodel")
     parser.add_argument("--pt", default=PT_PATH, help="PyTorch 权重")
-    parser.add_argument("--onnx", default=ONNX_PATH, help="ONNX 输出路径")
-    parser.add_argument("--kmodel", default=KMODEL_PATH, help="kmodel 输出路径")
+    parser.add_argument("--output-dir", help="输出目录；默认按权重文件名生成 .onnx 和 .kmodel")
+    parser.add_argument("--onnx", help="自定义 ONNX 输出路径（兼容旧用法）")
+    parser.add_argument("--kmodel", help="自定义 kmodel 输出路径（兼容旧用法）")
     parser.add_argument("--calib-dir", default=CALIB_DIR, help="校准图片目录")
     parser.add_argument("--size", type=int, default=TARGET_SIZE, help="输入边长")
     parser.add_argument("--samples", type=int, default=CALIB_SAMPLES, help="校准图片数量")
     parser.add_argument("--rebuild", action="store_true", help="覆盖已有 ONNX / kmodel")
     args = parser.parse_args()
-    export_onnx(args.pt, args.onnx, args.size, args.rebuild)
-    quantize(args.onnx, args.kmodel, args.calib_dir, args.size, args.samples, args.rebuild)
+    onnx_path, kmodel_path = output_paths(args.pt, args.output_dir, args.onnx, args.kmodel)
+    export_onnx(args.pt, onnx_path, args.size, args.rebuild)
+    quantize(onnx_path, kmodel_path, args.calib_dir, args.size, args.samples, args.rebuild)

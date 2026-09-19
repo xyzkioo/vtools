@@ -1275,8 +1275,7 @@ class UtilityPage(QWidget):
             self.specs[key] = ToolSpec(key, "NDJSON → YOLO", "转换 NDJSON 数据集", script=ROOT / "transform_tools" / "ndjson_to_yolo.py")
         elif self.category == "transform" and key == "kmodel":
             self._line(form, "pt", "PyTorch 权重", path_kind="file")
-            self._line(form, "onnx", "ONNX 输出", path_kind="save_file")
-            self._line(form, "kmodel", "kmodel 输出", path_kind="save_file")
+            self._line(form, "output", "输出目录", path_kind="dir")
             self._line(form, "calib", "校准图片目录", path_kind="dir")
             self._line(form, "size", "输入尺寸", "320")
             self._line(form, "samples", "校准样本数", "200")
@@ -1363,7 +1362,7 @@ class UtilityPage(QWidget):
             self._arg(args, "--input", self._value(key, "input"), required=True)
             self._arg(args, "--output", self._value(key, "output"), required=True)
         elif key == "kmodel":
-            for field, flag in (("pt", "--pt"), ("onnx", "--onnx"), ("kmodel", "--kmodel"), ("calib", "--calib-dir"), ("size", "--size"), ("samples", "--samples")):
+            for field, flag in (("pt", "--pt"), ("output", "--output-dir"), ("calib", "--calib-dir"), ("size", "--size"), ("samples", "--samples")):
                 self._arg(args, flag, self._value(key, field), required=field in {"pt", "calib"})
             if self._checked(key, "rebuild"):
                 args.append("--rebuild")

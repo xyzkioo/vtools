@@ -18,7 +18,7 @@ from checks.vision_consistency_metrics import (
     aggregate_status, align_outputs, combine_status, compare_array, compare_detections,
 )
 from checks.vision_consistency import _sources, save_reports
-from core.vision_benchmark_config import load_config
+from core.vision_benchmark_config import apply_python_paths, load_config
 from run_all import _invoke, _merge_results, main as run_all_main
 from core.vision_run_manager import apply_run_directory, prepare_run_directory, resolve_cli_path
 from core.vision_runtime import _with_library_dir
@@ -159,6 +159,27 @@ class DetectionTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_cli_model_path_participates_in_fork_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            fork = base / "workspace" / "ultralytics-cn"
+            (fork / "ultralytics").mkdir(parents=True)
+            (fork / "ultralytics/__init__.py").touch()
+            weights = base / "workspace/project/runs/weights/best.pt"
+            weights.parent.mkdir(parents=True)
+            weights.touch()
+            config = {
+                "project": {"root": str(base / "opt/vtools"), "python_paths": []},
+                "benchmark": {"adapter": "ultralytics", "task": "detect"},
+                "models": [],
+            }
+            original = list(sys.path)
+            try:
+                apply_python_paths(config, [str(weights)])
+                self.assertEqual(sys.path[0], str(fork))
+            finally:
+                sys.path[:] = original
+
     def test_conda_library_path_is_prepended_once(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -228,6 +249,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(second_dir.name, "run2")
             self.assertEqual(Path(first["pytorch"]["output"]), first_dir / "vision_speed_v2.csv")
             self.assertEqual(Path(first["tensorrt"]["engine_dir"]), root / "runs-profile" / "engines")
+            self.assertEqual(Path(first["tensorrt"]["onnx_dir"]), root / "runs-profile" / "onnx")
             self.assertEqual(Path(first["run_all"]["summary_output"]), first_dir / "summary.csv")
 
     def test_run_dir_override_is_reused_by_child_stage(self):
@@ -246,6 +268,22 @@ class WorkflowTests(unittest.TestCase):
             reused = prepare_run_directory(child, allocated)
             self.assertEqual(reused, allocated)
             self.assertEqual(Path(child["pytorch"]["output"]), allocated / "pytorch.csv")
+
+    def test_explicit_run_dir_moves_build_artifacts_to_writable_directory(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "config.yaml"
+            config_path.write_text(yaml.safe_dump({
+                "project": {"root": "/opt/vtools"},
+                "run": {"enabled": True, "root": "runs-profile"},
+                "tensorrt": {"engine_dir": "runs-profile/engines", "onnx_dir": "runs-profile/onnx"},
+            }), encoding="utf-8")
+            config = load_config(config_path)
+            writable = root / "desktop-run"
+            prepare_run_directory(config, writable)
+            self.assertEqual(Path(config["tensorrt"]["engine_dir"]), writable / "engines")
+            self.assertEqual(Path(config["tensorrt"]["onnx_dir"]), writable / "onnx")
 
     def test_relative_outputs_cannot_escape_run_directory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -280,8 +318,13 @@ class WorkflowTests(unittest.TestCase):
     def test_consistency_warning_not_success(self):
         with patch("run_all.importlib.import_module", return_value=SimpleNamespace(main=lambda: {"status": "warning"})):
             status, rows = _invoke("consistency", "fake_module", "config.yaml")
-        self.assertEqual(status["status"], "warning")
+        self.assertEqual(status["status"], "issues_found")
         self.assertEqual(rows, [])
+
+    def test_consistency_difference_is_not_execution_failure(self):
+        with patch("run_all.importlib.import_module", return_value=SimpleNamespace(main=lambda: {"status": "failed", "json_output": "report.json"})):
+            status, _rows = _invoke("consistency", "fake_module", "config.yaml")
+        self.assertEqual(status, {"backend": "consistency", "status": "issues_found", "error": "", "report": "report.json"})
 
     def test_merge_uses_current_rows_and_labels_stages(self):
         with tempfile.TemporaryDirectory() as directory:

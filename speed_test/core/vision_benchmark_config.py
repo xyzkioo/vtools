@@ -186,7 +186,7 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     return config
 
 
-def apply_python_paths(config: dict[str, Any]) -> None:
+def apply_python_paths(config: dict[str, Any], cli_models: Optional[Iterable[str]] = None) -> None:
     """把本地源码仓库和自定义 Python 目录加入导入路径。"""
     from vtools_runtime.ultralytics import add_repo_to_path
 
@@ -205,7 +205,12 @@ def apply_python_paths(config: dict[str, Any]) -> None:
         path = Path(str(value)).expanduser()
         if path.is_dir() and str(path) not in sys.path:
             sys.path.insert(0, str(path))
-    add_repo_to_path(config, Path(str(project.get("root", "."))))
+    model_paths = tuple(
+        Path(str(entry["weights"])).expanduser()
+        for entry in get_model_entries(config, cli_models=cli_models)
+        if entry.get("weights")
+    )
+    add_repo_to_path(config, Path(str(project.get("root", "."))), model_paths)
 
 
 def get_model_entries(

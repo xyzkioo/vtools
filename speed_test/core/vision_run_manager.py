@@ -22,6 +22,8 @@ RUN_DIR_ENV = "VISION_BENCHMARK_RUN_DIR"
 _PATH_DEFAULTS: dict[tuple[str, str], str] = {
     ("pytorch", "output"): "runs-profile/vision_speed_v2.csv",
     ("tensorrt", "output"): "runs-profile/vision_tensorrt_v2.csv",
+    ("tensorrt", "engine_dir"): "runs-profile/engines",
+    ("tensorrt", "onnx_dir"): "runs-profile/onnx",
     ("consistency", "output"): "runs-profile/consistency.csv",
     ("consistency", "json_output"): "runs-profile/consistency.json",
     ("run_all", "summary_output"): "runs-profile/vision_benchmark_summary.csv",
@@ -126,15 +128,24 @@ def _map_output_path(
     return str(_join_within(run_dir, relative, "相对输出路径"))
 
 
-def apply_run_directory(config: dict[str, Any], run_dir: str | Path) -> dict[str, Any]:
+def apply_run_directory(
+    config: dict[str, Any],
+    run_dir: str | Path,
+    *,
+    include_build_artifacts: bool = False,
+) -> dict[str, Any]:
     """把结果报告路径切换到指定的 run 目录。
 
-    ONNX/engine 是可复用的构建缓存，刻意不在这里搬迁。
+    显式 ``--run-dir`` 可以通过 ``include_build_artifacts`` 要求本次所有
+    产物都写入该可写目录；这对安装在只读 ``/opt`` 下的桌面包尤其重要。
+    普通 CLI 自动分配 runN 时仍保留可复用的 ONNX/engine 构建缓存。
     """
 
     target = Path(run_dir).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
     for (section, key), default in _PATH_DEFAULTS.items():
+        if key in {"engine_dir", "onnx_dir"} and not include_build_artifacts:
+            continue
         values = config.setdefault(section, {})
         if not isinstance(values, dict):
             values = {}
@@ -218,7 +229,7 @@ def prepare_run_directory(
             candidate.mkdir(parents=True, exist_ok=False)
             target = candidate
 
-    apply_run_directory(config, target)
+    apply_run_directory(config, target, include_build_artifacts=inherited is not None)
     _write_run_info(config, target)
     return target
 

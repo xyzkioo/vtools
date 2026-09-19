@@ -15,6 +15,7 @@ from typing import Any
 
 from .catalog import ROOT
 from .core import STATE_DIR, add_history, build_command
+from ..process_environment import build_tool_environment
 
 
 class TaskManager:
@@ -68,8 +69,7 @@ class TaskManager:
                 kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 kwargs["start_new_session"] = True
-            environment = os.environ.copy()
-            environment.update({"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"})
+            environment = build_tool_environment(executable, ROOT)
             process = subprocess.Popen([executable, *args], env=environment, **kwargs)
             with self._lock:
                 self._process = process
@@ -117,10 +117,9 @@ class TaskManager:
                     status = "stopped"
                 elif exit_code == 0:
                     status = "succeeded"
-                elif self._state["tool_id"] == "dataset_quality" and exit_code == 1:
-                    # The dataset audit uses exit code 1 to report findings after
-                    # a complete, valid scan. It is a warning result, not a run
-                    # failure; real execution errors use exit code 2.
+                elif self._state["tool_id"] in {"dataset_quality", "benchmark"} and exit_code == 1:
+                    # These tools use exit code 1 for a complete run with
+                    # findings. Real execution errors use exit code 2.
                     status = "succeeded_with_issues"
                 else:
                     status = "failed"
@@ -131,7 +130,8 @@ class TaskManager:
                 return
             self._process = None
         try:
-            add_history({"id": run_id, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "task": final["tool_id"], "status": {"succeeded": "成功", "succeeded_with_issues": "检查完成（有问题）", "failed": "失败", "stopped": "已停止"}[final["status"]], "config": final["config"] or "默认配置", "exit_code": exit_code, "result_dir": final["result_dir"], "log_path": str(log_file)})
+            issue_label = "完成（有差异）" if final["tool_id"] == "benchmark" else "检查完成（有问题）"
+            add_history({"id": run_id, "time": datetime.now().strftime("%Y-%m-%d %H:%M"), "task": final["tool_id"], "status": {"succeeded": "成功", "succeeded_with_issues": issue_label, "failed": "失败", "stopped": "已停止"}[final["status"]], "config": final["config"] or "默认配置", "exit_code": exit_code, "result_dir": final["result_dir"], "log_path": str(log_file)})
         except OSError as exc:
             self._emit("log", f"任务记录写入失败：{exc}\n")
         self._emit("state", final)

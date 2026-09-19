@@ -1,5 +1,12 @@
+import sys
+import tempfile
+import types
 import unittest
+from pathlib import Path
+from unittest.mock import patch
+
 from model_compression.modules.dependency_pruning import _structured_section, _input_size
+from model_compression.modules.structured import _ultralytics_amp_weights_dir
 
 
 class StructuredConfigTests(unittest.TestCase):
@@ -12,3 +19,25 @@ class StructuredConfigTests(unittest.TestCase):
     def test_empty_nested_settings_do_not_use_stale_legacy_values(self):
         self.assertEqual(_structured_section({'compression': {'structured': {}},
                                              'structured': {'channel_sparsity': .9}}), {})
+
+    def test_amp_check_weights_use_run_directory_and_are_restored(self):
+        previous = Path("original-weights")
+        utils = types.ModuleType("ultralytics.utils")
+        utils.WEIGHTS_DIR = previous
+        utils.SETTINGS = {"weights_dir": str(previous)}
+        ultralytics = types.ModuleType("ultralytics")
+        ultralytics.utils = utils
+        modules = {
+            "ultralytics": ultralytics,
+            "ultralytics.utils": utils,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, modules):
+            run_dir = Path(tmp) / "run"
+            with _ultralytics_amp_weights_dir(run_dir) as cache_dir:
+                self.assertEqual(cache_dir, (run_dir / "ultralytics-cache" / "weights").resolve())
+                self.assertEqual(utils.WEIGHTS_DIR, cache_dir)
+                self.assertEqual(utils.SETTINGS["weights_dir"], str(cache_dir))
+                self.assertTrue(cache_dir.is_dir())
+            self.assertEqual(utils.WEIGHTS_DIR, previous)
+            self.assertEqual(utils.SETTINGS["weights_dir"], str(previous))

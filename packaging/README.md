@@ -4,7 +4,7 @@
 
 桌面包只包含工作台、前端资源和轻量 API 依赖。模型、测速和转换任务继续使用工作台“设置”里选择的 Python 环境，这样不会把 torch、TensorRT 和 Ultralytics 的多 GB 运行库复制进每个桌面包。
 
-桌面包同时展开 `vtools_runtime` 发现模块到 `_internal/`。任务使用外部 Python 环境时，仍能加载 vtools 的运行时适配器并自动发现 Ultralytics Fork。
+桌面包同时展开 `vtools_runtime` 发现模块到 `_internal/`。启动任务时，工作台会把 `_internal/` 加入所选 Python 的模块搜索路径，把该环境的 `bin` 和动态库目录置于前面，并移除 PyInstaller 对外部 Python 不适用的动态库搜索路径。外部 Python 因此可以加载 vtools 的运行时适配器及其自身的 PyTorch、TensorRT 等依赖，并自动发现 Ultralytics Fork。
 
 ## 构建
 

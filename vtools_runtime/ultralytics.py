@@ -9,6 +9,11 @@ from typing import Any, Mapping
 
 
 CHECKOUT_NAMES = ("ultralytics-cn", "ultralytics-ezcn", "ultralytics")
+_INPUT_PATH_KEYS = {
+    "weights", "source", "data", "dataset_root", "root", "train", "val", "test",
+    "manifest", "image", "images", "calib_dir", "teacher_weights", "student_weights",
+    "initial_weights",
+}
 
 
 def _as_path(value: Any, base: Path) -> Path | None:
@@ -20,6 +25,21 @@ def _as_path(value: Any, base: Path) -> Path | None:
 
 def _is_checkout(path: Path) -> bool:
     return (path / "ultralytics" / "__init__.py").is_file()
+
+
+def _configured_input_paths(value: Any, key: str = "") -> tuple[Path, ...]:
+    """Collect workspace-bearing inputs used to discover a nearby checkout."""
+
+    found: list[Path] = []
+    if isinstance(value, Mapping):
+        for child_key, child in value.items():
+            found.extend(_configured_input_paths(child, str(child_key)))
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            found.extend(_configured_input_paths(child, key))
+    elif key in _INPUT_PATH_KEYS and value is not None and str(value).strip():
+        found.append(Path(str(value)).expanduser())
+    return tuple(found)
 
 
 def find_repo(
@@ -59,7 +79,8 @@ def add_repo_to_path(
     project_root: Path,
     input_paths: tuple[Path, ...] = (),
 ) -> Path | None:
-    repo = find_repo(settings, project_root, input_paths)
+    inferred_paths = _configured_input_paths(settings) if isinstance(settings, Mapping) else ()
+    repo = find_repo(settings, project_root, (*input_paths, *inferred_paths))
     if repo is not None and str(repo) not in sys.path:
         sys.path.insert(0, str(repo))
     return repo

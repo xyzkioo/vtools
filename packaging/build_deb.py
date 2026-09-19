@@ -56,10 +56,18 @@ def main() -> int:
             " Desktop workbench for model diagnostics, visualization, benchmarks and conversion.\n",
             encoding="utf-8",
         )
-        subprocess.run(
-            ["dpkg-deb", "--build", "--root-owner-group", str(stage), str(destination)],
-            check=True,
-        )
+        # Never build directly over a published package. If compression is
+        # interrupted, or a replacement happens to be shorter, writing to the
+        # final pathname can leave a truncated archive or stale trailing bytes
+        # that dpkg-deb tolerates but APT rejects. Build beside the destination
+        # and atomically publish only after dpkg-deb exits successfully.
+        with tempfile.TemporaryDirectory(prefix=".vtools-deb-build-", dir=destination.parent) as output_dir:
+            temporary_package = Path(output_dir) / destination.name
+            subprocess.run(
+                ["dpkg-deb", "--build", "--root-owner-group", str(stage), str(temporary_package)],
+                check=True,
+            )
+            temporary_package.replace(destination)
 
     print(destination)
     return 0

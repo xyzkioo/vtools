@@ -255,7 +255,7 @@ def main() -> list[dict[str, Any]]:
         return []
     config_file = load_config(args.config)
     run_dir = prepare_run_directory(config_file, args.run_dir)
-    apply_python_paths(config_file)
+    apply_python_paths(config_file, args.model)
     benchmark_values = config_file.get("benchmark", {})
     pytorch_values = config_file.get("pytorch", {})
     modules = resolve_speed_modules(config_file, only=args.only, enable=args.enable, disable=args.disable)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -48,9 +49,39 @@ def _default_results_root() -> str:
     return str(STATE_DIR / "runs") if getattr(sys, "frozen", False) else str(ROOT)
 
 
+def _results_root_path(raw: Any) -> Path:
+    """Resolve the configured results directory without returning to the bundle."""
+
+    candidate = Path(str(raw or "")).expanduser()
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    candidate = candidate.resolve()
+    if getattr(sys, "frozen", False) and (candidate == ROOT or ROOT in candidate.parents):
+        return (STATE_DIR / "runs").resolve()
+    return candidate
+
+
 def project_path(raw: str) -> Path:
     path = Path(raw).expanduser()
     return (path if path.is_absolute() else ROOT / path).resolve()
+
+
+def _editable_config_path(target: Path) -> Path:
+    """Copy packaged config templates to a writable per-user location."""
+
+    if not getattr(sys, "frozen", False):
+        return target
+    try:
+        relative = target.relative_to(ROOT)
+    except ValueError:
+        return target
+    user_target = STATE_DIR / "configs" / relative
+    if not user_target.exists():
+        if not target.is_file():
+            return target
+        user_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(target, user_target)
+    return user_target
 
 
 def _atomic_text(path: Path, content: str) -> None:
@@ -93,6 +124,7 @@ def read_settings() -> dict[str, Any]:
                     defaults[key] = value
         except ImportError:
             pass
+    defaults["results_root"] = str(_results_root_path(defaults["results_root"]))
     try:
         defaults["history_limit"] = max(1, min(200, int(defaults["history_limit"])))
     except (TypeError, ValueError):
@@ -103,7 +135,7 @@ def read_settings() -> dict[str, Any]:
 def save_settings(changes: dict[str, Any]) -> dict[str, Any]:
     settings = read_settings()
     if "results_root" in changes:
-        settings["results_root"] = str(project_path(str(changes["results_root"])))
+        settings["results_root"] = str(_results_root_path(changes["results_root"]))
         if getattr(sys, "frozen", False):
             Path(settings["results_root"]).mkdir(parents=True, exist_ok=True)
     if "python_executable" in changes:
@@ -212,7 +244,7 @@ def flatten_config(value: Any, prefix: str = "") -> list[dict[str, Any]]:
 
 
 def load_config(path: str) -> dict[str, Any]:
-    target = project_path(path)
+    target = _editable_config_path(project_path(path))
     try:
         text = target.read_text(encoding="utf-8")
     except OSError as exc:
@@ -230,7 +262,7 @@ def patch_config(text: str, path: str, value: Any) -> dict[str, Any]:
 
 def save_config(path: str, text: str) -> dict[str, Any]:
     data = parse_yaml(text)
-    target = project_path(path)
+    target = _editable_config_path(project_path(path))
     if target.exists() and not target.is_file():
         raise ValueError("配置路径不是文件")
     _atomic_text(target, text)
@@ -289,9 +321,20 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
                 value = _option(value, kind[7:].split("|"), label)
             elif kind in {"file", "dir", "file_or_dir", "save_file"}:
                 value = _field_path(value)
+                if getattr(sys, "frozen", False) and variant_id == "kmodel" and key in {"onnx", "kmodel"}:
+                    output = Path(value)
+                    if output == ROOT or ROOT in output.parents:
+                        raise ValueError(f"{label}不能放在安装目录，请选择用户可写目录")
             args += [flag, str(value)]
         if variant_id == "filename":
             args.append("--recursive" if values.get("recursive") else "--no-recursive")
+        if getattr(sys, "frozen", False) and variant_id == "kmodel" and "--output-dir" not in args:
+            # py2kmodel has repository-relative defaults for optional ONNX and
+            # kmodel outputs. A packaged app must never target its read-only
+            # _internal directory when those fields are left blank.
+            output_root = _results_root_path(settings["results_root"]) / "transform" / "kmodel" / f"run-{uuid.uuid4().hex}"
+            output_root.mkdir(parents=True, exist_ok=True)
+            args += ["--output-dir", str(output_root)]
         title = variant["title"]
     elif tool_id == "environment":
         args = [str(ROOT / tool["script"])]
@@ -328,9 +371,18 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
                     raise ValueError(f"{label}不能为负数")
                 args += [flag, str(number)]
             elif kind in {"file", "dir", "file_or_dir", "save_file"}:
-                args += [flag, _field_path(value)]
+                resolved = _field_path(value)
+                if getattr(sys, "frozen", False) and key in {"output", "output_root", "onnx", "kmodel", "plan"}:
+                    output = Path(resolved)
+                    if output == ROOT or ROOT in output.parents:
+                        raise ValueError(f"{label}不能放在安装目录，请选择用户可写目录")
+                args += [flag, resolved]
             else:
                 args += [flag, str(value)]
+        if getattr(sys, "frozen", False) and tool_id == "dataset_quality" and "--output-root" not in args:
+            output_root = _results_root_path(settings["results_root"]) / "dataset_quality"
+            output_root.mkdir(parents=True, exist_ok=True)
+            args += ["--output-root", str(output_root)]
         title = tool["title"]
     else:
         config = _field_path(request.get("config_path") or tool["config"])
@@ -371,7 +423,11 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         if not isinstance(edits, dict):
             raise ValueError("模块修改必须是对象")
         available = {item[0] for item in tool.get("modules", [])}
-        data = load_config(config)["data"]
+        loaded = load_config(config)
+        config = loaded["path"]
+        data = loaded["data"]
+        if "--config" in args:
+            args[args.index("--config") + 1] = config
         configured = data.get("modules")
         if isinstance(configured, dict):
             available.update(str(key) for key in configured)
@@ -382,7 +438,7 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
                 raise ValueError("该测速类型请在 YAML 中设置模块")
             args += ["--enable" if enabled else "--disable", module_id]
         if getattr(sys, "frozen", False) and backend != "checkpoint":
-            results_root = project_path(str(settings["results_root"]))
+            results_root = _results_root_path(settings["results_root"])
             tool_root = results_root / tool_id
             tool_root.mkdir(parents=True, exist_ok=True)
             args += ["--run-dir", str(tool_root / f"run-{uuid.uuid4().hex}")]
@@ -443,22 +499,56 @@ def preview_text(path: Path) -> dict[str, Any]:
 
 
 def environments() -> list[dict[str, str]]:
-    candidates = {str(Path(sys.executable).resolve())}
+    candidates: set[str] = set()
+
+    def add_python(raw: str | Path) -> None:
+        path = Path(raw).expanduser()
+        if path.is_file():
+            resolved = path.resolve()
+            # A frozen workbench can dispatch bundled scripts, but it is not a
+            # user Python environment and excludes heavy model dependencies.
+            if not (getattr(sys, "frozen", False) and resolved == Path(sys.executable).resolve()):
+                candidates.add(str(resolved))
+
+    if not getattr(sys, "frozen", False):
+        add_python(sys.executable)
+    saved = read_settings().get("python_executable")
+    if saved:
+        add_python(str(saved))
     for name in ("python", "python3"):
         found = shutil.which(name)
         if found:
-            candidates.add(str(Path(found).resolve()))
-    conda_exe = shutil.which("conda")
-    if conda_exe:
-        try:
-            import subprocess
+            add_python(found)
 
-            completed = subprocess.run([conda_exe, "env", "list", "--json"], capture_output=True, text=True, timeout=8, check=False)
+    conda_executables: list[Path] = []
+    for raw in (
+        os.environ.get("CONDA_EXE"),
+        shutil.which("conda"),
+        Path.home() / "miniconda3/bin/conda",
+        Path.home() / "anaconda3/bin/conda",
+        Path.home() / "miniforge3/bin/conda",
+        Path.home() / "mambaforge/bin/conda",
+    ):
+        if raw:
+            path = Path(raw).expanduser()
+            if path.is_file() and path.resolve() not in conda_executables:
+                conda_executables.append(path.resolve())
+
+    prefixes: set[Path] = set()
+    environments_file = Path.home() / ".conda/environments.txt"
+    try:
+        prefixes.update(Path(line.strip()).expanduser() for line in environments_file.read_text(encoding="utf-8").splitlines() if line.strip())
+    except OSError:
+        pass
+    for conda_exe in conda_executables:
+        try:
+            completed = subprocess.run([str(conda_exe), "env", "list", "--json"], capture_output=True, text=True, timeout=8, check=False)
             for raw in json.loads(completed.stdout).get("envs", []):
-                env = Path(raw)
-                candidate = env / ("python.exe" if os.name == "nt" else "bin/python")
-                if candidate.is_file():
-                    candidates.add(str(candidate.resolve()))
+                prefixes.add(Path(raw).expanduser())
         except (OSError, ValueError, subprocess.TimeoutExpired):
-            pass
+            continue
+        if prefixes:
+            break
+    for prefix in prefixes:
+        add_python(prefix / ("python.exe" if os.name == "nt" else "bin/python"))
     return [{"label": Path(path).parent.parent.name or path, "path": path} for path in sorted(candidates)]

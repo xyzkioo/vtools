@@ -81,6 +81,12 @@ PYTHONPATH=.:model_diagnostics python -m unittest discover -s model_diagnostics/
 
 README 中的命令必须从仓库根目录可定位到真实文件；入口、默认配置、模块名称、输出路径和依赖变化要同步更新。修改公开 Python API 或配置字段时，检查 `docs/` 下的 Spec 和示例。Markdown 本地链接应在交付前检查，避免引用已删除的 run 或临时文件。
 
+## 版本与安装包发布
+
+- 用户要求构建或发布包含新修复的桌面安装包时，必须先提升版本号；用户指定版本时使用指定值，否则默认递增补丁版本，不得沿用上一个已发布版本号。
+- 版本号必须同步到 `vtools_ui/__init__.py`、`vtools_ui/webapp/frontend/package.json`、`vtools_ui/webapp/frontend/package-lock.json` 和 `VERSION.md`；`VERSION.md` 必须记录该版本的用户可见变更。
+- 打包前重新构建前端和桌面目录包，再构建 `.deb`。交付前用 Debian 包元数据确认 `Version` 与目标版本一致，并报告安装包路径、架构、大小和 SHA-256。
+
 ## 交付检查
 
 交付前检查完整 diff，而不是只看新增文件；确认没有调试输出、死代码、未使用导入、私有绝对路径、秘密、临时产物或误删用户文件。总结改动、验证命令、实际结果和仍受环境限制的部分。

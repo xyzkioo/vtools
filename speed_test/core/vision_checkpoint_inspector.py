@@ -262,7 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     config = load_config(args.config)
-    apply_python_paths(config)
+    apply_python_paths(config, args.model)
     entries = get_model_entries(
         config,
         cli_models=args.model,

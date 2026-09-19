@@ -35,6 +35,8 @@ class RunnerBehaviour(unittest.TestCase):
         environment = runner.process.processEnvironment()
         self.assertEqual(environment.value("PYTHONUNBUFFERED"), "1")
         self.assertEqual(environment.value("PYTHONIOENCODING"), "utf-8")
+        self.assertEqual(environment.value("PYTHONPATH").split(os.pathsep)[0], str(ROOT))
+        self.assertEqual(environment.value("PATH").split(os.pathsep)[0], str(Path(sys.executable).resolve().parent))
         runner.deleteLater()
 
     def test_process_output_survives_multibyte_chunks(self) -> None:

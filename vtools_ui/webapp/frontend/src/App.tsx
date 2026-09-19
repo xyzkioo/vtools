@@ -37,17 +37,17 @@ async function api<T>(path: string, body?: object, method = body ? 'POST' : 'GET
 }
 const q = (value: string) => encodeURIComponent(value)
 const active = (state: RunState | null) => Boolean(state && ['starting', 'running', 'stopping'].includes(state.status))
-const statusText: Record<string, string> = { starting: '正在启动', running: '运行中', stopping: '正在停止', succeeded: '已完成', succeeded_with_issues: '检查完成（发现问题）', failed: '运行失败', stopped: '已停止' }
+const statusText: Record<string, string> = { starting: '正在启动', running: '运行中', stopping: '正在停止', succeeded: '已完成', succeeded_with_issues: '已完成（有差异/问题）', failed: '运行失败', stopped: '已停止' }
 const completionNotice = (state: RunState) => {
   if (state.status === 'succeeded') return state.result_dir ? `任务已完成，结果已保存到：${state.result_dir}` : '任务已完成'
-  if (state.status === 'succeeded_with_issues') return state.result_dir ? `检查完成，发现问题；结果已保存到：${state.result_dir}` : '检查完成，发现问题'
+  if (state.status === 'succeeded_with_issues') return state.result_dir ? `任务已完成，发现差异或问题；结果已保存到：${state.result_dir}` : '任务已完成，发现差异或问题'
   if (state.status === 'stopped') return '任务已停止'
   if (state.status === 'failed') return state.exit_code === 127 ? '任务启动失败，请检查 Python 解释器和依赖' : `任务运行失败（退出码 ${state.exit_code ?? '未知'}）`
   return statusText[state.status] || state.status
 }
 const prettyBackend: Record<string, string> = { pytorch: 'PyTorch 测速', tensorrt: 'TensorRT 测速', consistency: '输出一致性', all: '一键测速', checkpoint: 'Checkpoint 检查' }
 const isGoodHistoryStatus = (status: string) => status === '成功'
-const isWarningHistoryStatus = (status: string) => status === '检查完成（有问题）'
+const isWarningHistoryStatus = (status: string) => ['检查完成（有问题）', '完成（有差异）'].includes(status)
 
 function Icon({ name, size = 19 }: { name: string; size?: number }) {
   const props = { size, strokeWidth: 1.9 }
@@ -67,7 +67,7 @@ function Icon({ name, size = 19 }: { name: string; size?: number }) {
   }
 }
 
-function PathField({ value, onChange, kind, placeholder }: { value: string; onChange: (value: string) => void; kind: string; placeholder?: string }) {
+function PathField({ value, onChange, kind, placeholder, hint }: { value: string; onChange: (value: string) => void; kind: string; placeholder?: string; hint?: string }) {
   const [bridgeReady, setBridgeReady] = useState(Boolean(window.pywebview?.api))
   useEffect(() => {
     const ready = () => setBridgeReady(Boolean(window.pywebview?.api))
@@ -82,9 +82,19 @@ function PathField({ value, onChange, kind, placeholder }: { value: string; onCh
   const choices: { kind: 'file' | 'dir' | 'save_file'; label: string }[] = kind === 'file_or_dir'
     ? [{ kind: 'file', label: '选择文件' }, { kind: 'dir', label: '选择目录' }]
     : [{ kind: kind === 'dir' ? 'dir' : kind === 'save_file' ? 'save_file' : 'file', label: kind === 'dir' ? '选择目录' : kind === 'save_file' ? '选择保存位置' : '选择文件' }]
-  return <div className="path-field">
-    <input value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder || '输入路径或点击选择'} spellCheck={false} style={{ paddingRight: choices.length === 2 ? 76 : 42 }} />
-    {choices.map((choice, index) => <button key={choice.kind} type="button" className="icon-button" style={{ right: 5 + (choices.length - index - 1) * 34 }} title={bridgeReady ? choice.label : '浏览器预览可直接输入路径'} aria-label={choice.label} onClick={() => pick(choice.kind)} disabled={!bridgeReady}>{choice.kind === 'dir' ? <FolderOpen size={18} /> : <FileText size={18} />}</button>)}
+  const pathHint = hint || (kind === 'file'
+    ? '请选择文件；格式按字段名称要求（如 .pt、.onnx、.yaml、.json、图片或视频）。'
+    : kind === 'dir'
+      ? '请选择目录；目录内应包含该字段要求的文件。'
+      : kind === 'save_file'
+        ? '请选择输出文件位置；扩展名按输出格式填写。'
+        : '可选择单个文件或目录；文件格式按字段名称要求。')
+  return <div className="path-field-group">
+    <div className="path-field">
+      <input value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder || '输入路径或点击选择'} spellCheck={false} style={{ paddingRight: choices.length === 2 ? 76 : 42 }} />
+      {choices.map((choice, index) => <button key={choice.kind} type="button" className="icon-button" style={{ right: 5 + (choices.length - index - 1) * 34 }} title={bridgeReady ? choice.label : '浏览器预览可直接输入路径'} aria-label={choice.label} onClick={() => pick(choice.kind)} disabled={!bridgeReady}>{choice.kind === 'dir' ? <FolderOpen size={18} /> : <FileText size={18} />}</button>)}
+    </div>
+    {!hint && <small className="path-hint">{pathHint}</small>}
   </div>
 }
 
@@ -95,7 +105,7 @@ function InputField({ field, value, onChange }: { field: Field; value: unknown; 
     const options = field.options || kind.slice(7).split('|')
     return <select value={String(value ?? options[0] ?? '')} onChange={event => onChange(event.target.value)}>{options.map(option => <option key={option} value={option}>{prettyBackend[option] || option}</option>)}</select>
   }
-  if (['file', 'dir', 'save_file', 'file_or_dir'].includes(kind)) return <PathField value={String(value ?? '')} onChange={onChange} kind={kind} />
+  if (['file', 'dir', 'save_file', 'file_or_dir'].includes(kind)) return <PathField value={String(value ?? '')} onChange={onChange} kind={kind} hint={field.hint} />
   return <input type={kind === 'number' ? 'number' : 'text'} value={String(value ?? '')} onChange={event => onChange(event.target.value)} placeholder={field.hint || (field.required ? '必填' : '可选')} />
 }
 

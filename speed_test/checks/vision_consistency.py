@@ -436,7 +436,7 @@ def main() -> dict[str, Any]:
     if "modules" not in config and not args.only and not args.enable and not args.disable:
         modules["consistency.detection"] = True
     run_dir = prepare_run_directory(config, args.run_dir)
-    apply_python_paths(config)
+    apply_python_paths(config, args.model)
     values = config.setdefault("consistency", {})
     values["tensor_enabled"] = modules.get("consistency.tensor", False)
     values["detection_enabled"] = modules.get("consistency.detection", False)

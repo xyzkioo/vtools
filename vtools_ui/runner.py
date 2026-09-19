@@ -20,6 +20,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 
+from .process_environment import build_tool_environment
+
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -54,19 +56,20 @@ class ToolRunner(QObject):
         self.last_run_dir: Path | None = None
         self._run_dir_buffer = ""
         self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
-        self.process.setProcessEnvironment(self._child_environment())
+        self.process.setProcessEnvironment(self._child_environment(self.python_executable, self.project_root))
 
     @staticmethod
-    def _child_environment() -> QProcessEnvironment:
-        """Force line-buffered, UTF-8 output so the log pane stays readable."""
+    def _child_environment(executable: Path, runtime_root: Path) -> QProcessEnvironment:
+        """Create the same selected-Python bridge as the web workbench."""
 
-        environment = QProcessEnvironment.systemEnvironment()
-        environment.insert("PYTHONUNBUFFERED", "1")
-        environment.insert("PYTHONIOENCODING", "utf-8")
+        environment = QProcessEnvironment()
+        for key, value in build_tool_environment(executable, runtime_root).items():
+            environment.insert(key, value)
         return environment
 
     def set_python_executable(self, executable: Path) -> None:
         self.python_executable = executable.expanduser().resolve()
+        self.process.setProcessEnvironment(self._child_environment(self.python_executable, self.project_root))
 
     @property
     def is_running(self) -> bool:

@@ -59,6 +59,9 @@ def _invoke(
         if isinstance(result, dict):
             # 一致性详细数据只写自己的报告，不混进速度表。
             state = result.get("status", "error")
+            error = result.get("error", "")
+            if label == "consistency" and state in {"failed", "warning", "inconclusive"} and not error:
+                state = "issues_found"
             return {"backend": label, "status": state, "error": result.get("error", ""),
                     "report": result.get("json_output", "")}, []
         if not isinstance(result, list):
@@ -194,7 +197,11 @@ def main() -> int:
         print(f"本次运行目录：{run_dir}")
     print(f"\n汇总结果已保存：{summary.resolve()}")
     successful = {"succeeded", "passed", "ok", "skipped"}
-    return 1 if any(str(item.get("status", "")).lower() not in successful for item in stage_status) else 0
+    issue_states = {"issues_found"}
+    statuses = {str(item.get("status", "")).lower() for item in stage_status}
+    if any(status not in successful | issue_states for status in statuses):
+        return 2
+    return 1 if statuses & issue_states else 0
 
 
 if __name__ == "__main__":

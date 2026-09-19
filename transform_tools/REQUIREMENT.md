@@ -63,6 +63,7 @@ python -m pip install ultralytics
 #### 2. `py2kmodel.py`
 
 该脚本会执行 `PyTorch/Ultralytics → ONNX → ONNX 简化 → nncase INT8 → K230 .kmodel`，需要：
+界面中只需选择一个输出目录，程序会按权重文件名生成同名的 `.onnx` 和 `.kmodel`。
 
 ```bash
 python -m pip install ultralytics pillow numpy onnx onnxsim

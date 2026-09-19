@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from vtools_runtime.ultralytics import find_repo
+from vtools_runtime.ultralytics import add_repo_to_path, find_repo
 
 
 class OptionalUltralyticsDiscoveryTests(unittest.TestCase):
@@ -55,6 +56,26 @@ class OptionalUltralyticsDiscoveryTests(unittest.TestCase):
             fork.mkdir(parents=True)
             (fork / "__init__.py").touch()
             self.assertEqual(find_repo({}, packaged_root, (dataset,)), fork.parent)
+
+    def test_add_repo_infers_workspace_from_nested_model_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            fork = base / "workspace" / "ultralytics-cn" / "ultralytics"
+            weights = base / "workspace" / "project" / "runs" / "weights" / "best.pt"
+            fork.mkdir(parents=True)
+            (fork / "__init__.py").touch()
+            weights.parent.mkdir(parents=True)
+            weights.touch()
+            original = list(sys.path)
+            try:
+                found = add_repo_to_path(
+                    {"model": {"weights": str(weights)}},
+                    base / "opt" / "vtools" / "_internal",
+                )
+                self.assertEqual(found, fork.parent)
+                self.assertEqual(sys.path[0], str(fork.parent))
+            finally:
+                sys.path[:] = original
 
 
 if __name__ == "__main__":
