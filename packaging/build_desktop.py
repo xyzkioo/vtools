@@ -75,6 +75,14 @@ def main() -> int:
         import PyInstaller  # noqa: F401
     except ImportError as exc:
         raise SystemExit("缺少 PyInstaller，请先执行 python -m pip install pyinstaller") from exc
+    try:
+        import PySide6  # noqa: F401
+        import webview  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            "当前 Python 缺少桌面依赖，请使用已安装 PySide6 和 pywebview 的 Python 环境构建，"
+            "例如：/home/xyzkioo/miniconda3/envs/yolo/bin/python packaging/build_desktop.py --clean"
+        ) from exc
     command = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir",
         "--name", "vtools", "--console", "--paths", str(ROOT),

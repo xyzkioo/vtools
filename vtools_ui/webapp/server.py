@@ -259,6 +259,8 @@ def run(argv: list[str] | None = None) -> int:
         try:
             import webview  # noqa: F401
         except ImportError as exc:
+            if getattr(sys, "frozen", False):
+                raise RuntimeError("桌面包缺少 pywebview，请使用包含 PySide6 和 pywebview 的 Python 环境重新构建") from exc
             fallback = _find_webview_python()
             if fallback:
                 print(f"当前 Python 未安装桌面依赖，自动使用：{fallback}", flush=True)
