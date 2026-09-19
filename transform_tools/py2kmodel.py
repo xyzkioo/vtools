@@ -62,6 +62,30 @@ def load_yolo(pt_path):
         print(f"使用 Ultralytics Fork: {repo}")
     return module.YOLO
 
+
+def configure_dotnet() -> Path | None:
+    """Set a valid .NET root before nncase initializes hostfxr."""
+
+    def valid(root: Path) -> bool:
+        return (root / "host" / "fxr").is_dir() and any((root / "host" / "fxr").iterdir())
+
+    current = os.environ.get("DOTNET_ROOT") or os.environ.get("DOTNET_ROOT_X64")
+    candidates: list[Path] = []
+    if current:
+        candidates.append(Path(current).expanduser())
+    prefix = Path(sys.prefix).resolve()
+    candidates.extend((prefix.parent.parent / "lib" / "dotnet", Path("/usr/share/dotnet")))
+    dotnet = shutil.which("dotnet")
+    if dotnet:
+        candidates.append(Path(dotnet).resolve().parent.parent)
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if valid(candidate):
+            os.environ["DOTNET_ROOT"] = str(candidate)
+            os.environ["DOTNET_ROOT_X64"] = str(candidate)
+            return candidate
+    return None
+
 # ================== 与板端 AI2D 一致的 Letterbox ==================
 def letterbox(img, target_size=640, color=FILL_COLOR):
     from PIL import Image
@@ -129,6 +153,9 @@ def export_onnx(pt_path=PT_PATH, onnx_path=ONNX_PATH, target_size=TARGET_SIZE, r
 
 # ================== 步骤2：量化生成 kmodel ==================
 def quantize(onnx_path=ONNX_PATH, kmodel_path=KMODEL_PATH, calib_dir=CALIB_DIR, target_size=TARGET_SIZE, calib_samples=CALIB_SAMPLES, rebuild=False):
+    dotnet_root = configure_dotnet()
+    if dotnet_root:
+        print(f"使用 .NET 运行时: {dotnet_root}")
     import nncase
     import numpy as np
     from PIL import Image

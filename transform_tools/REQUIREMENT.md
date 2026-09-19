@@ -103,9 +103,10 @@ dotnet --version
 ~/miniconda3/lib/dotnet
 ```
 
-如果你的 .NET 实际安装在其他位置，请在终端中
-设置正确的 `DOTNET_ROOT`，例如 `/usr/share/dotnet`。不要把不存在的目录写入
-`DOTNET_ROOT`，否则可能出现 `Failed to initialize hostfxr`。
+转换脚本会优先使用已有的有效 `DOTNET_ROOT`，并自动检查当前 Conda 环境对应的
+`../lib/dotnet` 及 `/usr/share/dotnet`。如果这些位置都不存在，才需要在终端中
+设置正确的 `DOTNET_ROOT`。不要把不存在的目录写入 `DOTNET_ROOT`，否则可能出现
+`Failed to initialize hostfxr`。
 
 ### 环境自检
 
