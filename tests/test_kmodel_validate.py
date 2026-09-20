@@ -1,5 +1,7 @@
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -16,6 +18,18 @@ class RuntimeTensor:
 
 
 class KmodelValidation(unittest.TestCase):
+    def test_directory_resolution_returns_sorted_supported_images(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "z.JPG").touch()
+            (root / "a.png").touch()
+            (root / "notes.txt").touch()
+            (root / "nested").mkdir()
+            self.assertEqual(
+                [path.name for path in validate.resolve_image_paths(root)],
+                ["a.png", "z.JPG"],
+            )
+
     def test_empty_tensor_is_not_considered_equal(self):
         empty = np.asarray([], dtype=np.float32)
         self.assertFalse(validate.compare([empty], [RuntimeTensor(empty)]))

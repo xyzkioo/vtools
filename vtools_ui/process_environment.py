@@ -66,6 +66,14 @@ def build_tool_environment(
         environment["CONDA_PREFIX"] = str(prefix)
         environment["CONDA_DEFAULT_ENV"] = prefix.name
 
+    # nncase loads hostfxr through the .NET runtime bundled with the Conda
+    # installation.  A frozen PyInstaller process may otherwise leave the
+    # child with only the workbench's private libraries on its search path.
+    dotnet_root = prefix.parent.parent / "lib" / "dotnet"
+    if (dotnet_root / "host" / "fxr").is_dir() and not environment.get("DOTNET_ROOT"):
+        environment["DOTNET_ROOT"] = str(dotnet_root)
+        environment["DOTNET_ROOT_X64"] = str(dotnet_root)
+
     return environment
 
 

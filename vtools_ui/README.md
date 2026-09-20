@@ -41,7 +41,7 @@ Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。p
 ## 功能
 
 - 模型工具：检测诊断、模型可视化、PyTorch/TensorRT 测速、输出一致性、一键测速、checkpoint 检查和模型压缩。
-- 转换和数据工具：独立的数据集质量检查、NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验、视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。
+- 转换和数据工具：独立的数据集质量检查、NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验、视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。ONNX / `.kmodel` 校验支持单张测试图片或图片目录批量校验。
 - 数据集质量检查：在左侧“数据与转换 → 数据集质量检查”中选择 `data.yaml`，可设置报告目录和每个划分的标注抽样图数量；结果包含 `summary.json`、`issues.csv`、`report.md` 和抽样图，可直接跳转到结果查看。
 - 检测诊断会加载模型；打包版会从所选数据集或权重所在工作区寻找同级 Ultralytics Fork。只检查图片和标签时使用独立的数据集质量检查入口。
 - 环境检查：检查 Python、PyTorch、CUDA 和本地 Ultralytics 源码。

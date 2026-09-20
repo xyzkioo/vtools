@@ -69,7 +69,7 @@ TOOLS: dict[str, dict] = {
         "variants": {
             "ndjson": {"title": "NDJSON → YOLO", "script": "transform_tools/ndjson_to_yolo.py", "fields": [("input", "NDJSON 文件", "file", "--input", True), ("output", "输出目录", "dir", "--output", True)]},
             "kmodel": {"title": "PyTorch → K230", "script": "transform_tools/py2kmodel.py", "defaults": {"size": "320", "samples": "200"}, "fields": [("pt", "PyTorch 权重", "file", "--pt", True), ("output", "输出目录", "dir", "--output-dir", False), ("calib", "校准图片目录", "dir", "--calib-dir", True), ("size", "输入尺寸", "number", "--size", False), ("samples", "校准样本数", "number", "--samples", False), ("rebuild", "覆盖已有产物", "bool", "--rebuild", False)]},
-            "validate": {"title": "ONNX / kmodel 校验", "script": "transform_tools/PY2KM_validate.py", "defaults": {"size": "320", "normalize": True}, "fields": [("onnx", "ONNX 模型", "file", "--onnx", True), ("kmodel", "kmodel 模型", "file", "--kmodel", True), ("image", "测试图片", "file", "--image", True), ("size", "输入尺寸", "number", "--size", True), ("normalize", "输入除以 255", "bool", "--normalize", False)]},
+            "validate": {"title": "ONNX / kmodel 校验", "script": "transform_tools/PY2KM_validate.py", "defaults": {"size": "320", "normalize": True}, "fields": [("onnx", "ONNX 模型", "file", "--onnx", True), ("kmodel", "kmodel 模型", "file", "--kmodel", True), ("image", "校验图片或目录", "file_or_dir", "--image", True), ("size", "输入尺寸", "number", "--size", True), ("normalize", "输入除以 255", "bool", "--normalize", False)]},
         },
     },
     "data": {

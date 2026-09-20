@@ -60,6 +60,7 @@ class WebWorkbenchTests(unittest.TestCase):
             executable.parent.mkdir(parents=True, exist_ok=True)
             executable.touch()
             (prefix / "lib" / "libstdc++.so.6").touch()
+            (prefix.parent.parent / "lib" / "dotnet" / "host" / "fxr").mkdir(parents=True)
             (prefix / "conda-meta").mkdir()
             inherited = {
                 "PATH": "/usr/bin",
@@ -74,6 +75,8 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(environment["LD_LIBRARY_PATH"].split(os.pathsep), [str((prefix / "lib").resolve()), "/system/lib"])
         self.assertEqual(environment["CONDA_PREFIX"], str(prefix.resolve()))
         self.assertEqual(environment["CONDA_DEFAULT_ENV"], "vision")
+        self.assertEqual(environment["DOTNET_ROOT"], str((prefix.parent.parent / "lib" / "dotnet").resolve()))
+        self.assertEqual(environment["DOTNET_ROOT_X64"], environment["DOTNET_ROOT"])
 
     def test_frozen_environment_scan_finds_conda_without_path_and_hides_workbench(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -300,6 +303,7 @@ class WebWorkbenchTests(unittest.TestCase):
                 _executable, args, _config = core.build_command({"tool_id": "diagnostics", "values": {}})
             run_dir = Path(args[args.index("--run-dir") + 1])
             self.assertEqual(run_dir.parent, Path(directory) / "diagnostics")
+            self.assertRegex(run_dir.name, r"^run1-[a-z]{5}$")
             self.assertTrue(run_dir.parent.is_dir())
             self.assertFalse(run_dir.exists())
 

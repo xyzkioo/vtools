@@ -79,7 +79,10 @@ python -m pip install nncase==<相同版本> nncase-kpu==<相同版本>
 
 #### 3. `PY2KM_validate.py`
 
-该脚本在主机上用 ONNX Runtime 和 nncase Simulator 对比 ONNX 与 `.kmodel`：
+该脚本在主机上用 ONNX Runtime 和 nncase Simulator 对比 ONNX 与 `.kmodel`。`--image`
+可以填写单张图片，也可以填写图片目录；目录中的 `.jpg`、`.jpeg`、`.png`、`.bmp`、
+`.webp`、`.tif` 和 `.tiff` 会按文件名排序逐张校验，最后给出整体结果。单张图片适合
+快速检查，目录适合确认转换结果在一批真实输入上的一致性：
 
 ```bash
 python -m pip install pillow numpy onnxruntime

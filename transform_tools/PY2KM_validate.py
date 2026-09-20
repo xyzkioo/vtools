@@ -1,7 +1,17 @@
-import os, sys, argparse
+import argparse
+import os
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    from transform_tools.py2kmodel import configure_dotnet
+except ModuleNotFoundError:
+    # The script is also supported as `python transform_tools/PY2KM_validate.py`;
+    # in that mode Python puts the script directory, rather than the repository
+    # root, on sys.path.
+    from py2kmodel import configure_dotnet
 
 # ONNX vs kmodel 推理一致性校验脚本
 
@@ -13,6 +23,24 @@ os.environ["PATH"] = _site_packages + os.pathsep + os.environ.get("PATH", "")
 TARGET_SIZE = 320                                                        # letterbox 目标尺寸（与 convert.py 保持一致）
 FILL_COLOR = (128, 128, 128)                                             # letterbox 填充色 (R, G, B)
 NORMALIZE = True                                                         # ONNX 输入是否 /255 归一化 (kmodel 始终 uint8)
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+
+
+def resolve_image_paths(image_path):
+    """Return one image or all supported images in a directory."""
+
+    target = Path(image_path).expanduser().resolve()
+    if target.is_file():
+        return [target]
+    if not target.is_dir():
+        raise FileNotFoundError(f"未找到图片或目录: {target}")
+    paths = [
+        child for child in sorted(target.iterdir(), key=lambda item: item.name.casefold())
+        if child.is_file() and child.suffix.lower() in IMAGE_SUFFIXES
+    ]
+    if not paths:
+        raise ValueError(f"目录中没有支持的图片（{', '.join(sorted(IMAGE_SUFFIXES))}）: {target}")
+    return paths
 
 
 @contextmanager
@@ -39,11 +67,12 @@ def letterbox(img, target_size, fill_color):
     return canvas
 
 
-def onnx_infer(onnx_path, img, target_size, fill_color, normalize):
+def onnx_infer(onnx_path, img, target_size, fill_color, normalize, session=None):
     import numpy as np
     import onnxruntime as ort
     print("[1/2] ONNX 推理 ...")
-    session = ort.InferenceSession(onnx_path)
+    if session is None:
+        session = ort.InferenceSession(onnx_path)
     input_name = session.get_inputs()[0].name
 
     img = letterbox(img, target_size, fill_color)
@@ -81,12 +110,23 @@ def onnx_infer(onnx_path, img, target_size, fill_color, normalize):
     return outputs
 
 
-def kmodel_infer(kmodel_path, img, target_size, fill_color):
+def load_kmodel_simulator(kmodel_path):
+    dotnet_root = configure_dotnet()
+    if dotnet_root:
+        print(f"使用 .NET 运行时: {dotnet_root}")
+    import nncase
+
+    simulator = nncase.Simulator()
+    simulator.load_model(Path(kmodel_path).read_bytes())
+    return simulator
+
+
+def kmodel_infer(kmodel_path, img, target_size, fill_color, simulator=None):
     import numpy as np
     import nncase
     print("[2/2] kmodel 推理 ...")
-    simulator = nncase.Simulator()
-    simulator.load_model(Path(kmodel_path).read_bytes())
+    if simulator is None:
+        simulator = load_kmodel_simulator(kmodel_path)
 
     img = letterbox(img, target_size, fill_color)
     input_tensor = np.array(img, dtype=np.uint8)
@@ -142,7 +182,7 @@ def main():
     parser = argparse.ArgumentParser(description="ONNX vs kmodel 推理一致性验证")
     parser.add_argument("--onnx", required=True, help="ONNX 模型路径")
     parser.add_argument("--kmodel", required=True, help="kmodel 模型路径")
-    parser.add_argument("--image", required=True, help="测试图片路径")
+    parser.add_argument("--image", required=True, help="测试图片路径或图片目录（目录按文件名排序批量校验）")
     parser.add_argument("--size", type=int, default=TARGET_SIZE, help=f"letterbox 目标尺寸 (默认: {TARGET_SIZE})")
     parser.add_argument("--color", type=int, nargs=3, metavar=("R", "G", "B"), default=FILL_COLOR, help=f"letterbox 填充色 (默认: {FILL_COLOR})")
     parser.add_argument("--no-norm", dest="normalize", action="store_false", default=NORMALIZE, help="ONNX 输入不做 /255 归一化")
@@ -167,21 +207,42 @@ def main():
     if args.mae_threshold < 0:
         parser.error("--mae-threshold 不能小于 0")
 
-    for name, path in (("ONNX", onnx_path), ("kmodel", kmodel_path), ("图片", image_path)):
+    for name, path in (("ONNX", onnx_path), ("kmodel", kmodel_path)):
         if not os.path.exists(path):
             sys.exit(f"❌ 未找到{name}文件: {path}")
+    try:
+        image_paths = resolve_image_paths(image_path)
+    except (FileNotFoundError, ValueError) as exc:
+        sys.exit(f"❌ {exc}")
+    onnx_path = str(Path(onnx_path).expanduser().resolve())
+    kmodel_path = str(Path(kmodel_path).expanduser().resolve())
 
     print(f"配置: onnx={onnx_path}\n      kmodel={kmodel_path}\n      image={image_path}\n      size={size}, color={fill_color}, normalize={normalize}\n")
 
     from PIL import Image
 
-    img = Image.open(image_path).convert("RGB")
+    import onnxruntime as ort
 
-    onnx_outputs = onnx_infer(onnx_path, img, size, fill_color, normalize=normalize)
+    onnx_session = ort.InferenceSession(onnx_path)
+    all_passed = True
     with _isolated_simulator_workspace():
-        kmodel_outputs = kmodel_infer(kmodel_path, img, size, fill_color)
+        simulator = load_kmodel_simulator(kmodel_path)
+        for index, image_file in enumerate(image_paths, start=1):
+            print(f"\n===== 图片 {index}/{len(image_paths)}: {image_file.name} =====")
+            try:
+                with Image.open(image_file) as source:
+                    img = source.convert("RGB")
+            except Exception as exc:
+                print(f"  图片读取失败: {exc}")
+                all_passed = False
+                continue
+            onnx_outputs = onnx_infer(onnx_path, img, size, fill_color, normalize=normalize, session=onnx_session)
+            kmodel_outputs = kmodel_infer(kmodel_path, img, size, fill_color, simulator=simulator)
+            image_passed = compare(onnx_outputs, kmodel_outputs, args.cosine_threshold, args.mae_threshold)
+            all_passed = all_passed and image_passed
 
-    return 0 if compare(onnx_outputs, kmodel_outputs, args.cosine_threshold, args.mae_threshold) else 1
+    print(f"\n批量校验结果: {len(image_paths)} 张图片，整体 {'PASS' if all_passed else 'FAIL'}")
+    return 0 if all_passed else 1
 
 
 if __name__ == "__main__":

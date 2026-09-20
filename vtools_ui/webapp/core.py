@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,21 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".ti
 MODEL_SUFFIXES = {".pt", ".pth", ".onnx", ".engine", ".kmodel"}
 SKIP_DIRS = {".git", ".vtools_ui", "__pycache__", "node_modules"}
 PREVIEW_BYTES = 256 * 1024
+
+
+def _visible_run_name(root: Path) -> str:
+    """Return a readable sequential run name with a short random suffix."""
+
+    largest = 0
+    if root.is_dir():
+        for child in root.iterdir():
+            if not child.is_dir() or not child.name.startswith("run"):
+                continue
+            number, separator, _suffix = child.name[3:].partition("-")
+            if separator and number.isdigit():
+                largest = max(largest, int(number))
+    suffix = "".join(secrets.choice(string.ascii_lowercase) for _ in range(5))
+    return f"run{largest + 1}-{suffix}"
 
 
 def _default_python_executable() -> str:
@@ -320,7 +336,8 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
             # py2kmodel has repository-relative defaults for optional ONNX and
             # kmodel outputs. A packaged app must never target its read-only
             # _internal directory when those fields are left blank.
-            output_root = _results_root_path(settings["results_root"]) / "transform" / "kmodel" / f"run-{uuid.uuid4().hex}"
+            output_parent = _results_root_path(settings["results_root"]) / "transform" / "kmodel"
+            output_root = output_parent / _visible_run_name(output_parent)
             output_root.mkdir(parents=True, exist_ok=True)
             args += ["--output-dir", str(output_root)]
         title = variant["title"]
@@ -429,7 +446,7 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
             results_root = _results_root_path(settings["results_root"])
             tool_root = results_root / tool_id
             tool_root.mkdir(parents=True, exist_ok=True)
-            args += ["--run-dir", str(tool_root / f"run-{uuid.uuid4().hex}")]
+            args += ["--run-dir", str(tool_root / _visible_run_name(tool_root))]
     script = Path(args[0])
     if not script.is_file():
         raise ValueError(f"入口文件不存在：{args[0]}")
