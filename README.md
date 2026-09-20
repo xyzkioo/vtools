@@ -4,6 +4,35 @@
 
 `vtools` 把模型开发中常见的“模型能不能跑、错在哪里、到底快不快、能不能部署”组织成一套可复查的工作流。它提供统一的桌面工作台，也保留 YAML 和命令行入口，适合个人实验、模型迭代和边缘设备部署前验证。
 
+<p align="center">
+  <img src="docs/images/vtools-main.png" width="920" alt="vtools 桌面工作台主界面">
+</p>
+
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/images/diagnostics.png" alt="检测诊断界面"><br>
+      <strong>检测诊断</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/images/visualization.png" alt="模型可视化界面"><br>
+      <strong>模型可视化</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/images/pytorch-benchmark.png" alt="PyTorch 性能测速界面"><br>
+      <strong>PyTorch 性能测速</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/images/results-preview.png" alt="运行结果预览界面"><br>
+      <strong>结果预览</strong>
+    </td>
+  </tr>
+</table>
+
 ## 它解决什么问题
 
 - **看清模型为什么错**：定位漏检、错分类、定位偏差、重复框和背景误检，并保留逐图、逐目标和差图证据。
