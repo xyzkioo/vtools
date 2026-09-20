@@ -5,8 +5,8 @@ from model_compression.core.module_selection import resolve_compression_modules
 
 class CompressionModuleSelectionTests(unittest.TestCase):
     def test_only_selection_disables_omitted_modules(self):
-        values = resolve_compression_modules({}, only=["branch.create"])
-        self.assertTrue(values["branch.create"])
+        values = resolve_compression_modules({}, only=["model.parameters"])
+        self.assertTrue(values["model.parameters"])
         self.assertFalse(values["baseline.evaluate"])
 
     def test_partial_config_is_an_allow_list(self):
@@ -16,7 +16,7 @@ class CompressionModuleSelectionTests(unittest.TestCase):
 
     def test_conflicting_cli_flags_are_rejected(self):
         with self.assertRaises(ValueError):
-            resolve_compression_modules({}, enable=["branch.create"], disable=["branch.create"])
+            resolve_compression_modules({}, enable=["model.parameters"], disable=["model.parameters"])
 
     def test_metric_comparison_leaves_missing_values_unknown(self):
         from model_compression.core.metrics import compare_to_baseline

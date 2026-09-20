@@ -54,7 +54,7 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, Mapping):
         raise TypeError("配置文件顶层必须是 YAML 对象")
-    removed = sorted(set(raw) & {"operation", "models"})
+    removed = sorted(set(raw) & {"operation", "models", "storage", "branch"})
     if removed:
         raise ValueError(f"已移除旧版配置字段：{', '.join(removed)}；请使用 model 和 modules")
     config: dict[str, Any] = copy.deepcopy(dict(raw))
@@ -81,10 +81,6 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     run.setdefault("enabled", True)
     run.setdefault("name", "auto")
     config["run"] = run
-
-    # 运行结果自包含在 runs/runN/ 中；旧 storage/branch 键仅为兼容读取，
-    # 不参与运行状态，也不会触发 store/registry 写入。
-    config.pop("storage", None)
 
     model = _mapping(config.get("model"), "model")
     model.setdefault("name", "model")
@@ -125,8 +121,6 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     if structured.get("initial_weights") is not None:
         structured["initial_weights"] = _resolve(structured["initial_weights"], project_root)
     config["compression"]["structured"] = structured
-    # 分支和版本指针属于已移除的跨运行注册表，不进入有效配置。
-    config.pop("branch", None)
     return config
 
 

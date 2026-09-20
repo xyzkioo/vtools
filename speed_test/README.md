@@ -30,7 +30,7 @@ by:小尛ovo
 1. 修改 `benchmark_config.yaml` 中的项目根目录、模型权重和输入图片。
 2. 可先运行 `inspect_checkpoint.py` 检查 `.pt` 是否能恢复模型架构。
 3. 从桌面 UI 选择“一键测速”，或在终端运行 `run_all.py`。
-4. 查看终端打印的 `runs-profile/runN` 目录；每次运行都会使用新的编号，
+4. 查看终端打印的 `speed_test/runs/runN` 目录；每次运行都会使用新的编号，
    其中包含本次的 PyTorch/TensorRT/一致性 CSV 或 JSON 结果。
 
 新增：直接运行 `check_consistency.py` 检查已有 ONNX/engine 与 PyTorch 的输出。
@@ -40,10 +40,10 @@ by:小尛ovo
 
 注意：须先成功构建 TensorRT engine；一致性通过不代替 mAP 验证。
 
-默认 `run.enabled: true`，结果会依次保存到 `runs-profile/run1`、`run2`……；
+默认 `run.enabled: true`，结果会依次保存到 `speed_test/runs/run1`、`run2`……；
 ONNX 和 TensorRT engine 仍使用 `tensorrt.onnx_dir`、`tensorrt.engine_dir` 的
 公共缓存。需要补跑到已有目录时，可在命令行加入
-`--run-dir runs-profile/run2`；设置 `run.enabled: false` 可恢复固定输出路径。
+`--run-dir speed_test/runs/run2`；设置 `run.enabled: false` 可恢复固定输出路径。
 
 ---
 
@@ -128,24 +128,24 @@ modules:
   memory.pytorch_peak: false
   export.onnx: false
   build.tensorrt: true
-  consistency.tensor: true
-  consistency.detection: false
+  consistency.tensor: false
+  consistency.detection: true
 
 run:
   enabled: true
-  root: runs-profile
+  root: speed_test/runs
   name: auto
 
 pytorch:
   precisions: [fp32, fp16]
-  output: runs-profile/vision_speed_v2.csv
+  output: speed_test/runs/vision_speed_v2.csv
 
 tensorrt:
   builder: python          # TensorRT Python API；不需要 trtexec
   precision: fp16
   onnx_opset: 18
   rebuild_engine: false
-  output: runs-profile/vision_tensorrt_v2.csv
+  output: speed_test/runs/vision_tensorrt_v2.csv
 ```
 
 路径规则：
@@ -154,7 +154,7 @@ tensorrt:
 - `weights`、`image` 等输入路径的相对路径相对于 `project.root`。
 - 启用 `run.enabled: true` 后，每次入口调用会在 `run.root` 下创建下一个
   `run1`、`run2`、`run3`……；CSV/JSON 报告和汇总默认放到该目录。
-  配置中原有的 `runs-profile/...` 报告写法会自动转换成当前 run 目录下的相对路径。
+  配置中原有的报告路径写法会自动转换成当前 run 目录下的相对路径。
 - ONNX 和 TensorRT engine 仍保留在 `tensorrt.onnx_dir`、`tensorrt.engine_dir`
   公共目录，便于 `rebuild_engine: false` 复用，不会因分 run 而重复构建。
 - 输出路径写成 `run.root` 之外的绝对路径时会保留原位置；这可用于固定外部日志目录。
@@ -168,14 +168,14 @@ tensorrt:
 ```yaml
 run:
   enabled: true
-  root: runs-profile
+  root: speed_test/runs
   name: auto
 ```
 
 例如连续执行三次 `run_all.py` 后，目录结构类似：
 
 ```text
-runs-profile/
+speed_test/runs/
 ├── run1/
 │   ├── vision_speed_v2.csv
 │   ├── vision_tensorrt_v2.csv
@@ -186,8 +186,8 @@ runs-profile/
 ├── run2/
 └── run3/
 
-runs-profile/onnx/       # 公共 ONNX 缓存
-runs-profile/engines/    # 公共 TensorRT engine 缓存
+speed_test/runs/onnx/       # 公共 ONNX 缓存
+speed_test/runs/engines/    # 公共 TensorRT engine 缓存
 ```
 
 `run_all.py` 会把同一次调用的 PyTorch、TensorRT 和一致性检查放在同一个
@@ -198,7 +198,7 @@ runs-profile/engines/    # 公共 TensorRT engine 缓存
 如果需要复用已经创建的目录（例如只补跑某个阶段），在命令行填写：
 
 ```text
---run-dir runs-profile/run2
+--run-dir speed_test/runs/run2
 ```
 
 也可以在命令行使用同样的参数。`run2` 已存在时会在该目录继续写入，因此只
@@ -393,8 +393,8 @@ modules:
   speed.pytorch_pipeline: false
   speed.tensorrt_call: true
   build.tensorrt: true
-  consistency.tensor: true
-  consistency.detection: false
+  consistency.tensor: false
+  consistency.detection: true
 
 consistency:
   input_mode: image
@@ -408,10 +408,14 @@ consistency:
   detection_conf: 0.25
   detection_iou: 0.95
   score_atol: 0.01
-  output: runs-profile/consistency.csv
-  json_output: runs-profile/consistency.json
+  output: speed_test/runs/consistency.csv
+  json_output: speed_test/runs/consistency.json
 
 ```
+
+默认检测模型只启用 `consistency.detection`。端到端检测输出经过 NMS，候选框顺序可能变化，
+因此直接逐元素比较整块输出通常没有语义。需要定位普通模型或特定导出节点的数值误差时，
+再显式启用 `consistency.tensor`。
 
 这是需要合并到现有 YAML 的配置片段，不要在同一 YAML 中重复添加同名顶层键。
 完整文件已经包含逐项中文注释；升级时保留你自己的 project/models 路径。

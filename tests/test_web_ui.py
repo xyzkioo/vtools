@@ -22,6 +22,35 @@ from vtools_ui.process_environment import build_tool_environment
 
 
 class WebWorkbenchTests(unittest.TestCase):
+    def test_history_recovers_from_invalid_content_and_writes_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            path.write_text('{"unexpected": true}', encoding="utf-8")
+            with patch.object(core, "HISTORY_PATH", path), \
+                    patch.object(core, "read_settings", return_value={"history_limit": 40}):
+                core.add_history({"task": "task"})
+            records = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(records, [{"task": "task"}])
+
+    def test_failed_history_publish_preserves_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "history.json"
+            path.write_text("[]", encoding="utf-8")
+            original_replace = Path.replace
+
+            def fail_for_history(source: Path, target: Path) -> Path:
+                if Path(target) == path:
+                    raise OSError("disk full")
+                return original_replace(source, target)
+
+            with patch.object(core, "HISTORY_PATH", path), \
+                    patch.object(core, "read_settings", return_value={"history_limit": 40}), \
+                    patch.object(Path, "replace", fail_for_history):
+                with self.assertRaises(OSError):
+                    core.add_history({"task": "task"})
+            self.assertEqual(path.read_text(encoding="utf-8"), "[]")
+            self.assertEqual(list(path.parent.iterdir()), [path])
+
     def test_selected_python_receives_packaged_runtime_and_environment_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "_internal"
@@ -243,9 +272,16 @@ class WebWorkbenchTests(unittest.TestCase):
             core.build_command({"tool_id": "dataset_quality", "values": {}})
 
     def test_frozen_workbench_wraps_tool_scripts(self) -> None:
-        with patch.object(core.sys, "frozen", True, create=True), patch.object(core.sys, "executable", sys.executable):
+        expected = sys.executable
+        with patch.object(core.sys, "frozen", True, create=True), \
+                patch.object(core.sys, "executable", expected), \
+                patch.object(core, "read_settings", return_value={
+                    "python_executable": expected,
+                    "results_root": str(core.ROOT),
+                    "history_limit": 40,
+                }):
             executable, args, _config = core.build_command({"tool_id": "environment", "values": {"skip_model": True}})
-        self.assertEqual(Path(executable).resolve(), Path(sys.executable).resolve())
+        self.assertEqual(Path(executable).resolve(), Path(expected).resolve())
         self.assertEqual(args[0], "--run-script")
         self.assertEqual(Path(args[1]).name, "check_install.py")
 
@@ -341,6 +377,34 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(manager.state()["status"], "stopped")
         self.assertNotEqual(manager.state()["exit_code"], 0)
 
+    def test_benchmark_execution_error_is_not_reported_as_warning(self) -> None:
+        manager = TaskManager()
+        with patch("vtools_ui.webapp.tasks.build_command", return_value=(
+                sys.executable, ["-c", "print('一致性总状态：error'); raise SystemExit(1)"], None)), \
+                patch("vtools_ui.webapp.tasks.add_history"):
+            manager.start({"tool_id": "benchmark"})
+            cursor = 0
+            for _ in range(10):
+                events, done = manager.events_after(cursor, timeout=2)
+                cursor += len(events)
+                if done:
+                    break
+        self.assertEqual(manager.state()["status"], "failed")
+
+    def test_benchmark_findings_are_reported_as_warning(self) -> None:
+        manager = TaskManager()
+        with patch("vtools_ui.webapp.tasks.build_command", return_value=(
+                sys.executable, ["-c", "print('一致性总状态：failed'); raise SystemExit(1)"], None)), \
+                patch("vtools_ui.webapp.tasks.add_history"):
+            manager.start({"tool_id": "benchmark"})
+            cursor = 0
+            for _ in range(10):
+                events, done = manager.events_after(cursor, timeout=2)
+                cursor += len(events)
+                if done:
+                    break
+        self.assertEqual(manager.state()["status"], "succeeded_with_issues")
+
     def test_log_open_failure_reaps_started_process(self) -> None:
         manager = TaskManager()
         started = []
@@ -406,7 +470,7 @@ class WebWorkbenchTests(unittest.TestCase):
 
     def test_benchmark_difference_is_completed_with_warning(self) -> None:
         manager = TaskManager()
-        with patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, ["-c", "raise SystemExit(1)"], None)), patch("vtools_ui.webapp.tasks.add_history") as add_history_mock:
+        with patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, ["-c", "print('一致性总状态：failed'); raise SystemExit(1)"], None)), patch("vtools_ui.webapp.tasks.add_history") as add_history_mock:
             manager.start({"tool_id": "benchmark"})
             cursor = 0
             for _ in range(10):

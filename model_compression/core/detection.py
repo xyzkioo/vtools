@@ -3,15 +3,99 @@ from __future__ import annotations
 
 from pathlib import Path
 import math
+import os
+import shutil
 import statistics
 import time
 from typing import Any, Mapping
 
 from .model_runtime import parameter_metrics, resolve_device
-from .registry import artifact_info
+from .provenance import artifact_info
 from ..modules.pruning import prune_unstructured
 from ..modules.dependency_pruning import prune_detector_dependency_aware
 from ..modules.structured import build_structured_detector, finetune_structured_detector
+
+
+def _resolved_dataset_root(data_path: Path, raw_root: Any) -> Path:
+    root = Path(str(raw_root or ".")).expanduser()
+    return (root if root.is_absolute() else data_path.parent / root).resolve()
+
+
+def _link_or_copy(source: Path, target: Path) -> None:
+    """Mirror a dataset directory into a run directory without editing input."""
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        for child in source.iterdir():
+            _link_or_copy(child, target / child.name)
+        return
+    try:
+        # Hardlinks keep the mirror cheap while preserving the shadow path;
+        # Ultralytics then writes its cache beside the hardlinked labels.
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+
+
+def _isolated_validation_data(data_path: Path, run_dir: Path, split: str) -> Path:
+    """Point standard YOLO validation paths at run-local label-cache locations.
+
+    Ultralytics stores ``labels.cache`` beside the first label directory. A
+    run-local mirror keeps that generated file out of the user's dataset while
+    retaining the original bytes through hardlinks (or a safe copy fallback).
+    Non-standard layouts are left untouched because their label mapping cannot
+    be inferred safely here.
+    """
+
+    try:
+        import yaml
+    except ImportError:
+        return data_path
+    try:
+        raw = yaml.safe_load(data_path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError, yaml.YAMLError):
+        return data_path
+    if not isinstance(raw, dict):
+        return data_path
+    source = raw.get(split)
+    if not isinstance(source, str) or not source.strip() or any(char in source for char in "[]"):
+        return data_path
+    dataset_root = _resolved_dataset_root(data_path, raw.get("path"))
+    source_path = Path(source).expanduser()
+    source_path = (source_path if source_path.is_absolute() else dataset_root / source_path).resolve()
+    if not source_path.is_dir():
+        return data_path
+    try:
+        relative_source = source_path.relative_to(dataset_root)
+    except ValueError:
+        return data_path
+    relative_parts = relative_source.parts
+    if not relative_parts:
+        return data_path
+    if relative_parts[0].lower() == "images":
+        suffix = Path(*relative_parts[1:])
+        original_labels = dataset_root / "labels" / suffix
+    elif relative_parts[-1].lower() == "images":
+        suffix = Path(*relative_parts[:-1])
+        original_labels = source_path.parent / "labels"
+    else:
+        return data_path
+    if not original_labels.is_dir():
+        return data_path
+    mirror_root = run_dir / "_input" / "dataset"
+    mirror_images = mirror_root / "images" / suffix
+    mirror_labels = mirror_root / "labels" / suffix
+    if not mirror_images.exists():
+        _link_or_copy(source_path, mirror_images)
+    if not mirror_labels.exists():
+        _link_or_copy(original_labels, mirror_labels)
+    raw["path"] = str(mirror_root)
+    raw[split] = str(Path("images") / suffix)
+    isolated = run_dir / "_input" / "data.yaml"
+    isolated.parent.mkdir(parents=True, exist_ok=True)
+    isolated.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return isolated
 
 
 def detection_data(config: Mapping[str, Any]) -> Path | None:
@@ -106,8 +190,10 @@ def evaluate_detector(detector, config: Mapping[str, Any], run_dir: Path, name: 
     device = None if device == 'auto' else str(device).replace('cuda:', '')
     # ``val`` may fuse the model in place. Callers that need to mutate the
     # checkpoint after validation reload it before doing so.
+    split = str(evaluation.get('split', 'val'))
+    validation_data = _isolated_validation_data(data, run_dir, split)
     metrics = detector.val(
-        data=str(data), split=evaluation.get('split', 'val'),
+        data=str(validation_data), split=split,
         imgsz=config.get('dataset', {}).get('input_size', 640),
         batch=int(evaluation.get('batch_size', 1)), device=device,
         workers=0, project=str(run_dir), name=name, exist_ok=True,
@@ -180,13 +266,12 @@ def benchmark_detector(detector, config: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_detection_operation(module_id, config, registry, run_dir, run_id):
+def run_detection_operation(module_id, config, state, run_dir, run_id):
     """Use detection metrics and Ultralytics checkpoints for supported operations."""
     if module_id in {'compression.quantize.dynamic_int8', 'distillation.classification'}:
         raise ValueError('该模块为分类流程；YOLO 检测当前支持基线评估、非结构化剪枝、结构化缩放和导出。')
-    branch_name = config.get('branch', {}).get('name', 'main')
     explicit = config.get('model', {}).get('weights')
-    head, resolved_weights = registry.resolve_input_version(branch_name, explicit)
+    head, resolved_weights = state.current(explicit)
     if not resolved_weights:
         raise ValueError('请先选择 YOLO 模型权重。')
     weights = Path(resolved_weights)
@@ -312,27 +397,26 @@ def run_detection_operation(module_id, config, registry, run_dir, run_id):
         elif 'before_structured_pruning' in metadata:
             baseline_metadata = dict(metadata['before_structured_pruning'])
         baseline_metadata['task'] = 'detect'
-        original = registry.add_version(name=config.get('model', {}).get('name', 'yolo'),
+        original = state.add_version(name=config.get('model', {}).get('name', 'yolo'),
             artifact=input_weights, parent_version_id=None, run_id=run_id, method='baseline',
             metadata=baseline_metadata)
         head = original['id']
-        registry.advance_branch(branch_name, head)
+        state.advance(head)
     if module_id == 'compression.prune.unstructured':
-        version = registry.add_version(name='yolo-pruned', artifact=weights, parent_version_id=head,
+        version = state.add_version(name='yolo-pruned', artifact=weights, parent_version_id=head,
             run_id=run_id, method='unstructured_l1', metadata=metadata)
         head = version['id']
-        registry.advance_branch(branch_name, head)
+        state.advance(head)
     elif module_id == 'compression.prune.structured':
         registry_method = 'structured_torch_pruning' if metadata.get('structured_method') in {
             'torch_pruning', 'torch-pruning', 'dependency', 'dependency_aware'
         } else 'structured_width_scaling'
-        version = registry.add_version(name='yolo-structured', artifact=weights, parent_version_id=head,
+        version = state.add_version(name='yolo-structured', artifact=weights, parent_version_id=head,
             run_id=run_id, method=registry_method, metadata=metadata)
         head = version['id']
-        registry.advance_branch(branch_name, head)
+        state.advance(head)
     elif module_id in {'baseline.evaluate', 'model.parameters'}:
-        registry.data['versions'][head].setdefault('metadata', {}).update(metadata)
-        registry.save()
+        state.versions[head].setdefault('metadata', {}).update(metadata)
     if 'export_info' in locals():
         metadata['verification'] = {'reload': True, 'validation': 'evaluated', 'task': 'detect'}
     result = {'module': module_id, 'status': 'succeeded', 'version_id': head,

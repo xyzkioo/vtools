@@ -8,23 +8,18 @@ from pathlib import Path
 #这个是01studio的k230用的.py转换成.kmodel的代码
 # ================== 路径与参数配置 ==================
 PT_PATH = "best.pt"
-ONNX_PATH = "best.onnx"
-KMODEL_PATH = "best.kmodel"
 CALIB_DIR = ""    # 校准图片目录；请通过 --calib-dir 或此处填写
 TARGET_SIZE = 320   #尺寸不能错
 FILL_COLOR = (128, 128, 128)
 CALIB_SAMPLES = 200 #修正用的图片数量
 
 
-def output_paths(pt_path, output_dir=None, onnx_path=None, kmodel_path=None):
-    """Resolve converter outputs while preserving the legacy file arguments."""
+def output_paths(pt_path, output_dir=None):
+    """Resolve both converter outputs beneath one output directory."""
 
-    if output_dir:
-        directory = Path(output_dir).expanduser().resolve()
-        stem = Path(pt_path).stem
-        onnx_path = onnx_path or directory / f"{stem}.onnx"
-        kmodel_path = kmodel_path or directory / f"{stem}.kmodel"
-    return str(onnx_path or ONNX_PATH), str(kmodel_path or KMODEL_PATH)
+    directory = Path(output_dir).expanduser().resolve() if output_dir else Path.cwd() / "outputs" / "k230"
+    stem = Path(pt_path).stem
+    return str(directory / f"{stem}.onnx"), str(directory / f"{stem}.kmodel")
 
 
 def require_module(module_name, package_name=None):
@@ -100,7 +95,7 @@ def letterbox(img, target_size=640, color=FILL_COLOR):
     return canvas
 
 # ================== 步骤1：导出 + 简化 ONNX ==================
-def export_onnx(pt_path=PT_PATH, onnx_path=ONNX_PATH, target_size=TARGET_SIZE, rebuild=False):
+def export_onnx(pt_path, onnx_path, target_size=TARGET_SIZE, rebuild=False):
     YOLO = load_yolo(pt_path)
     onnx = require_module("onnx")
     onnxsim = require_module("onnxsim")
@@ -152,7 +147,7 @@ def export_onnx(pt_path=PT_PATH, onnx_path=ONNX_PATH, target_size=TARGET_SIZE, r
     print(f"✅ ONNX 已简化: {onnx_path}")
 
 # ================== 步骤2：量化生成 kmodel ==================
-def quantize(onnx_path=ONNX_PATH, kmodel_path=KMODEL_PATH, calib_dir=CALIB_DIR, target_size=TARGET_SIZE, calib_samples=CALIB_SAMPLES, rebuild=False):
+def quantize(onnx_path, kmodel_path, calib_dir=CALIB_DIR, target_size=TARGET_SIZE, calib_samples=CALIB_SAMPLES, rebuild=False):
     dotnet_root = configure_dotnet()
     if dotnet_root:
         print(f"使用 .NET 运行时: {dotnet_root}")
@@ -245,13 +240,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PyTorch/Ultralytics 模型转换为 K230 .kmodel")
     parser.add_argument("--pt", default=PT_PATH, help="PyTorch 权重")
     parser.add_argument("--output-dir", help="输出目录；默认按权重文件名生成 .onnx 和 .kmodel")
-    parser.add_argument("--onnx", help="自定义 ONNX 输出路径（兼容旧用法）")
-    parser.add_argument("--kmodel", help="自定义 kmodel 输出路径（兼容旧用法）")
     parser.add_argument("--calib-dir", default=CALIB_DIR, help="校准图片目录")
     parser.add_argument("--size", type=int, default=TARGET_SIZE, help="输入边长")
     parser.add_argument("--samples", type=int, default=CALIB_SAMPLES, help="校准图片数量")
     parser.add_argument("--rebuild", action="store_true", help="覆盖已有 ONNX / kmodel")
     args = parser.parse_args()
-    onnx_path, kmodel_path = output_paths(args.pt, args.output_dir, args.onnx, args.kmodel)
+    onnx_path, kmodel_path = output_paths(args.pt, args.output_dir)
     export_onnx(args.pt, onnx_path, args.size, args.rebuild)
     quantize(onnx_path, kmodel_path, args.calib_dir, args.size, args.samples, args.rebuild)

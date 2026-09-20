@@ -14,6 +14,23 @@ from model_diagnostics.check_dataset import audit, main
 
 
 class DatasetQualityTests(unittest.TestCase):
+    def test_rounding_at_image_boundary_is_not_reported_or_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image_dir = root / "images"
+            label_dir = root / "labels"
+            image_dir.mkdir()
+            label_dir.mkdir()
+            Image.new("RGB", (64, 64), "white").save(image_dir / "edge.png")
+            label = label_dir / "edge.txt"
+            label.write_text("0 0.992135 0.946960 0.015731 0.076855\n", encoding="utf-8")
+            data = root / "data.yaml"
+            data.write_text("path: .\nval: images\nnames: [cat]\n", encoding="utf-8")
+            result = audit(data, root / "reports", sample_count=0)
+
+            self.assertEqual(result["class_counts"], {"0": 1})
+            self.assertNotIn("out_of_bounds_box", result["issue_counts"])
+
     def test_report_preserves_inputs_and_finds_cross_split_problems(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

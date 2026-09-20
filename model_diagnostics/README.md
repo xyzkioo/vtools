@@ -41,7 +41,7 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 
 环境检查脚本会检查 PyTorch、CUDA 和 `YOLO` 的训练、推理、验证接口。
 
-然后修改带中文注释的 `config/config.yaml`，从桌面 UI 选择“检测诊断”，或在仓库根目录执行运行器。每次结果写入 `runs/runN/<mode_name>/`，不会覆盖上一次运行。
+然后修改带中文注释的 `config/config.yaml`，从桌面 UI 选择“检测诊断”，或在仓库根目录执行运行器。每次结果写入 `model_diagnostics/runs/runN/<mode_name>/`，不会覆盖上一次运行。
 
 入口配置使用三种有明确含义的互斥模式，不再需要 `models[].enabled`：
 

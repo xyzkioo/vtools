@@ -7,9 +7,18 @@ import numpy as np
 
 from model_visualization.core.capture import _aggregate, _channel_indices
 from model_visualization.core.common import append_html_index, image_output_name, load_config, parse_size, write_image
+from model_visualization.run_visualization import _logical_image_id
 
 
 class VisualizationOutput(unittest.TestCase):
+    def test_standalone_image_folder_has_a_stable_logical_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "resized"
+            root.mkdir()
+            image = root / "frame.jpg"
+            image.touch()
+            self.assertEqual(_logical_image_id(image, root), "frame.jpg")
+
     def test_input_size_must_be_positive(self):
         for value in (0, -1, [640, 0], "640x-1"):
             with self.subTest(value=value), self.assertRaises(ValueError):

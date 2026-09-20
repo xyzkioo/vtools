@@ -4,7 +4,7 @@
 
 ## 项目范围
 
-vtools 是一个以 Python 和 YAML 为核心的视觉模型工具集，包含检测诊断、模型可视化、PyTorch/TensorRT 测速、模型压缩、K230 转换、数据文件处理和 PySide6 桌面工作台。
+vtools 是一个以 Python 和 YAML 为核心的视觉模型工具集，包含检测诊断、模型可视化、PyTorch/TensorRT 测速、模型压缩、K230 转换、数据文件处理和 React/pywebview 桌面工作台。
 
 Ultralytics Fork 是 vtools 同级的独立仓库，不属于 vtools 的源码提交范围。修改 Fork 时遵循其仓库内的约定；不要把 vtools 的工具逻辑复制进上游包内部。vtools 通过 `project.ultralytics_repo`、`VTOOLS_ULTRALYTICS_REPO` 或同级目录发现它。
 
@@ -65,7 +65,7 @@ Ultralytics Fork 是 vtools 同级的独立仓库，不属于 vtools 的源码�
 python -m compileall -q .
 git diff --check
 
-# 通用回归（已安装 PyTorch/PySide6 时）
+# 通用回归（已安装 PyTorch 时）
 QT_QPA_PLATFORM=offscreen PYTHONPATH=.:speed_test:model_diagnostics \
   python -m unittest discover -s tests -q
 

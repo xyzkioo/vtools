@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""CLI backend for generic object-detection diagnostics.
-
-The YAML entry point uses one explicit mode at a time:
-
-* ``A`` reads an existing prediction file and does not load a model.
-* ``B`` loads an Ultralytics ``.pt`` through the built-in loader.
-* ``C`` loads a model through a vtools-compatible custom adapter.
-
-The diagnostics engine itself remains framework independent and only consumes
-canonical ``bbox/score/class_id`` detections.
-"""
+"""CLI backend for generic object-detection diagnostics."""
 
 from __future__ import annotations
 
@@ -52,9 +42,10 @@ def _resolve(value: Any, base: Path) -> Optional[Path]:
     return path if path.is_absolute() else (base / path).resolve()
 
 
-def _project_root(settings: Mapping[str, Any]) -> Path:
+def _project_root(settings: Mapping[str, Any], base: Path | None = None) -> Path:
     project = _mapping(settings.get("project"), "project")
-    return _resolve(project.get("root", "."), PROJECT_ROOT) or PROJECT_ROOT
+    anchor = (base or PROJECT_ROOT).resolve()
+    return _resolve(project.get("root", "."), anchor) or anchor
 
 
 def _add_python_paths(
@@ -419,7 +410,7 @@ def main() -> int:
         predictions_file["predictions"] = str(cli_args.predictions.expanduser().resolve())
         settings = dict(settings)
         settings["predictions_file"] = predictions_file
-    project_root = _project_root(settings)
+    project_root = _project_root(settings, config_path.parent)
     input_paths = tuple(
         path for path in (
             cli_args.data,

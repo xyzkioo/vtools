@@ -219,10 +219,82 @@ class WorkflowTests(unittest.TestCase):
             _sources({"input_mode": "image"}, {})
         self.assertEqual(_sources({"input_mode": "adapter"}, {}), [None])
 
+    def test_dataset_root_prefers_validation_images_over_generated_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            validation = root / "val" / "images" / "original.jpg"
+            generated = root / "run1" / "samples" / "report.png"
+            validation.parent.mkdir(parents=True)
+            generated.parent.mkdir(parents=True)
+            validation.touch()
+            generated.touch()
+            self.assertEqual(
+                _sources({"input_mode": "image", "source": str(root), "max_images": 10}, {}),
+                [validation],
+            )
+
+    def test_ultralytics_detect_export_and_validation_keep_primary_output(self):
+        if importlib.util.find_spec("torch") is None:
+            self.skipTest("需要 torch")
+        import torch
+        from core.vision_benchmark_common import _TupleOutputWrapper, UltralyticsAdapter
+
+        class Demo(torch.nn.Module):
+            def forward(self, value):
+                return value + 1, {"aux": value + 2}
+
+        value = torch.zeros(1)
+        outputs = _TupleOutputWrapper(Demo(), primary_only=True)(value)
+        self.assertEqual(len(outputs), 1)
+        self.assertTrue(torch.equal(outputs[0], value + 1))
+        adapter = UltralyticsAdapter(task="detect")
+        self.assertTrue(adapter.primary_export_output())
+        self.assertEqual(adapter.validation_outputs((value + 1, value + 2), ["detections"]), {"detections": value + 1})
+
+    def test_ultralytics_native_export_is_confined_to_run_directory(self):
+        if importlib.util.find_spec("torch") is None:
+            self.skipTest("需要 torch")
+        import torch
+        from core.vision_benchmark_common import InputBundle, UltralyticsAdapter
+
+        class Target(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pt_path = "/private/input/best.pt"
+
+        class Model:
+            def __init__(self):
+                self.model = Target()
+                self.arguments = None
+
+            def export(self, **kwargs):
+                self.arguments = kwargs
+                exported = Path(self.model.pt_path).with_suffix(".onnx")
+                exported.write_bytes(b"onnx")
+                return str(exported)
+
+        with tempfile.TemporaryDirectory() as directory:
+            model = Model()
+            output = Path(directory) / "artifacts" / "model.onnx"
+            result = UltralyticsAdapter(task="detect").export_onnx(
+                model,
+                output,
+                InputBundle.from_value(torch.zeros(1, 3, 320, 640)),
+                opset=17,
+                dynamic=False,
+            )
+            self.assertEqual(result, output.resolve())
+            self.assertEqual(model.model.pt_path, "/private/input/best.pt")
+            self.assertEqual(model.arguments["imgsz"], [320, 640])
+            self.assertEqual(model.arguments["device"], "cpu")
+            self.assertEqual(model.arguments["quantize"], 32)
+
     def test_yaml_paths_and_preserved_settings(self):
         cfg = load_config(Path(__file__).resolve().parents[1] / "benchmark_config.yaml")
         self.assertTrue(cfg["modules"]["speed.pytorch_call"])
         self.assertTrue(cfg["modules"]["speed.tensorrt_call"])
+        self.assertFalse(cfg["modules"]["consistency.tensor"])
+        self.assertTrue(cfg["modules"]["consistency.detection"])
         self.assertFalse(cfg["modules"]["speed.pytorch_pipeline"])
         self.assertNotIn("enabled", cfg["consistency"])
         self.assertTrue(Path(cfg["consistency"]["output"]).is_absolute())

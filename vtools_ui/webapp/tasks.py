@@ -117,9 +117,7 @@ class TaskManager:
                     status = "stopped"
                 elif exit_code == 0:
                     status = "succeeded"
-                elif self._state["tool_id"] in {"dataset_quality", "benchmark"} and exit_code == 1:
-                    # These tools use exit code 1 for a complete run with
-                    # findings. Real execution errors use exit code 2.
+                elif exit_code == 1 and self._completed_with_issues(self._state["tool_id"], log_file):
                     status = "succeeded_with_issues"
                 else:
                     status = "failed"
@@ -135,6 +133,27 @@ class TaskManager:
         except OSError as exc:
             self._emit("log", f"任务记录写入失败：{exc}\n")
         self._emit("state", final)
+
+    @staticmethod
+    def _completed_with_issues(tool_id: str, log_file: Path) -> bool:
+        """Recognize a completed report with findings, not a failed process."""
+
+        try:
+            text = log_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        if tool_id == "dataset_quality":
+            return "状态：issues_found" in text or "issues found" in text.lower()
+        if tool_id != "benchmark":
+            return False
+        if "Traceback (most recent call last)" in text or "阶段失败" in text or "错误：" in text:
+            return False
+        if "一致性总状态：error" in text:
+            return False
+        return any(
+            f"一致性总状态：{status}" in text
+            for status in ("failed", "warning", "inconclusive", "issues_found")
+        )
 
     def _capture_result(self, buffer: str) -> str:
         lines = buffer.splitlines(keepends=True)

@@ -332,7 +332,7 @@ class BaseAdapter:
         if not isinstance(export_model, nn.Module):
             raise TypeError("当前 adapter 没有提供可导出的 nn.Module")
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        wrapper = _TupleOutputWrapper(export_model)
+        wrapper = _TupleOutputWrapper(export_model, primary_only=self.primary_export_output())
         # wrapper 本身默认处于 train 模式；显式 eval，避免 exporter 误报并保证
         # BatchNorm/Dropout 等层与测速时的推理状态一致。
         wrapper.eval()
@@ -362,13 +362,19 @@ class BaseAdapter:
             )
         return output_path
 
+    def primary_export_output(self) -> bool:
+        """Whether ONNX export should keep only the first deployment tensor."""
+
+        return False
+
 
 class _TupleOutputWrapper(nn.Module):
     """把 tensor/list/dict 输出扁平化成 ONNX 可导出的 tuple。"""
 
-    def __init__(self, model: nn.Module) -> None:
+    def __init__(self, model: nn.Module, *, primary_only: bool = False) -> None:
         super().__init__()
         self.model = model
+        self.primary_only = primary_only
 
     def forward(self, *args: Any, **kwargs: Any) -> tuple[torch.Tensor, ...]:
         outputs = self.model(*args, **kwargs)
@@ -387,6 +393,8 @@ class _TupleOutputWrapper(nn.Module):
         visit(outputs)
         if not tensors:
             raise TypeError("模型输出中没有 Tensor，无法导出 ONNX")
+        if self.primary_only:
+            return (tensors[0],)
         return tuple(tensors)
 
 
@@ -586,6 +594,81 @@ class UltralyticsAdapter(BaseAdapter):
 
     def forward_model(self, model: Any) -> Any:
         return model.model if hasattr(model, "model") else model
+
+    def primary_export_output(self) -> bool:
+        # End-to-end detect 的第一个 Tensor 是部署所需的 [B, N, 6] 输出；
+        # 后续 Tensor 是原始预测和特征层，不应进入部署 engine。
+        return self.task == "detect"
+
+    def export_onnx(
+        self,
+        model: Any,
+        output_path: Path,
+        inputs: InputBundle,
+        opset: int,
+        dynamic: bool,
+    ) -> Path:
+        """Use the Ultralytics public exporter without writing beside the input weights."""
+
+        export = getattr(model, "export", None)
+        target = self.forward_model(model)
+        if self.task != "detect" or not callable(export) or not isinstance(target, nn.Module):
+            return super().export_onnx(model, output_path, inputs, opset, dynamic)
+
+        tensors = flatten_tensors((inputs.args, inputs.kwargs))
+        if not tensors or tensors[0].ndim != 4:
+            raise ValueError("Ultralytics ONNX 导出需要形状为 [B, C, H, W] 的 Tensor 输入")
+        image = tensors[0]
+        output_path = output_path.resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Ultralytics derives the output name from DetectionModel.pt_path. Point it
+        # at this run directory only for the duration of export, then restore it so
+        # neither the source checkpoint nor the loaded model is modified.
+        had_pt_path = hasattr(target, "pt_path")
+        original_pt_path = getattr(target, "pt_path", None)
+        target.pt_path = str(output_path.with_suffix(".pt"))
+        device = str(image.device)
+        if device.startswith("cuda:"):
+            device = device.split(":", 1)[1]
+        try:
+            exported = Path(
+                export(
+                    format="onnx",
+                    imgsz=[int(image.shape[-2]), int(image.shape[-1])],
+                    batch=int(image.shape[0]),
+                    device=device,
+                    quantize=16 if image.dtype == torch.float16 else 32,
+                    opset=opset,
+                    dynamic=dynamic,
+                    simplify=False,
+                    nms=False,
+                    verbose=False,
+                )
+            ).resolve()
+        finally:
+            if had_pt_path:
+                target.pt_path = original_pt_path
+            else:
+                delattr(target, "pt_path")
+
+        if exported != output_path:
+            raise RuntimeError(f"Ultralytics 导出位置异常：期望 {output_path}，实际 {exported}")
+        if not output_path.is_file():
+            raise FileNotFoundError(f"Ultralytics 未生成 ONNX 文件：{output_path}")
+        return output_path
+
+    def validation_outputs(self, outputs: Any, output_names: list[str]) -> dict[str, torch.Tensor]:
+        tensors = flatten_tensors(outputs)
+        if self.task == "detect" and len(output_names) == 1:
+            if not tensors:
+                raise ValueError("Ultralytics detect 没有可验证的 Tensor 输出")
+            return {output_names[0]: tensors[0]}
+        if len(tensors) != len(output_names):
+            raise ValueError(
+                f"PyTorch 有 {len(tensors)} 个 Tensor 输出，ONNX 有 {len(output_names)} 个"
+            )
+        return dict(zip(output_names, tensors))
 
     def prepare_model(self, model: Any, device: torch.device, precision: str, fuse: bool = False) -> Any:
         target = self.forward_model(model)

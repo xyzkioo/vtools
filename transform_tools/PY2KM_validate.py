@@ -1,4 +1,6 @@
 import os, sys, argparse
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 # ONNX vs kmodel 推理一致性校验脚本
@@ -11,6 +13,19 @@ os.environ["PATH"] = _site_packages + os.pathsep + os.environ.get("PATH", "")
 TARGET_SIZE = 320                                                        # letterbox 目标尺寸（与 convert.py 保持一致）
 FILL_COLOR = (128, 128, 128)                                             # letterbox 填充色 (R, G, B)
 NORMALIZE = True                                                         # ONNX 输入是否 /255 归一化 (kmodel 始终 uint8)
+
+
+@contextmanager
+def _isolated_simulator_workspace():
+    """Keep nncase's relative gmodel dump outside the repository or bundle."""
+
+    previous = Path.cwd()
+    with tempfile.TemporaryDirectory(prefix="vtools-kmodel-") as workspace:
+        os.chdir(workspace)
+        try:
+            yield Path(workspace)
+        finally:
+            os.chdir(previous)
 
 
 def letterbox(img, target_size, fill_color):
@@ -163,7 +178,8 @@ def main():
     img = Image.open(image_path).convert("RGB")
 
     onnx_outputs = onnx_infer(onnx_path, img, size, fill_color, normalize=normalize)
-    kmodel_outputs = kmodel_infer(kmodel_path, img, size, fill_color)
+    with _isolated_simulator_workspace():
+        kmodel_outputs = kmodel_infer(kmodel_path, img, size, fill_color)
 
     return 0 if compare(onnx_outputs, kmodel_outputs, args.cosine_threshold, args.mae_threshold) else 1
 

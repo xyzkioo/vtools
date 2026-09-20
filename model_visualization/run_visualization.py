@@ -125,7 +125,15 @@ def _logical_image_id(image_path: Path, source_root: Path, dataset_root: Path | 
         if indices:
             dataset_root = Path(*parts[:indices[-1]])
         else:
-            raise ValueError("非 images 目录布局请设置 input.dataset_root 或 --dataset-root，与诊断数据集根目录一致")
+            # A standalone image folder is a valid visualization input. Use
+            # its relative path for stable output IDs; dataset_root remains an
+            # opt-in only when IDs must match a diagnostics dataset.
+            if source_root.is_file():
+                return image_path.name
+            try:
+                return image_path.relative_to(source_root.resolve()).as_posix()
+            except ValueError:
+                return image_path.name
     try:
         return image_path.relative_to(dataset_root.resolve()).as_posix()
     except ValueError:

@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import platform
+import re
 import sys
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -44,7 +45,35 @@ def _sha256(path: Path) -> str:
 
 def _hook(adapter: Any, name: str) -> Any:
     function = getattr(getattr(adapter, "module", None), name, None)
+    if callable(function):
+        return function
+    function = getattr(adapter, name, None)
     return function if callable(function) else None
+
+
+_GENERATED_IMAGE_DIRS = {"artifacts", "outputs", "reports", "runs", "runs-profile", "_input"}
+
+
+def _preferred_image_root(path: Path) -> Path:
+    """Prefer a standard validation image directory inside a dataset root."""
+
+    for candidate in (
+        path / "val" / "images",
+        path / "images" / "val",
+        path / "train" / "images",
+        path / "images" / "train",
+        path / "images",
+    ):
+        if candidate.is_dir():
+            return candidate
+    return path
+
+
+def _generated_relative_path(path: Path) -> bool:
+    return any(
+        part.lower() in _GENERATED_IMAGE_DIRS or re.fullmatch(r"run[-_]?\d+", part.lower())
+        for part in path.parts[:-1]
+    )
 
 
 def _sources(values: dict[str, Any], benchmark: dict[str, Any]) -> list[Path | None]:
@@ -65,7 +94,13 @@ def _sources(values: dict[str, Any], benchmark: dict[str, Any]) -> list[Path | N
     limit = int(values.get("max_images", 10))
     if limit <= 0:
         raise ValueError("consistency.max_images 必须大于 0")
-    paths = sorted(p for p in path.rglob("*") if p.is_file() and p.suffix.lower() in suffixes)[:limit]
+    image_root = _preferred_image_root(path)
+    paths = sorted(
+        p for p in image_root.rglob("*")
+        if p.is_file()
+        and p.suffix.lower() in suffixes
+        and not _generated_relative_path(p.relative_to(image_root))
+    )[:limit]
     if not paths:
         raise ValueError(f"目录中没有可用图片：{path}")
     return paths

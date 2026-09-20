@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+BBOX_BOUNDARY_TOLERANCE = 1e-6
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -112,9 +113,20 @@ def _read_boxes(label: Path, image: Path, split: str, classes: dict[int, str],
         if width <= 0 or height <= 0:
             _issue(issues, "error", "nonpositive_box", split, image, label, number)
             continue
-        if min(xc - width / 2, yc - height / 2) < 0 or max(xc + width / 2, yc + height / 2) > 1:
+        left, top = xc - width / 2, yc - height / 2
+        right, bottom = xc + width / 2, yc + height / 2
+        # YOLO labels are commonly rounded to six decimal places. A box that
+        # touches an image edge can therefore be off by a few ulps after the
+        # arithmetic above. Keep that harmless rounding out of the error
+        # report, while still rejecting genuinely invalid annotations.
+        if min(left, top) < -BBOX_BOUNDARY_TOLERANCE or max(right, bottom) > 1 + BBOX_BOUNDARY_TOLERANCE:
             _issue(issues, "error", "out_of_bounds_box", split, image, label, number)
             continue
+        if min(left, top) < 0 or max(right, bottom) > 1:
+            xc = min(1.0, max(0.0, xc))
+            yc = min(1.0, max(0.0, yc))
+            width = min(width, 2 * min(xc, 1 - xc))
+            height = min(height, 2 * min(yc, 1 - yc))
         box = (int(raw_class), xc, yc, width, height)
         if box in seen:
             _issue(issues, "warning", "duplicate_label", split, image, label, number)

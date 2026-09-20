@@ -112,18 +112,6 @@ def read_settings() -> dict[str, Any]:
                 defaults.update({key: loaded[key] for key in defaults if key in loaded})
         except (OSError, ValueError):
             pass
-    else:
-        # One-time read of settings saved by the existing Qt workbench.
-        try:
-            from PySide6.QtCore import QSettings
-
-            previous = QSettings("vtools", "desktop")
-            for key in defaults:
-                value = previous.value(key)
-                if value is not None:
-                    defaults[key] = value
-        except ImportError:
-            pass
     defaults["results_root"] = str(_results_root_path(defaults["results_root"]))
     try:
         defaults["history_limit"] = max(1, min(200, int(defaults["history_limit"])))

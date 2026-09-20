@@ -6,7 +6,6 @@ from typing import Any, Iterable, Mapping
 
 
 COMPRESSION_MODULES: dict[str, bool] = {
-    "branch.create": False,
     "model.parameters": True,
     "baseline.evaluate": True,
     "compression.quantize.dynamic_int8": False,

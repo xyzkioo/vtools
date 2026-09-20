@@ -19,15 +19,14 @@ def _parameter_count(model: Any) -> int:
 
 
 def _structured_section(config: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Read structured settings from the full compression config or a section."""
+    """Read structured settings from the canonical compression section."""
 
     compression = config.get("compression", {})
     if isinstance(compression, Mapping):
         section = compression.get("structured")
         if isinstance(section, Mapping):
             return section
-    section = config.get("structured", {})
-    return section if isinstance(section, Mapping) else {}
+    return {}
 
 
 def _input_size(config: Mapping[str, Any]) -> int:

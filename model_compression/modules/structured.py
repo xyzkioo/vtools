@@ -178,7 +178,7 @@ def finetune_structured_detector(
 ) -> tuple[Any, dict[str, Any]]:
     """Optionally fine-tune the reduced detector and reload its best checkpoint."""
 
-    compression = config.get("compression", config)
+    compression = config.get("compression", {})
     section = dict(compression.get("structured", {}) or {})
     epochs = int(section.get("finetune_epochs", 80))
     if epochs < 0:

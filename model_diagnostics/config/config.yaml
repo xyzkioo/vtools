@@ -3,7 +3,7 @@ project:
   root: ../..
   python_paths: []
 run:
-  root: ./vtools/model_diagnostics/runs
+  root: ./model_diagnostics/runs
   name: auto
 dataset:
   data: null

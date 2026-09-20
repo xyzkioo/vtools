@@ -6,10 +6,56 @@ from pathlib import Path
 
 from model_compression.core.run_manager import prepare_run_directory, write_json
 from model_compression.core.model_runtime import resolve_device, save_model
-from model_compression.run_model_compression import _build_summary
+from model_compression.core.detection import _isolated_validation_data
+from model_compression.run_model_compression import _RunState, _build_summary
 
 
 class RunLayoutTests(unittest.TestCase):
+    def test_run_state_uses_latest_artifact_for_sequential_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = root / "original.pt"
+            compressed = root / "compressed.pt"
+            original.write_bytes(b"original")
+            compressed.write_bytes(b"compressed")
+            state = _RunState()
+            base = state.add_version(
+                name="base", artifact=original, parent_version_id=None,
+                run_id="run1", method="baseline",
+            )
+            state.advance(base["id"])
+            latest = state.add_version(
+                name="compressed", artifact=compressed, parent_version_id=base["id"],
+                run_id="run1", method="unstructured_l1",
+            )
+            state.advance(latest["id"])
+
+            version_id, artifact = state.current(original)
+
+            self.assertEqual(version_id, latest["id"])
+            self.assertEqual(artifact, str(compressed.resolve()))
+            self.assertEqual([item["id"] for item in state.lineage()], [latest["id"], base["id"]])
+
+    def test_validation_dataset_mirror_keeps_label_cache_inside_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            images = root / "dataset" / "images" / "val"
+            labels = root / "dataset" / "labels" / "val"
+            images.mkdir(parents=True)
+            labels.mkdir(parents=True)
+            (images / "a.jpg").write_bytes(b"image")
+            (labels / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+            data = root / "dataset" / "data.yaml"
+            data.write_text("path: .\nval: images/val\nnames: [cat]\n", encoding="utf-8")
+            run_dir = root / "run1"
+
+            isolated = _isolated_validation_data(data, run_dir, "val")
+
+            self.assertEqual(isolated, run_dir / "_input" / "data.yaml")
+            self.assertTrue((run_dir / "_input" / "dataset" / "images" / "val").exists())
+            self.assertTrue((run_dir / "_input" / "dataset" / "labels" / "val").exists())
+            self.assertFalse((labels.parent / "val.cache").exists())
+
     def test_explicit_run_directory_cannot_overwrite_old_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "run1"
@@ -60,7 +106,6 @@ class RunLayoutTests(unittest.TestCase):
             self.assertTrue((run_dir / "artifacts" / "structured_pruning").is_dir())
             self.assertTrue((run_dir / "artifacts" / "unstructured_pruning").is_dir())
             self.assertFalse((run_dir / "run_info.json").exists())
-            self.assertFalse((run_dir / "registry.json").exists())
 
     def test_summary_is_flat_and_omits_internal_ids(self):
         with tempfile.TemporaryDirectory() as tmp:

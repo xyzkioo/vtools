@@ -2,10 +2,19 @@
 
 ## 当前版本
 
-- 更新批次：`2026.09.19`
-- 功能标识：`k230-output-and-fork-discovery`
-- 版本性质：K230 输出交互与 Ultralytics Fork 发现修复
+- 当前版本：`0.3.24`
+- 更新批次：`2026.09.20`
+- 功能标识：`portability-review-and-cleanup`
+- 版本性质：全项目审阅、可移植性修复与旧代码精简
 - 适用仓库：`xyzkioo/vtools`
+
+### v0.3.24
+
+- 修复测速状态分类、可移植默认路径、NDJSON Fork 发现、普通目录可视化、压缩验证缓存隔离和 K230 模拟器临时文件污染。
+- 完成 CUDA、TensorRT 和 K230 软件模拟器实测；TensorRT FP16 在完整验证集上的 mAP 与 PyTorch FP16 持平。
+- 删除已被 React/pywebview 工作台取代的旧 PySide 界面、QProcess runner 和专属测试；设置、任务、历史与结果逻辑只保留当前 Web 工作台实现。
+- 删除未被主流程使用的跨运行压缩注册表和 branch 接口；连续压缩只维护本次运行内的当前模型与产物血缘。
+- K230 转换命令行只保留输出目录参数，自动生成同名 ONNX 和 kmodel。
 
 ### v0.3.4
 
@@ -82,7 +91,7 @@
 
 ### v0.3.20
 
-- K230 转换界面改为只选择一个输出目录，自动按权重文件名生成 `.onnx` 和 `.kmodel`，同时保留旧命令行参数兼容性。
+- K230 转换界面和命令行统一为一个输出目录，自动按权重文件名生成 `.onnx` 和 `.kmodel`；已删除重复的旧输出文件参数。
 - K230 转换复用 vtools 的 Ultralytics Fork 发现机制，可自动加载同级 `ultralytics-cn` / `ultralytics-ezcn` 源码，不再要求所选 Python 环境另外安装 PyPI 版。
 
 ### v0.3.21

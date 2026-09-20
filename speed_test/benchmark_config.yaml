@@ -7,7 +7,7 @@
 
 project:
   # vtools 项目根目录。
-  root: ../..
+  root: ..
 
   # 可选：Ultralytics 源码目录。相对路径会按 project.root 解析。
   # 留空时使用当前 Python 环境中的 ultralytics；非 Ultralytics adapter 不需要它。
@@ -17,12 +17,12 @@ project:
   python_paths: []
 
 run:
-  # 每次入口调用自动创建一个新的 runs-profile/runN 目录，避免覆盖旧结果。
+  # 每次入口调用自动创建一个新的 speed_test/runs/runN 目录，避免覆盖旧结果。
   # run_all.py 的 PyTorch、TensorRT、一致性三个阶段会共用同一个 runN。
   enabled: true
 
   # 运行目录的父目录；相对路径按 project.root 解析。
-  root: ./vtools/speed_test/runs
+  root: ./speed_test/runs
 
   # auto 自动选择下一个空闲目录：run1、run2、run3……
   # 也可以写 run20260905 这类自定义名称，但已存在时会拒绝覆盖。
@@ -92,16 +92,18 @@ modules:
   memory.pytorch_peak: false
   export.onnx: false
   build.tensorrt: true
-  consistency.tensor: true
-  consistency.detection: false
+  # 端到端检测输出经过 NMS，框顺序不稳定；默认按框语义匹配。
+  # 排查普通模型或导出节点数值时再显式启用逐元素比较。
+  consistency.tensor: false
+  consistency.detection: true
 
 pytorch:
   # CUDA 可选 fp32、fp16、bf16；CPU 会自动跳过 fp16。
   precisions: [fp32, fp16]
 
   # PyTorch 明细 CSV 输出路径。启用 run 后会归档到 runN；保留旧写法
-  # runs-profile/... 也可以，程序会自动去掉这层前缀。
-  output: runs-profile/vision_speed_v2.csv
+  # 相对 run.root 的路径会自动放入当前 runN；也兼容旧的 runs-profile/... 写法。
+  output: speed_test/runs/vision_speed_v2.csv
 
 tensorrt:
   # engine 构建方式：
@@ -127,11 +129,11 @@ tensorrt:
 
   # ONNX 和 TensorRT engine 公共缓存目录；不随 runN 搬迁，便于
   # rebuild_engine: false 时复用已有文件。需要时可手动指定绝对路径。
-  engine_dir: runs-profile/engines
-  onnx_dir: runs-profile/onnx
+  engine_dir: speed_test/runs/engines
+  onnx_dir: speed_test/runs/onnx
 
   # TensorRT 明细 CSV 输出路径；启用 run 后会归档到 runN。
-  output: runs-profile/vision_tensorrt_v2.csv
+  output: speed_test/runs/vision_tensorrt_v2.csv
 
 consistency:
 
@@ -174,9 +176,9 @@ consistency:
 
   # 与速度 CSV 分开：记录每个案例、每个输出误差、框匹配和失败原因；
   # 启用 run 后会归档到当前 runN。
-  output: runs-profile/consistency.csv
-  json_output: runs-profile/consistency.json
+  output: speed_test/runs/consistency.csv
+  json_output: speed_test/runs/consistency.json
 
 run_all:
   # 两个后端的结果汇总 CSV；启用 run 后会归档到当前 runN。
-  summary_output: runs-profile/vision_benchmark_summary.csv
+  summary_output: speed_test/runs/vision_benchmark_summary.csv
