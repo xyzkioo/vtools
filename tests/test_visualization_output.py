@@ -1,4 +1,5 @@
 import tempfile
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -7,10 +8,30 @@ import numpy as np
 
 from model_visualization.core.capture import _aggregate, _channel_indices
 from model_visualization.core.common import append_html_index, image_output_name, load_config, parse_size, write_image
-from model_visualization.run_visualization import _logical_image_id
+from model_visualization.run_visualization import _logical_image_id, _set_cli_overrides, build_parser, run
 
 
 class VisualizationOutput(unittest.TestCase):
+    def test_disabled_modules_do_not_load_weights_or_forward(self):
+        config = {"mode": "visualize", "modules": {"visualization.features": False, "visualization.cam": False, "visualization.stage_trace": False}}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with patch("model_visualization.run_visualization.UltralyticsAdapter") as adapter:
+                self.assertEqual(run(config, output), 0)
+            adapter.assert_not_called()
+            metadata = json.loads((output / "run_metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["status"], "skipped")
+            self.assertEqual(metadata["images"], [])
+
+    def test_explicit_empty_only_disables_all_modules(self):
+        config = {"project": {"root": "/"}, "modules": {"visualization.features": True}}
+        args = build_parser().parse_args(["--only", ""])
+        _set_cli_overrides(config, args)
+        self.assertFalse(any(config["modules"].values()))
+        args = build_parser().parse_args(["--only", "", "--enable", "visualization.features"])
+        with self.assertRaises(ValueError):
+            _set_cli_overrides(config, args)
+
     def test_standalone_image_folder_has_a_stable_logical_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "resized"

@@ -52,6 +52,10 @@ python model_visualization/run_visualization.py --enable visualization.cam --dis
 python model_visualization/run_visualization.py --list-modules
 ```
 
+显式传入 `--only ''` 表示关闭全部可视化模块，不会恢复 YAML 默认选择；不能与 `--enable/--disable` 混用。层检查、特征图、CAM 和阶段追踪都需要可加载的 PyTorch 模型，不能只凭导出的 ONNX 图获得相同结果。
+
+`mode: visualize` 下全部模块关闭时，不加载权重或执行前向传播；`run_metadata.json` 记录 `status: skipped`、`reason: no_modules` 和空图片列表。`mode: list_layers` 是独立的模型层检查，仍需要加载模型。
+
 ## 三类输出
 
 1. **层与特征图**：`mode: list_layers` 只输出 `layers.csv`，先用它确认实际模块名；`layers.modules` 填模块名后，`features/` 保存通道图，`activations/` 保存聚合图和叠加图。

@@ -81,7 +81,16 @@ def main() -> int:
     except ImportError as exc:
         raise SystemExit(
             "当前 Python 缺少桌面依赖，请使用已安装 PySide6 和 pywebview 的 Python 环境构建，"
-            "例如：/home/xyzkioo/miniconda3/envs/yolo/bin/python packaging/build_desktop.py --clean"
+            "先安装 vtools_ui/requirements.txt，再用同一 Python 执行 packaging/build_desktop.py --clean"
+        ) from exc
+    try:
+        import cv2  # noqa: F401
+        import PIL.Image  # noqa: F401
+        import PIL.ImageDraw  # noqa: F401
+        import PIL.ImageOps  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            "桌面包内置图片与数据工具需要 Pillow 和 OpenCV，请安装 packaging/requirements-bundled-tools.txt"
         ) from exc
     command = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir",
@@ -94,11 +103,17 @@ def main() -> int:
         command.append("--clean")
     for source, destination in source_datas():
         command.extend(["--add-data", f"{source}{os.pathsep}{destination}"])
-    for module in ("webview", "vtools_runtime", "vtools_runtime.ultralytics"):
+    for module in (
+        "webview", "vtools_runtime", "vtools_runtime.ultralytics", "cv2",
+        "PIL.Image", "PIL.ImageDraw", "PIL.ImageOps",
+    ):
         command.extend(["--hidden-import", module])
+    # Bundle image/report primitives, not model frameworks. Runtime dispatch in
+    # webapp/core.py must only select this executable for framework-free paths.
+    # Keep model inference, CAM, checkpoint loading, TensorRT and nncase external.
     for module in (
         "pytest", "_pytest", "expecttest", "tests", "torch", "torchvision",
-        "ultralytics", "cv2", "PIL", "matplotlib", "onnxruntime",
+        "ultralytics", "matplotlib", "onnxruntime",
         "tensorrt", "cupy",
     ):
         command.extend(["--exclude-module", module])

@@ -13,7 +13,7 @@ TOOLS: dict[str, dict] = {
         "fields": [
             {"key": "resource", "label": "模型权重或预测文件", "kind": "file", "hint": "支持 .pt、.pth、.onnx 或预测文件"},
             {"key": "data", "label": "数据集 YAML", "kind": "file",
-             "hint": "此工具会加载模型进行检测诊断；只检查图片和标签请选左侧“数据集质量检查”。"},
+             "hint": "安装版使用已有预测文件时无需外部 Python；使用模型权重时需要模型环境。只检查图片和标签请选“数据集质量检查”。"},
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
         ],
         "modules": [("diagnostics.missed", "漏检与误检"), ("diagnostics.classification", "分类错误"), ("diagnostics.overlap", "重叠分析"), ("output.images", "差图输出")],
@@ -24,7 +24,7 @@ TOOLS: dict[str, dict] = {
         "config": "model_visualization/config/config.yaml", "entry": "visualization",
         "fields": [
             {"key": "resource", "label": "模型权重", "kind": "file",
-             "hint": "选择模型文件（通常为 .pt、.pth 或 .onnx），不是数据集目录。"},
+             "hint": "选择可加载的 PyTorch 权重（.pt 或 .pth）；特征图和 CAM 需要模型内部层，不支持 ONNX。"},
             {"key": "source", "label": "输入图片或目录", "kind": "file_or_dir",
              "hint": "可选单张图片或图片目录（.jpg、.jpeg、.png、.bmp、.webp、.tif、.tiff）；只放图片即可，不需要 YOLO 标签或 data.yaml。"},
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
@@ -73,7 +73,7 @@ TOOLS: dict[str, dict] = {
         },
     },
     "data": {
-        "title": "数据工具", "group": "utility", "description": "视频抽帧、图片缩放和文件名转换。",
+        "title": "数据工具", "group": "utility", "description": "视频抽帧、图片缩放和文件名转换；安装版内置运行环境。",
         "variants": {
             "video": {"title": "视频抽帧", "script": "others/video_frame_extractor/video_frame_extractor.py", "defaults": {"every_n": "8", "start": "0", "extension": ".jpg"}, "fields": [("input", "视频文件或目录", "file_or_dir", "--input", True), ("output", "输出目录", "dir", "--output-dir", False), ("every_n", "每隔 N 帧", "number", "--every-n", True), ("start", "起始帧", "number", "--start-frame", False), ("end", "结束帧", "number", "--end-frame", False), ("extension", "输出格式", "select:.jpg|.png", "--extension", False), ("recursive", "递归目录", "bool", "--recursive", False), ("overwrite", "覆盖已有帧", "bool", "--overwrite", False)]},
             "resize": {"title": "图片批量缩放", "script": "others/image_resize/image_resize.py", "defaults": {"width": "1024", "height": "1024", "mode": "fit", "format": "same"}, "fields": [("input", "图片文件或目录", "file_or_dir", "--input", True), ("output", "输出目录", "dir", "--output-dir", False), ("width", "目标宽度", "number", "--width", True), ("height", "目标高度", "number", "--height", True), ("mode", "缩放方式", "select:fit|stretch|crop", "--mode", False), ("format", "输出格式", "select:same|jpg|png|webp", "--output-format", False), ("recursive", "递归目录", "bool", "--recursive", False), ("overwrite", "覆盖已有图片", "bool", "--overwrite", False)]},
@@ -82,7 +82,7 @@ TOOLS: dict[str, dict] = {
     },
     "dataset_quality": {
         "title": "数据集质量检查", "group": "utility",
-        "description": "训练前检查坏图、标签、尺寸、重复图片和数据划分泄漏。",
+        "description": "训练前检查坏图、标签、尺寸、重复图片和数据划分泄漏；安装版无需外部 Python。",
         "script": "model_diagnostics/check_dataset.py",
         "fields": [
             {"key": "data", "label": "数据集 YAML", "kind": "file", "required": True,

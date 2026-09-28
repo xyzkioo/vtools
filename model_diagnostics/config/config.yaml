@@ -36,7 +36,7 @@ benchmark:
   max_det: 3000
 modules:
   predict.generate: true
-  validation.ultralytics: false
+  validation.ultralytics: false  # 预留模块；启用会报错，标准验证请使用 model.val()/yolo val
   diagnostics.missed: true
   diagnostics.classification: true
   diagnostics.background: true

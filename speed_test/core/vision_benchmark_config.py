@@ -75,7 +75,9 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
         raise ImportError("读取 YAML 配置需要 PyYAML，请执行：pip install pyyaml") from error
 
     with config_path.open("r", encoding="utf-8") as file:
-        raw = yaml.safe_load(file) or {}
+        raw = yaml.safe_load(file)
+    if raw is None:
+        raw = {}
     if not isinstance(raw, dict):
         raise TypeError("配置文件顶层必须是字典")
     removed = []

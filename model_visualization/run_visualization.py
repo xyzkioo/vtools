@@ -62,12 +62,13 @@ def _set_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None
     only = {item.strip() for value in args.only or [] for item in str(value).split(",") if item.strip()}
     enable = {item.strip() for value in args.enable or [] for item in str(value).split(",") if item.strip()}
     disable = {item.strip() for value in args.disable or [] for item in str(value).split(",") if item.strip()}
-    if only and (enable or disable):
+    if args.only is not None and (enable or disable):
         raise ValueError("--only 不能与 --enable/--disable 同时使用")
     unknown = (only | enable | disable) - module_ids
     if unknown:
         raise ValueError(f"未知可视化模块：{', '.join(sorted(unknown))}")
-    if only:
+    # argparse uses None when --only is absent; --only '' intentionally selects none.
+    if args.only is not None:
         states = {key: key in only for key in module_ids}
     else:
         overlap = enable & disable
@@ -231,9 +232,21 @@ def _run_list_layers(adapter: UltralyticsAdapter, config: Mapping[str, Any], run
 
 
 def run(config: dict[str, Any], run_dir: Path) -> int:
+    _write_config_copy(config, run_dir)
+    mode = str(config.get("mode", "visualize")).lower()
+    if mode not in {"list_layers", "visualize"}:
+        raise ValueError("mode 只支持 list_layers 或 visualize")
+    if mode == "visualize" and not any(config["modules"].values()):
+        # Empty selection is a no-op: do not load weights or run a hidden
+        # forward merely to produce an empty visual report.
+        write_json(run_dir / "run_metadata.json", {
+            "mode": mode, "modules": config["modules"], "images": [],
+            "status": "skipped", "reason": "no_modules",
+        })
+        print("[跳过] 未启用可视化模块，不加载模型或执行前向传播")
+        return 0
     import torch
 
-    _write_config_copy(config, run_dir)
     adapter_name = str((config.get("model") or {}).get("adapter", "ultralytics")).lower()
     if adapter_name != "ultralytics":
         raise ValueError("首版可视化只支持 model.adapter: ultralytics；自定义模型请先实现同等 adapter")
@@ -241,13 +254,9 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
     # Always archive the effective module names alongside visual outputs; this
     # makes a run reproducible even when the user did not first run list_layers.
     write_csv(run_dir / "layers.csv", adapter.list_layers())
-    mode = str(config.get("mode", "visualize")).lower()
     if mode == "list_layers":
         _run_list_layers(adapter, config, run_dir)
         return 0
-    if mode != "visualize":
-        raise ValueError("mode 只支持 list_layers 或 visualize")
-
     input_values = config.get("input") if isinstance(config.get("input"), Mapping) else {}
     source_root = Path(str(input_values.get("source"))).expanduser().resolve()
     images = list_images(str(source_root), input_values.get("max_images"))

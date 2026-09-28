@@ -71,31 +71,49 @@
 sudo apt install ./vtools_<版本>_<架构>.deb
 ```
 
-`.deb` 包含 vtools 桌面工作台，但不包含 PyTorch、Ultralytics、模型权重、数据集或 GPU 驱动。安装后，在“设置”中选择实际运行模型任务的 Python 环境即可。
+`.deb` 内置工作台以及图片缩放、视频抽帧、文件名转换、数据集质量检查和已有预测文件诊断所需的轻量运行依赖，这些功能无需另配 Python 环境。诊断生成预测、模型可视化、测速和压缩仍需 PyTorch/Ultralytics 等模型运行库；Linux 安装版首次启动时会优先使用 `~/python-envs/vtools/.venv`，如果没有该环境，可在“设置”中选择已有环境。NDJSON 数据集转换仍调用 Ultralytics，使用外部环境。模型权重、数据集和 GPU 驱动不包含在安装包中。
 
-### 方式二：从源码运行
+### 方式二：使用已有的 uv 环境
 
 ```bash
 git clone https://github.com/xyzkioo/vtools.git
 cd vtools
 
-conda create -n vtools python=3.10 -y
-conda activate vtools
-python -m pip install -r vtools_ui/requirements.txt
-python -m vtools_ui
+VTOOLS_ROOT=/path/to/vtools
+UV_PROJECT=/path/to/python-envs/vtools
+ULTRALYTICS_REPO=/path/to/ultralytics-ezcn
+
+cd "$VTOOLS_ROOT"
+VTOOLS_ULTRALYTICS_REPO="$ULTRALYTICS_REPO" \
+  uv run --project "$UV_PROJECT" --no-sync python -m vtools_ui
 ```
 
-也可以直接使用已有的训练环境，例如 `yolo`。模型依赖和独立 Fork 的配置见[环境检验向导](env_test/README.md)。
+`UV_PROJECT` 指向包含 `pyproject.toml` 和 `uv.lock` 的 uv 环境项目目录。先在该目录用 `uv sync --locked`（或项目提供的同步脚本）安装锁定依赖；`--no-sync` 让 vtools 命令复用现有环境，不在启动时改动它。Fork 路径可通过 `VTOOLS_ULTRALYTICS_REPO` 指定。也可以直接使用该 uv 项目提供的 VTools 启动脚本。
+
+如果需要在 vtools 仓库内新建轻量环境，可从仓库根目录运行：
+
+```bash
+uv venv .venv --python 3.10
+source .venv/bin/activate
+uv pip install \
+  -r vtools_ui/requirements.txt \
+  -r model_visualization/requirements.txt \
+  -r model_diagnostics/requirements.txt
+```
+
+以上激活命令适用于 Linux/macOS；Windows PowerShell 使用 `.venv\Scripts\Activate.ps1`。这个依赖集合可启动桌面工作台并运行基础可视化、诊断和数据集检查。模型功能还需要按本机驱动选择合适的 PyTorch/torchvision，并安装 Ultralytics 或本地 Fork。完整步骤见[环境检验向导](env_test/README.md)。
 
 ### 第一次检查环境
 
-从仓库根目录运行：
+使用现有 uv 环境时，从仓库根目录运行：
 
 ```bash
-python env_test/check_install.py --source ../ultralytics-ezcn
+uv run --project /path/to/python-envs/vtools --no-sync \
+  python env_test/check_install.py \
+  --source /path/to/ultralytics-ezcn
 ```
 
-检查器会验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、CUDA、模型构建和一次前向传播。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要验证自己的权重时增加 `--weights /path/to/best.pt`。
+检查器会验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、依赖一致性、CUDA、模型构建和一次前向传播。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要验证自己的权重时增加 `--weights /path/to/best.pt`。没有 uv 项目时，激活目标环境后直接运行 `python env_test/check_install.py ...`。
 
 ## 接入独立 Ultralytics Fork
 

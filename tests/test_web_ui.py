@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from vtools_ui.webapp import core
+from vtools_ui.webapp import core, server
 from vtools_ui.webapp.server import DesktopBridge, WorkbenchServer
 from vtools_ui.webapp.tasks import TaskManager
 from vtools_ui.process_environment import build_tool_environment
@@ -78,6 +78,36 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(environment["DOTNET_ROOT"], str((prefix.parent.parent / "lib" / "dotnet").resolve()))
         self.assertEqual(environment["DOTNET_ROOT_X64"], environment["DOTNET_ROOT"])
 
+    def test_bundled_tool_child_keeps_packaged_library_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "vtools"
+            executable.touch()
+            inherited = {
+                "PATH": "/usr/bin",
+                "LD_LIBRARY_PATH": "/opt/vtools/_internal",
+                "LD_LIBRARY_PATH_ORIG": "/system/lib",
+            }
+            with patch.object(core.sys, "executable", str(executable)):
+                environment = build_tool_environment(executable, directory, inherited, frozen=True)
+
+        self.assertEqual(environment["LD_LIBRARY_PATH"], "/opt/vtools/_internal")
+        self.assertEqual(environment["LD_LIBRARY_PATH_ORIG"], "/system/lib")
+
+    def test_uv_job_does_not_inherit_previous_conda_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / ".venv"
+            executable = prefix / "bin" / "python"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            (prefix / "pyvenv.cfg").touch()
+            environment = build_tool_environment(executable, directory, {
+                "CONDA_PREFIX": "/previous/conda", "CONDA_DEFAULT_ENV": "old",
+                "VIRTUAL_ENV": "/previous/venv",
+            }, frozen=False)
+        self.assertNotIn("CONDA_PREFIX", environment)
+        self.assertNotIn("CONDA_DEFAULT_ENV", environment)
+        self.assertEqual(environment["VIRTUAL_ENV"], str(prefix))
+
     def test_frozen_environment_scan_finds_conda_without_path_and_hides_workbench(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
@@ -99,6 +129,76 @@ class WebWorkbenchTests(unittest.TestCase):
                 found = core.environments()
 
         self.assertEqual(found, [{"label": "yolo", "path": str(yolo.resolve())}])
+
+    def test_environment_scan_lists_uv_projects_from_python_envs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            project = home / "python-envs" / "vtools"
+            executable = project / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            executable.parent.mkdir(parents=True)
+            try:
+                executable.symlink_to(sys.executable)
+            except OSError as exc:
+                self.skipTest(f"无法创建解释器符号链接：{exc}")
+            (project / "pyproject.toml").write_text("[project]\nname = 'vtools'\n", encoding="utf-8")
+            (project / "uv.lock").touch()
+            with patch.object(core.sys, "frozen", True, create=True), \
+                    patch.object(core.sys, "executable", "/opt/vtools/vtools"), \
+                    patch.object(core.Path, "home", return_value=home), \
+                    patch.object(core.shutil, "which", return_value=None), \
+                    patch.object(core, "read_settings", return_value={"python_executable": "/opt/vtools/vtools"}), \
+                    patch.object(core.subprocess, "run", side_effect=OSError("unavailable")), \
+                    patch.dict(os.environ, {}, clear=True):
+                found = core.environments()
+
+        self.assertEqual(
+            found,
+            [{"label": "vtools (uv)", "path": str(executable)}],
+        )
+
+    def test_frozen_default_prefers_vtools_uv_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            project = home / "python-envs" / "vtools"
+            executable = project / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            (project / "pyproject.toml").write_text("[project]\nname = 'vtools'\n", encoding="utf-8")
+            with patch.object(core.sys, "frozen", True, create=True), \
+                    patch.object(core.Path, "home", return_value=home), \
+                    patch.object(core.shutil, "which", return_value="/usr/bin/python3"), \
+                    patch.dict(os.environ, {}, clear=True):
+                selected = core._default_python_executable()
+
+        self.assertEqual(selected, str(executable))
+
+    def test_python_executable_path_preserves_uv_environment_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            executable.parent.mkdir(parents=True)
+            try:
+                executable.symlink_to(sys.executable)
+            except OSError as exc:
+                self.skipTest(f"无法创建解释器符号链接：{exc}")
+
+            selected = core.python_executable_path(str(executable))
+            environment = build_tool_environment(executable, directory, {"PATH": "/usr/bin"}, frozen=False)
+
+        self.assertEqual(selected, executable)
+        self.assertEqual(environment["PATH"].split(os.pathsep)[0], str(executable.parent))
+
+    def test_webview_fallback_probes_uv_environment_not_shared_base_python(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / ".venv" / "bin" / "python"
+            executable.parent.mkdir(parents=True)
+            try:
+                executable.symlink_to(sys.executable)
+            except OSError as exc:
+                self.skipTest(f"无法创建解释器符号链接：{exc}")
+            with patch.object(server, "environments", return_value=[{"path": str(executable)}]), \
+                    patch.object(server.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as probe:
+                self.assertEqual(server._find_webview_python(), str(executable))
+            self.assertEqual(probe.call_args.args[0][0], str(executable))
 
     def test_desktop_picker_uses_native_dialog_for_file_and_directory(self) -> None:
         class FileDialog(IntEnum):
@@ -159,6 +259,36 @@ class WebWorkbenchTests(unittest.TestCase):
             self.assertEqual(copied.read_text(encoding="utf-8"), "value: new\n")
             self.assertEqual(source.read_text(encoding="utf-8"), "value: old\n")
 
+    def test_copying_packaged_template_preserves_original_project_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            source = root / "model_diagnostics" / "config" / "config.yaml"
+            source.parent.mkdir(parents=True)
+            source.write_text("project:\n  root: ../..\nmode: predictions_file\npredictions_file:\n  predictions: data/predictions.json\n", encoding="utf-8")
+            user_dir = Path(directory) / "user"
+            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", user_dir), patch.object(core.sys, "frozen", True, create=True):
+                loaded = core.load_config(str(source))
+                self.assertEqual(loaded["data"]["project"]["root"], str(root))
+                self.assertEqual(loaded["data"]["predictions_file"]["predictions"], "data/predictions.json")
+                core.save_config(loaded["path"], "project:\n  root: /user/custom\n")
+                self.assertEqual(core.load_config(str(source))["data"]["project"]["root"], "/user/custom")
+            self.assertIn("root: ../..", source.read_text(encoding="utf-8"))
+
+    def test_json_config_remains_json_after_copy_and_graphical_patch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "bundle"
+            source = root / "config.json"
+            source.parent.mkdir()
+            source.write_text(json.dumps({"project": {"root": "."}, "custom": {"value": 1}}), encoding="utf-8")
+            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", Path(directory) / "user"), patch.object(core.sys, "frozen", True, create=True):
+                loaded = core.load_config(str(source))
+                copied = Path(loaded["path"])
+                self.assertEqual(json.loads(copied.read_text())["project"]["root"], str(root))
+                patched = core.patch_config(loaded["text"], "custom.value", 2)
+                core.save_config(str(copied), patched["text"])
+                self.assertEqual(json.loads(copied.read_text())["custom"]["value"], 2)
+            self.assertEqual(json.loads(source.read_text())["custom"]["value"], 1)
+
     def test_frozen_settings_move_old_bundle_results_root_to_user_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "bundle"
@@ -179,7 +309,7 @@ class WebWorkbenchTests(unittest.TestCase):
             (root / "run_tools.py").touch()
             user_dir = Path(directory) / "user"
             results = Path(directory) / "user-runs"
-            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", user_dir), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True):
+            with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", user_dir), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True), patch.object(core.sys, "executable", "/opt/vtools/vtools"):
                 _executable, args, _config = core.build_command({"tool_id": "diagnostics", "values": {}})
             self.assertIn("--config", args)
             self.assertEqual(Path(args[args.index("--config") + 1]), user_dir / "configs" / "model_diagnostics" / "config" / "config.yaml")
@@ -191,10 +321,84 @@ class WebWorkbenchTests(unittest.TestCase):
             (root / "model_diagnostics" / "check_dataset.py").touch()
             results = Path(directory) / "user-runs"
             with patch.object(core, "ROOT", root), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True):
-                _executable, args, _config = core.build_command({"tool_id": "dataset_quality", "values": {"data": str(Path(directory) / "data.yaml")}})
+                executable, args, _config = core.build_command({"tool_id": "dataset_quality", "values": {"data": str(Path(directory) / "data.yaml")}})
+            self.assertEqual(executable, core.sys.executable)
+            self.assertEqual(args[0], "--run-script")
             output = Path(args[args.index("--output-root") + 1])
             self.assertEqual(output, results / "dataset_quality")
             self.assertNotIn(root, output.parents)
+
+    def test_frozen_lightweight_data_tools_use_bundled_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            requests = (
+                ("filename", {"dir": str(root), "dataset": "images", "apply": False}, "image_filename_converter.py"),
+                ("resize", {"input": str(root / "image.jpg"), "width": "640", "height": "480"}, "image_resize.py"),
+                ("video", {"input": str(root / "video.mp4"), "every_n": "8"}, "video_frame_extractor.py"),
+            )
+            with patch.object(core, "read_settings", return_value={"python_executable": str(root / "missing-python"), "results_root": str(root / "results")}), \
+                    patch.object(core.sys, "frozen", True, create=True):
+                for variant, values, script_name in requests:
+                    executable, args, _config = core.build_command({
+                        "tool_id": "data", "variant": variant, "values": values,
+                    })
+                    self.assertEqual(executable, core.sys.executable)
+                    self.assertEqual(args[0], "--run-script")
+                    self.assertEqual(Path(args[1]).name, script_name)
+
+    def test_frozen_model_tools_still_require_selected_python(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing_python = str(Path(directory) / "missing-python")
+            with patch.object(core, "read_settings", return_value={"python_executable": missing_python, "results_root": directory}), \
+                    patch.object(core.sys, "frozen", True, create=True):
+                with self.assertRaisesRegex(ValueError, "Python 解释器不存在"):
+                    core.build_command({"tool_id": "diagnostics", "values": {}})
+
+    def test_frozen_diagnostics_dispatch_follows_prediction_and_ground_truth_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundled_python = root / "vtools"
+            bundled_python.touch()
+            external_python = sys.executable
+            config = root / "diagnostics.yaml"
+            for mode, resource, ground_truth, bundled in (
+                ("ultralytics_model", "predictions.json", "data.yaml", True),
+                ("predictions_file", "", "data.yaml", True),
+                ("predictions_file", "model.pt", "data.yaml", False),
+                ("predictions_file", "model.engine", "data.yaml", False),
+                ("predictions_file", "predictions.json", "data.ndjson", False),
+                ("ultralytics_model", "", "data.yaml", False),
+            ):
+                config.write_text(f"mode: {mode}\ndataset:\n  data: {ground_truth}\nmodules: {{}}\n", encoding="utf-8")
+                with self.subTest(mode=mode, resource=resource, ground_truth=ground_truth), \
+                        patch.object(core.sys, "frozen", True, create=True), \
+                        patch.object(core.sys, "executable", str(bundled_python)), \
+                        patch.object(core, "read_settings", return_value={"python_executable": external_python, "results_root": str(root / "reports")}):
+                    executable, args, _config = core.build_command({
+                        "tool_id": "diagnostics", "config_path": str(config), "values": {"resource": resource},
+                    })
+                self.assertEqual(executable, str(bundled_python) if bundled else external_python)
+                self.assertEqual(args[0] == "--run-script", bundled)
+                if resource.endswith(".engine"):
+                    self.assertIn("--weights", args)
+                    self.assertNotIn("--predictions", args)
+
+    def test_frozen_predictions_diagnostics_does_not_require_external_python(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "diagnostics.yaml"
+            config.write_text("mode: predictions_file\nmodules: {}\n", encoding="utf-8")
+            with patch.object(core.sys, "frozen", True, create=True), \
+                    patch.object(core, "read_settings", return_value={"python_executable": str(root / "missing-python"), "results_root": str(root / "reports")}):
+                executable, args, _config = core.build_command({"tool_id": "diagnostics", "config_path": str(config), "values": {}})
+            self.assertEqual(executable, sys.executable)
+            self.assertEqual(args[0], "--run-script")
+
+    def test_frozen_external_tools_reject_workbench_as_model_interpreter(self) -> None:
+        with patch.object(core.sys, "frozen", True, create=True), \
+                patch.object(core, "read_settings", return_value={"python_executable": sys.executable}):
+            with self.assertRaisesRegex(ValueError, "需要外部 Python 模型环境"):
+                core.build_command({"tool_id": "environment", "values": {"skip_model": True}})
 
     def test_frozen_kmodel_defaults_write_to_user_results(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -202,7 +406,7 @@ class WebWorkbenchTests(unittest.TestCase):
             (root / "transform_tools").mkdir(parents=True)
             (root / "transform_tools" / "py2kmodel.py").touch()
             results = Path(directory) / "user-runs"
-            with patch.object(core, "ROOT", root), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True):
+            with patch.object(core, "ROOT", root), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": str(results)}), patch.object(core.sys, "frozen", True, create=True), patch.object(core.sys, "executable", "/opt/vtools/vtools"):
                 _executable, args, _config = core.build_command({"tool_id": "transform", "variant": "kmodel", "values": {"pt": str(Path(directory) / "best.pt"), "calib": str(Path(directory) / "images")}})
             output = Path(args[args.index("--output-dir") + 1])
             self.assertEqual(output.parent.parent.parent, results)
@@ -283,10 +487,10 @@ class WebWorkbenchTests(unittest.TestCase):
                     "results_root": str(core.ROOT),
                     "history_limit": 40,
                 }):
-            executable, args, _config = core.build_command({"tool_id": "environment", "values": {"skip_model": True}})
+            executable, args, _config = core.build_command({"tool_id": "data", "variant": "filename", "values": {"dir": str(core.ROOT), "dataset": "images"}})
         self.assertEqual(Path(executable).resolve(), Path(expected).resolve())
         self.assertEqual(args[0], "--run-script")
-        self.assertEqual(Path(args[1]).name, "check_install.py")
+        self.assertEqual(Path(args[1]).name, "image_filename_converter.py")
 
     def test_environment_check_leaves_source_automatic_when_empty(self) -> None:
         _executable, args, _config = core.build_command({"tool_id": "environment", "values": {"skip_model": True}})
@@ -299,7 +503,7 @@ class WebWorkbenchTests(unittest.TestCase):
 
     def test_frozen_model_run_uses_writable_results_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(core.sys, "frozen", True, create=True), patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": directory}):
+            with patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": directory}), patch.object(core.sys, "frozen", True, create=True), patch.object(core.sys, "executable", "/opt/vtools/vtools"):
                 _executable, args, _config = core.build_command({"tool_id": "diagnostics", "values": {}})
             run_dir = Path(args[args.index("--run-dir") + 1])
             self.assertEqual(run_dir.parent, Path(directory) / "diagnostics")

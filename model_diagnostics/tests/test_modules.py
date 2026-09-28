@@ -29,6 +29,17 @@ class ModuleSelectionTests(unittest.TestCase):
         self.assertTrue(values["diagnostics.overlap"])
         self.assertFalse(values["diagnostics.missed"])
 
+    def test_explicit_empty_only_disables_all_modules(self):
+        for only in ([], [""], [" , "]):
+            with self.subTest(only=only):
+                self.assertFalse(any(resolve_modules({"modules": {"diagnostics.missed": True}}, only=only).values()))
+        with self.assertRaises(ValueError):
+            resolve_modules({}, only=[""], enable=["diagnostics.missed"])
+
+    def test_reserved_validation_does_not_silently_succeed(self):
+        with self.assertRaisesRegex(ValueError, "预留模块"):
+            resolve_modules({"modules": {"validation.ultralytics": True}})
+
     def test_conflicting_selection_is_rejected(self):
         with self.assertRaises(ValueError):
             resolve_modules({}, enable=["diagnostics.overlap"], disable=["diagnostics.overlap"])

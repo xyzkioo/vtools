@@ -437,6 +437,20 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(invoke.call_count, 1)
             self.assertEqual(invoke.call_args.args[0], "pytorch")
 
+    def test_run_all_empty_only_does_not_start_default_backends(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = {
+                "_config_path": str(root / "config.yaml"),
+                "project": {"root": str(root)},
+                "run": {"enabled": True, "root": str(root / "runs")},
+                "run_all": {"summary_output": str(root / "summary.csv")},
+            }
+            with patch("run_all.load_config", return_value=config), \
+                    patch("sys.argv", ["run_all.py", "--only", ""]), patch("run_all._invoke") as invoke:
+                run_all_main()
+            invoke.assert_not_called()
+
     def test_error_report_written_without_cuda(self):
         report = {"status": "error", "models": [{"name": "test", "status": "error", "error": "No CUDA"}]}
         with tempfile.TemporaryDirectory() as directory:

@@ -42,7 +42,7 @@ def resolve_speed_modules(config: Mapping[str, Any], *, only: Iterable[str] | No
     elif configured is not None:
         raise ValueError("modules 必须是 module_id: true/false 的对象")
     only_values, enable_values, disable_values = _split(only), _split(enable), _split(disable)
-    if only_values and (enable_values or disable_values):
+    if only is not None and (enable_values or disable_values):
         raise ValueError("--only 不能与 --enable/--disable 同时使用")
     requested = set(only_values + enable_values + disable_values)
     unknown = requested - set(modules)
@@ -51,7 +51,8 @@ def resolve_speed_modules(config: Mapping[str, Any], *, only: Iterable[str] | No
     overlap = set(enable_values) & set(disable_values)
     if overlap:
         raise ValueError(f"模块同时启用和禁用：{', '.join(sorted(overlap))}")
-    if only_values:
+    # Preserve an explicitly empty selection instead of restoring YAML defaults.
+    if only is not None:
         selected = set(only_values)
         modules = {key: key in selected for key in modules}
     else:

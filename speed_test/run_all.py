@@ -124,8 +124,7 @@ def main() -> int:
     # ``--only`` is an exclusive plan: route each selected module to the
     # backend that owns it, so a PyTorch module is not accidentally measured
     # once in both the PyTorch and TensorRT stages.
-    only_values = [item.strip() for value in args.only or [] for item in str(value).split(",") if item.strip()]
-    if only_values or "modules" in config:
+    if args.only is not None or "modules" in config:
         run_pytorch_stage = any(selected_modules.get(key) for key in (
             "checkpoint.inspect", "checkpoint.load_check", "model.parameters", "model.flops",
             "speed.pytorch_call", "speed.pytorch_pipeline", "memory.pytorch_peak",

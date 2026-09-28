@@ -11,12 +11,12 @@ from typing import Mapping
 def _prepend_path(environment: dict[str, str], name: str, value: Path) -> None:
     """Put *value* first in a path-list variable without duplicating it."""
 
-    target = value.expanduser().resolve()
+    target = Path(os.path.abspath(value.expanduser()))
     parts = [item for item in environment.get(name, "").split(os.pathsep) if item]
     kept: list[str] = []
     for item in parts:
         try:
-            if Path(item).expanduser().resolve() == target:
+            if Path(os.path.abspath(Path(item).expanduser())) == target:
                 continue
         except OSError:
             pass
@@ -31,24 +31,29 @@ def build_tool_environment(
     *,
     frozen: bool | None = None,
 ) -> dict[str, str]:
-    """Return the environment used by a selected external Python.
+    """Return the environment used by a bundled tool or external Python.
 
     A frozen workbench launches source files from its ``_internal`` directory
-    with a user-selected Python.  Merely replacing the executable does not make
-    that directory importable and leaves PyInstaller's library search path in
-    the child.  Construct the bridge explicitly for every tool process.
+    with either its own lightweight runtime or a user-selected model runtime.
+    Both need the tool sources on PYTHONPATH. Only external interpreters must
+    have PyInstaller's private library path removed.
     """
 
     environment = dict(os.environ if inherited is None else inherited)
     environment.update({"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"})
-    executable_path = Path(executable).expanduser().resolve()
+    # Preserve .venv/bin/python symlinks: resolving them selects uv's base
+    # interpreter and makes Python lose the virtual environment's site-packages.
+    executable_path = Path(os.path.abspath(Path(executable).expanduser()))
     root = Path(runtime_root).expanduser().resolve()
 
     _prepend_path(environment, "PATH", executable_path.parent)
     _prepend_path(environment, "PYTHONPATH", root)
 
     is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen
-    if is_frozen and sys.platform.startswith("linux"):
+    is_bundled_executable = executable_path.resolve() == Path(sys.executable).resolve()
+    # Bundled data tools re-enter the PyInstaller executable and need its
+    # packaged Qt/OpenCV libraries; restoring LD_LIBRARY_PATH_ORIG breaks them.
+    if is_frozen and sys.platform.startswith("linux") and not is_bundled_executable:
         # PyInstaller saves the pre-launch value here.  Its own bundled
         # libraries are correct for the UI executable but can break an external
         # Conda Python and its compiled extensions.
@@ -58,6 +63,9 @@ def build_tool_environment(
         else:
             environment.pop("LD_LIBRARY_PATH", None)
 
+    if is_frozen and is_bundled_executable:
+        return environment
+
     prefix = executable_path.parent.parent
     conda_library = prefix / "lib"
     if sys.platform.startswith("linux") and (conda_library / "libstdc++.so.6").is_file():
@@ -65,6 +73,15 @@ def build_tool_environment(
     if (prefix / "conda-meta").is_dir():
         environment["CONDA_PREFIX"] = str(prefix)
         environment["CONDA_DEFAULT_ENV"] = prefix.name
+    else:
+        # A uv job launched from a Conda shell must not let vision_runtime
+        # discover and inject the previous environment's compiled libraries.
+        environment.pop("CONDA_PREFIX", None)
+        environment.pop("CONDA_DEFAULT_ENV", None)
+    if (prefix / "pyvenv.cfg").is_file():
+        environment["VIRTUAL_ENV"] = str(prefix)
+    else:
+        environment.pop("VIRTUAL_ENV", None)
 
     # nncase loads hostfxr through the .NET runtime bundled with the Conda
     # installation.  A frozen PyInstaller process may otherwise leave the

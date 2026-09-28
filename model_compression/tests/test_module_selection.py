@@ -9,6 +9,13 @@ class CompressionModuleSelectionTests(unittest.TestCase):
         self.assertTrue(values["model.parameters"])
         self.assertFalse(values["baseline.evaluate"])
 
+    def test_explicit_empty_only_disables_all_modules(self):
+        for only in ([], [""], [" , "]):
+            with self.subTest(only=only):
+                self.assertFalse(any(resolve_compression_modules({"modules": {"model.parameters": True}}, only=only).values()))
+        with self.assertRaises(ValueError):
+            resolve_compression_modules({}, only=[""], enable=["model.parameters"])
+
     def test_partial_config_is_an_allow_list(self):
         values = resolve_compression_modules({"modules": {"compression.prune.unstructured": True}})
         self.assertTrue(values["compression.prune.unstructured"])

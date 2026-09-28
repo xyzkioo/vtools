@@ -49,7 +49,9 @@ def main() -> int:
     if selected_config and selected_config.name == "tools.yaml":
         try:
             import yaml  # type: ignore
-            tools_config = yaml.safe_load(selected_config.read_text(encoding="utf-8")) or {}
+            tools_config = yaml.safe_load(selected_config.read_text(encoding="utf-8"))
+            if tools_config is None:
+                tools_config = {}
             if not isinstance(tools_config, dict):
                 raise ValueError("tools.yaml 顶层必须是对象")
         except Exception as exc:

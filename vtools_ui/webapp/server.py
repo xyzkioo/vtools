@@ -22,7 +22,7 @@ from .catalog import ROOT, public_catalog
 from .core import (
     IMAGE_SUFFIXES, TEXT_SUFFIXES, clear_history, environments, flatten_config, history, list_results,
     load_config, parse_yaml, patch_config, preview_text, project_path, read_settings,
-    result_file, save_config, save_settings,
+    python_executable_path, result_file, save_config, save_settings,
 )
 from .tasks import TaskManager
 from .updater import check_update, install_update
@@ -231,14 +231,16 @@ class DesktopBridge:
 def _find_webview_python() -> str | None:
     """Find a local Python environment that already provides pywebview."""
 
-    current = str(Path(sys.executable).resolve())
+    current = python_executable_path(sys.executable)
     for candidate in environments():
-        path = str(Path(candidate["path"]).resolve())
-        if path == current or not Path(path).is_file():
+        # uv environments commonly share a base Python through symlinks. Probe
+        # the venv path itself, or we test the base interpreter's dependencies.
+        path = python_executable_path(candidate["path"])
+        if path == current or not path.is_file():
             continue
         try:
             check = subprocess.run(
-                [path, "-c", "import webview"],
+                [str(path), "-c", "import webview"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=5,
@@ -247,7 +249,7 @@ def _find_webview_python() -> str | None:
         except (OSError, subprocess.SubprocessError):
             continue
         if check.returncode == 0:
-            return path
+            return str(path)
     return None
 
 

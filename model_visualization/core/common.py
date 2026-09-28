@@ -101,7 +101,9 @@ def load_config(path: str | Path | None = None, *, allow_missing_source: bool = 
     config_path = config_path.expanduser().resolve()
     if not config_path.is_file():
         raise FileNotFoundError(f"找不到可视化配置：{config_path}")
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if raw is None:
+        raw = {}
     if not isinstance(raw, Mapping):
         raise ValueError("可视化配置顶层必须是 YAML 对象")
     for section in ("features", "cam", "stage_trace"):

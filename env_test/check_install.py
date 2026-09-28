@@ -23,6 +23,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -147,7 +148,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="把版本不一致、pip check 失败和可选依赖缺失也作为失败处理。",
+        help="把版本不一致、依赖一致性检查失败和可选依赖缺失也作为失败处理。",
     )
     return parser.parse_args()
 
@@ -499,27 +500,51 @@ def choose_device(requested: str, cuda_available: bool, reporter: Reporter) -> O
     return chosen
 
 
-def run_pip_check(reporter: Reporter, strict: bool) -> None:
+def run_dependency_check(reporter: Reporter, strict: bool) -> None:
+    uv_executable = shutil.which("uv")
+    if uv_executable:
+        checker = "uv pip check"
+        command = [uv_executable, "pip", "check", "--python", sys.executable]
+    else:
+        checker = "python -m pip check"
+        command = [sys.executable, "-m", "pip", "check"]
+
     try:
         completed = subprocess.run(
-            [sys.executable, "-m", "pip", "check"],
+            command,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=120,
         )
-    except Exception as exc:
-        reporter.warned("pip check", f"无法执行 pip check：{type(exc).__name__}: {exc}")
+    except (OSError, subprocess.SubprocessError) as exc:
+        report = reporter.failed if strict else reporter.warned
+        report(
+            "依赖一致性",
+            f"无法执行 {checker}：{type(exc).__name__}: {exc}",
+        )
         return
     if completed.returncode == 0:
-        reporter.passed("pip check", "当前解释器的已安装依赖没有发现冲突。")
+        reporter.passed(
+            "依赖一致性",
+            f"{checker} 未发现当前解释器的已安装依赖冲突。",
+            f"解释器：{sys.executable}",
+        )
         return
     detail = compact_error(completed.stdout, completed.stderr, limit=2000)
     if strict:
-        reporter.failed("pip check", "发现依赖冲突（--strict 下视为失败）。", detail)
+        reporter.failed(
+            "依赖一致性",
+            f"{checker} 发现依赖冲突（--strict 下视为失败）。",
+            detail,
+        )
     else:
-        reporter.warned("pip check", "发现依赖冲突；核心模型检查仍会继续。", detail)
+        reporter.warned(
+            "依赖一致性",
+            f"{checker} 发现依赖冲突；核心模型检查仍会继续。",
+            detail,
+        )
 
 
 def main() -> int:
@@ -655,7 +680,7 @@ def main() -> int:
             # 这些是普通 PyTorch 运行和本仓库声明的核心依赖，缺失视为失败。
             reporter.failed(f"依赖/{label}", "无法导入。", detail)
 
-    run_pip_check(reporter, args.strict)
+    run_dependency_check(reporter, args.strict)
 
     device = choose_device(args.device, bool(info.get("cuda_available")), reporter)
     if info.get("cuda_available"):

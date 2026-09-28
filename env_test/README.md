@@ -35,7 +35,9 @@ workspace/
 
 如果本地目录仍叫 `ultralytics-cn` 或改成了 `ultralytics-custom`，只需要把下面命令中的目录名替换掉。`--source` 必须指向包含 `pyproject.toml` 和包目录的外部项目根目录；检查脚本会把它临时加入隔离子进程，不要求先执行安装。
 
-## 二、已有 Conda 环境安装（推荐）
+## 二、接入已有运行环境
+
+### Conda 环境
 
 如果当前的 `yolo` 环境已经能够运行 PyTorch，可以直接接入本地源码：
 
@@ -54,6 +56,33 @@ python -m pip install -e ../ultralytics-ezcn --no-deps
 ```
 
 `--no-deps` 只安装本地源码的入口，不会补齐缺失依赖；空环境不要使用它。
+
+### uv 管理的环境
+
+如果 uv 环境由另一个目录中的 `pyproject.toml` 和 `uv.lock` 管理，令 `UV_PROJECT` 指向该目录，令 `VTOOLS_ROOT` 和 `FORK_ROOT` 指向 vtools 与 Ultralytics Fork：
+
+```bash
+VTOOLS_ROOT=/path/to/vtools
+UV_PROJECT=/path/to/python-envs/vtools
+FORK_ROOT=/path/to/ultralytics-ezcn
+
+cd "$VTOOLS_ROOT"
+uv run --project "$UV_PROJECT" --no-sync \
+  python env_test/check_install.py --source "$FORK_ROOT"
+```
+
+`--project` 使用指定 uv 项目的锁定环境，`--no-sync` 避免检查时同步或改动共享环境。若项目提供 `setup.sh` 或其他同步脚本，先用它按 `uv.lock` 安装依赖。启动工作台或其他 vtools 命令时也可使用相同形式：
+
+```bash
+VTOOLS_ULTRALYTICS_REPO="$FORK_ROOT" \
+  uv run --project "$UV_PROJECT" --no-sync python -m vtools_ui
+
+VTOOLS_ULTRALYTICS_REPO="$FORK_ROOT" \
+  uv run --project "$UV_PROJECT" --no-sync \
+  python run_tools.py --tool diagnostics
+```
+
+环境检查会在系统可找到 `uv` 时运行 `uv pip check --python <当前解释器>`；否则回退到 `python -m pip check`。报告统一显示为“依赖一致性”。
 
 ## 三、新电脑创建环境
 
@@ -92,7 +121,7 @@ python env_test/check_install.py --source ../ultralytics-ezcn
 2. `ultralytics` 的真实导入文件和版本；
 3. 是否导入了 `../ultralytics-ezcn/ultralytics/`，避免误用 pip 版；
 4. PyTorch、torchvision、NumPy、PyYAML、OpenCV、Pillow；
-5. pip 依赖冲突；
+5. 当前解释器中的依赖冲突；
 6. `yolo26.yaml` 是否能构建模型并完成一次 Tensor 前向传播；
 7. CUDA 是否可用。没有 GPU 时会改用 CPU，不会因此判定基础安装失败。
 

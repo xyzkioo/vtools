@@ -97,13 +97,14 @@ def resolve_modules(
     only_values = _split_values(only)
     enable_values = _split_values(enable)
     disable_values = _split_values(disable)
-    if only_values and (enable_values or disable_values):
+    if only is not None and (enable_values or disable_values):
         raise ValueError("--only 不能与 --enable/--disable 同时使用")
     requested = set(only_values) | set(enable_values) | set(disable_values)
     unknown = sorted(requested - set(values))
     if unknown:
         raise ValueError(f"未知模块：{', '.join(unknown)}；请使用 --list-modules 查看可用模块")
-    if only_values:
+    # None means no override; an explicitly empty --only turns every module off.
+    if only is not None:
         values = {key: key in set(only_values) for key in values}
     else:
         values.update({key: True for key in enable_values})
@@ -117,6 +118,10 @@ def resolve_modules(
         raise ValueError("output.images 依赖 output.bad_cases")
     if values.get("output.html") and not values.get("output.bad_cases"):
         raise ValueError("output.html 依赖 output.bad_cases")
+    # This flag was reserved but never invoked validation. Do not report a
+    # successful run when the user explicitly requested an unimplemented step.
+    if values.get("validation.ultralytics"):
+        raise ValueError("validation.ultralytics 是预留模块，尚未实现；标准验证请使用 Ultralytics 的 model.val() 或 yolo val")
     return values
 
 

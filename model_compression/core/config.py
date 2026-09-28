@@ -51,7 +51,9 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     except ImportError as exc:
         raise ImportError("读取 YAML 配置需要 PyYAML，请执行：pip install pyyaml") from exc
 
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if raw is None:
+        raw = {}
     if not isinstance(raw, Mapping):
         raise TypeError("配置文件顶层必须是 YAML 对象")
     removed = sorted(set(raw) & {"operation", "models", "storage", "branch"})

@@ -1,0 +1,4 @@
+# Image/report primitives for data utilities and diagnostics from saved predictions.
+# Headless OpenCV avoids a second Qt runtime alongside the workbench's PySide6.
+Pillow>=9.0
+opencv-python-headless>=4.7

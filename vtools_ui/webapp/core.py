@@ -48,14 +48,54 @@ def _visible_run_name(root: Path) -> str:
     return f"run{largest + 1}-{suffix}"
 
 
+def _uv_project_python_environments() -> list[tuple[str, Path]]:
+    """Find uv project interpreters in the user's conventional environment roots."""
+
+    roots = [Path.home() / "python-envs"]
+    configured_roots = os.environ.get("VTOOLS_UV_PROJECTS_ROOT", "")
+    roots.extend(Path(raw).expanduser() for raw in configured_roots.split(os.pathsep) if raw)
+    found: dict[Path, str] = {}
+    interpreter_name = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+
+    active_environment = os.environ.get("UV_PROJECT_ENVIRONMENT")
+    if active_environment:
+        prefix = Path(active_environment).expanduser()
+        if not prefix.is_absolute():
+            prefix = Path.cwd() / prefix
+        executable = prefix / interpreter_name
+        if executable.is_file():
+            found[Path(os.path.abspath(executable))] = f"{prefix.parent.name} (uv)"
+
+    for root in dict.fromkeys(roots):
+        projects = [root]
+        try:
+            projects.extend(child for child in root.iterdir() if child.is_dir())
+        except OSError:
+            continue
+        for project in projects:
+            if not (project / "pyproject.toml").is_file():
+                continue
+            executable = project / ".venv" / interpreter_name
+            if executable.is_file():
+                found[Path(os.path.abspath(executable))] = f"{project.name} (uv)"
+
+    return [(label, path) for path, label in sorted(found.items(), key=lambda item: str(item[0]))]
+
+
 def _default_python_executable() -> str:
     """Use a real Python environment for jobs launched by a desktop bundle."""
 
     if getattr(sys, "frozen", False):
+        uv_environments = _uv_project_python_environments()
+        for label, executable in uv_environments:
+            if label.removesuffix(" (uv)").casefold() == "vtools":
+                return str(executable)
+        if os.environ.get("VTOOLS_UV_PROJECTS_ROOT") and uv_environments:
+            return str(uv_environments[0][1])
         for name in ("python", "python3"):
             candidate = shutil.which(name)
             if candidate:
-                return str(Path(candidate).resolve())
+                return os.path.abspath(candidate)
     return sys.executable
 
 
@@ -82,6 +122,15 @@ def project_path(raw: str) -> Path:
     return (path if path.is_absolute() else ROOT / path).resolve()
 
 
+def python_executable_path(raw: str) -> Path:
+    """Normalize an interpreter path without resolving venv symlinks."""
+
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    return Path(os.path.abspath(path))
+
+
 def _editable_config_path(target: Path) -> Path:
     """Copy packaged config templates to a writable per-user location."""
 
@@ -95,8 +144,20 @@ def _editable_config_path(target: Path) -> Path:
     if not user_target.exists():
         if not target.is_file():
             return target
-        user_target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(target, user_target)
+        text = target.read_text(encoding="utf-8")
+        data = parse_yaml(text)
+        project = data.get("project")
+        if isinstance(project, dict) and project.get("root") is not None:
+            root = Path(str(project["root"])).expanduser()
+            if not root.is_absolute():
+                # Moving a template must not change where its relative inputs
+                # are resolved. Existing user copies remain user-owned.
+                project["root"] = str((target.parent / root).resolve())
+                text = (
+                    json.dumps(data, ensure_ascii=False, indent=2) if target.suffix.lower() == ".json"
+                    else yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+                )
+        _atomic_text(user_target, text)
     return user_target
 
 
@@ -143,7 +204,7 @@ def save_settings(changes: dict[str, Any]) -> dict[str, Any]:
         if getattr(sys, "frozen", False):
             Path(settings["results_root"]).mkdir(parents=True, exist_ok=True)
     if "python_executable" in changes:
-        candidate = project_path(str(changes["python_executable"]))
+        candidate = python_executable_path(str(changes["python_executable"]))
         if not candidate.is_file():
             raise ValueError(f"Python 解释器不存在：{candidate}")
         settings["python_executable"] = str(candidate)
@@ -172,9 +233,11 @@ def clear_history() -> None:
 
 def parse_yaml(text: str) -> dict[str, Any]:
     try:
-        value = yaml.safe_load(text) or {}
+        value = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise ValueError(f"YAML 解析失败：{exc}") from exc
+    if value is None:
+        value = {}
     if not isinstance(value, dict):
         raise ValueError("YAML 顶层必须是对象")
     return value
@@ -269,6 +332,10 @@ def save_config(path: str, text: str) -> dict[str, Any]:
     target = _editable_config_path(project_path(path))
     if target.exists() and not target.is_file():
         raise ValueError("配置路径不是文件")
+    # The graphical patch API emits YAML; JSON configs must still be readable
+    # by backends that select their parser from the filename suffix.
+    if target.suffix.lower() == ".json":
+        text = json.dumps(data, ensure_ascii=False, indent=2)
     _atomic_text(target, text)
     return {"path": str(target), "data": data}
 
@@ -284,6 +351,36 @@ def _option(raw: Any, options: list[str], name: str) -> str:
     return value
 
 
+def _uses_bundled_tool_runtime(
+    tool_id: str, request: dict[str, Any], config_data: dict[str, Any],
+) -> bool:
+    """Select only paths that run without importing a model framework."""
+
+    if not getattr(sys, "frozen", False):
+        return False
+    if tool_id == "diagnostics":
+        # Existing predictions use the same matching/report engine as model
+        # inference, but never create an adapter. An explicit model input takes
+        # precedence over the YAML mode and still requires external packages.
+        values = request.get("values") or {}
+        dataset = config_data.get("dataset")
+        dataset = dataset if isinstance(dataset, dict) else {}
+        ground_truth = values.get("data") or dataset.get("data") or dataset.get("yaml") or dataset.get("gt")
+        # NDJSON ground truth invokes the upstream dataset converter, so that
+        # path still needs Ultralytics even when predictions are already saved.
+        if str(dataset.get("gt_format", "")).lower() == "ndjson" or Path(str(ground_truth or "")).suffix.lower() == ".ndjson":
+            return False
+        resource = str(values.get("resource") or "").strip()
+        if resource:
+            return Path(resource).suffix.lower() not in MODEL_SUFFIXES
+        return str(config_data.get("mode", "")).strip().lower() == "predictions_file"
+    # Keep this list explicit: NDJSON conversion currently calls Ultralytics;
+    # checkpoint inspection needs torch even though it does not run inference.
+    return tool_id == "dataset_quality" or (
+        tool_id == "data" and request.get("variant") in {"filename", "resize", "video"}
+    )
+
+
 def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
     tool_id = str(request.get("tool_id", ""))
     if tool_id not in TOOLS:
@@ -293,10 +390,8 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
     if not isinstance(values, dict):
         raise ValueError("参数必须是对象")
     settings = read_settings()
-    executable = project_path(str(request.get("python_executable") or settings["python_executable"]))
-    if not executable.is_file():
-        raise ValueError(f"Python 解释器不存在：{executable}")
     config: str | None = None
+    config_data: dict[str, Any] = {}
     args: list[str] = []
     if "variants" in tool:
         variant_id = str(request.get("variant", ""))
@@ -408,7 +503,7 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         if resource:
             resource = _field_path(resource)
             if tool_id == "diagnostics":
-                args += ["--weights" if Path(resource).suffix.lower() in {".pt", ".pth", ".onnx"} else "--predictions", resource]
+                args += ["--weights" if Path(resource).suffix.lower() in MODEL_SUFFIXES else "--predictions", resource]
             elif tool_id == "visualization":
                 args += ["--weights", resource]
             elif tool_id == "compression":
@@ -431,6 +526,7 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         loaded = load_config(config)
         config = loaded["path"]
         data = loaded["data"]
+        config_data = data
         if "--config" in args:
             args[args.index("--config") + 1] = config
         configured = data.get("modules")
@@ -447,10 +543,22 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
             tool_root = results_root / tool_id
             tool_root.mkdir(parents=True, exist_ok=True)
             args += ["--run-dir", str(tool_root / _visible_run_name(tool_root))]
+    # Decide after loading the effective config, so predictions_file configured
+    # in YAML also works without an external interpreter or a UI file override.
+    bundled_runtime = _uses_bundled_tool_runtime(tool_id, request, config_data)
+    executable = (
+        Path(sys.executable) if bundled_runtime
+        else python_executable_path(str(request.get("python_executable") or settings["python_executable"]))
+    )
+    if not executable.is_file():
+        raise ValueError(f"Python 解释器不存在：{executable}")
+    bundled_executable = getattr(sys, "frozen", False) and executable.resolve() == Path(sys.executable).resolve()
+    if bundled_executable and not bundled_runtime:
+        raise ValueError("此功能需要外部 Python 模型环境，请在环境选择器或设置中选择已安装相应依赖的解释器")
     script = Path(args[0])
     if not script.is_file():
         raise ValueError(f"入口文件不存在：{args[0]}")
-    if getattr(sys, "frozen", False) and executable.resolve() == Path(sys.executable).resolve():
+    if bundled_executable:
         args = ["--run-script", *args]
     return str(executable), args, config
 
@@ -505,15 +613,21 @@ def preview_text(path: Path) -> dict[str, Any]:
 
 def environments() -> list[dict[str, str]]:
     candidates: set[str] = set()
+    labels: dict[str, str] = {}
 
-    def add_python(raw: str | Path) -> None:
+    def add_python(raw: str | Path, label: str | None = None) -> None:
         path = Path(raw).expanduser()
         if path.is_file():
-            resolved = path.resolve()
+            executable = os.path.abspath(path)
             # A frozen workbench can dispatch bundled scripts, but it is not a
             # user Python environment and excludes heavy model dependencies.
-            if not (getattr(sys, "frozen", False) and resolved == Path(sys.executable).resolve()):
-                candidates.add(str(resolved))
+            if not (
+                getattr(sys, "frozen", False)
+                and Path(executable).resolve() == Path(sys.executable).resolve()
+            ):
+                candidates.add(executable)
+                if label:
+                    labels[executable] = label
 
     if not getattr(sys, "frozen", False):
         add_python(sys.executable)
@@ -556,4 +670,14 @@ def environments() -> list[dict[str, str]]:
             break
     for prefix in prefixes:
         add_python(prefix / ("python.exe" if os.name == "nt" else "bin/python"))
-    return [{"label": Path(path).parent.parent.name or path, "path": path} for path in sorted(candidates)]
+
+    for label, executable in _uv_project_python_environments():
+        add_python(executable, label)
+
+    return [
+        {
+            "label": labels.get(path, Path(path).parent.parent.name or path),
+            "path": path,
+        }
+        for path in sorted(candidates)
+    ]

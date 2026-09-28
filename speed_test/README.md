@@ -557,6 +557,8 @@ python benchmark_pytorch.py --list-modules
 在 `run_all.py` 中使用 `--only` 时，PyTorch、TensorRT 和一致性模块会按所属阶段路由，
 同一个模块不会在两个阶段重复执行。
 
+显式传入 `--only ''` 表示关闭全部模块；一键入口会跳过所有计算阶段，不恢复 YAML 默认选择。空选择不能与 `--enable/--disable` 混用。
+
 实现参考：
 - PyTorch 容差定义：https://docs.pytorch.org/docs/stable/generated/torch.allclose.html
 - TensorRT 精度注意事项：https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/accuracy-considerations.html

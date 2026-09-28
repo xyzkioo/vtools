@@ -2,7 +2,17 @@
 
 工作台默认使用 Python 和 pywebview 运行。需要交付给没有 Node 环境的使用者时，可以用 PyInstaller 生成目录包；前端 `dist/`、已纳入 Git 的工具脚本和配置文件会一起放入包内。构建请在 Git 工作区中执行；本地权重、数据集、运行结果和未跟踪文件不会进入包。
 
-桌面包只包含工作台、前端资源和轻量 API 依赖。模型、测速和转换任务继续使用工作台“设置”里选择的 Python 环境，这样不会把 torch、TensorRT 和 Ultralytics 的多 GB 运行库复制进每个桌面包。
+桌面包包含工作台、前端资源和 Pillow、OpenCV 等图片/报告运行依赖。按功能路径而不是工具名称分流：
+
+| 功能路径 | 安装版运行环境 | 依赖边界 |
+| --- | --- | --- |
+| 图片缩放、视频抽帧、文件名转换、数据集质量检查 | 内置 | Pillow、OpenCV、PyYAML |
+| 检测诊断读取已有预测文件，输出匹配结果、差图和报告 | 内置 | 不加载模型；GT 为本地 YAML/JSON/YOLO 标签 |
+| 检测诊断生成预测、模型可视化、测速、压缩、checkpoint 检查 | 所选外部 Python | PyTorch、Ultralytics 或对应后端 |
+| NDJSON 数据集转换（包括诊断读取 NDJSON GT） | 所选外部 Python | 复用 Ultralytics 公共转换 API |
+| K230 转换及 ONNX/kmodel 推理校验 | 所选外部 Python | 对应的模型、推理和 nncase/.NET 运行库 |
+
+内置路径由 `vtools_ui/webapp/core.py` 明确选择；添加新路径前需验证其实际导入链，不应因为“不执行推理”就推断无需模型库。构建用 `opencv-python-headless` 避免引入额外的 Qt 界面库；构建环境应避免同时安装多个 OpenCV 发行包。PyTorch、TensorRT 和 nncase 不随主包复制。
 
 桌面包同时展开 `vtools_runtime` 发现模块到 `_internal/`。启动任务时，工作台会把 `_internal/` 加入所选 Python 的模块搜索路径，把该环境的 `bin` 和动态库目录置于前面，并移除 PyInstaller 对外部 Python 不适用的动态库搜索路径。外部 Python 因此可以加载 vtools 的运行时适配器及其自身的 PyTorch、TensorRT 等依赖，并自动发现 Ultralytics Fork。
 
@@ -11,7 +21,7 @@
 在仓库根目录执行：
 
 ```bash
-python -m pip install -r vtools_ui/requirements.txt pyinstaller
+python -m pip install -r vtools_ui/requirements.txt -r packaging/requirements-bundled-tools.txt pyinstaller
 cd vtools_ui/webapp/frontend
 npm install
 npm run build
@@ -24,7 +34,7 @@ python packaging/build_desktop.py --clean
 - Windows：`dist/vtools/vtools.exe`
 - Ubuntu：`dist/vtools/vtools`
 
-目录包需要保留整个 `dist/vtools/` 目录，不能只复制可执行文件。首次启动仍然只监听本机随机端口；Linux 包默认优先使用系统的 `python`/`python3` 执行任务。GPU、TensorRT、nncase 和真实权重仍需要目标机器提供对应驱动或运行库。
+目录包需要保留整个 `dist/vtools/` 目录，不能只复制可执行文件。首次启动仍然只监听本机随机端口；Linux 包的模型任务优先选择 `~/python-envs/vtools/.venv`，没有该环境时尝试系统 `python`/`python3`。已保存的解释器设置优先。GPU、TensorRT、nncase 和真实权重仍需要目标机器提供对应驱动或运行库。
 
 ## Ubuntu 双击启动
 

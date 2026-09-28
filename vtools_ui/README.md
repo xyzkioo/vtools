@@ -9,7 +9,9 @@ python -m pip install -r vtools_ui/requirements.txt
 python -m vtools_ui
 ```
 
-如果默认 Python 没有桌面依赖，启动器会自动寻找已安装 pywebview 的 conda 环境（例如 `yolo`）。也可以明确使用该环境：
+如果默认 Python 没有桌面依赖，启动器会自动寻找已安装 pywebview 的 Conda 或 uv 环境。uv 项目默认从 `~/python-envs/<项目>/.venv` 扫描；也可通过 `VTOOLS_UV_PROJECTS_ROOT` 指定一个或多个项目目录。Linux 安装版首次启动时优先把名为 `vtools` 的 uv 环境设为模型运行环境。工作台右上角的环境选择器和“设置 → 任务使用的 Python 解释器”会列出这些环境，也允许手动填写解释器路径。
+
+也可以明确使用 Conda 环境启动：
 
 ```bash
 conda run -n yolo python -m vtools_ui
@@ -41,15 +43,19 @@ Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。p
 ## 功能
 
 - 模型工具：检测诊断、模型可视化、PyTorch/TensorRT 测速、输出一致性、一键测速、checkpoint 检查和模型压缩。
-- 转换和数据工具：独立的数据集质量检查、NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验、视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。ONNX / `.kmodel` 校验支持单张测试图片或图片目录批量校验。
+- 转换和数据工具：独立的数据集质量检查、NDJSON 转 YOLO、PyTorch 转 K230 `.kmodel`、ONNX / `.kmodel` 校验、视频抽帧、图片缩放、图片 / YOLO / COCO 文件名转换。安装版内置轻量运行依赖，图片缩放、视频抽帧、文件名转换和数据集质量检查无需外部 Python 环境；ONNX / `.kmodel` 校验仍需要相应外部推理运行库。
 - 数据集质量检查：在左侧“数据与转换 → 数据集质量检查”中选择 `data.yaml`，可设置报告目录和每个划分的标注抽样图数量；结果包含 `summary.json`、`issues.csv`、`report.md` 和抽样图，可直接跳转到结果查看。
-- 检测诊断会加载模型；打包版会从所选数据集或权重所在工作区寻找同级 Ultralytics Fork。只检查图片和标签时使用独立的数据集质量检查入口。
+- 检测诊断：安装版选择已有 JSON/JSONL/COCO 预测文件，或在 YAML 设置 `mode: predictions_file` 时，漏检/误检、分类、重叠、差图和报告由内置运行时执行，不需要模型环境。选择模型权重时则加载模型，使用所选外部 Python，并从数据集或权重所在工作区寻找同级 Ultralytics Fork。NDJSON 格式的 GT 需要调用 Ultralytics 转换，仍走外部环境。只检查图片和标签时使用独立的数据集质量检查入口。
 - 环境检查：检查 Python、PyTorch、CUDA 和本地 Ultralytics 源码。
 - 配置编辑：常用字段、全部标量字段与 YAML 原文共享编辑状态。YAML 是模型工具的完整参数来源；保存前校验并原子写入，不再生成 `.bak` 备份。对模块按钮的修改是本次运行的增量覆盖，不会关闭未显示的模块。
 - 结果查看：扫描选定目录中的 runs、results、reports 和 outputs，以可展开的多级目录树浏览任意深度的子文件夹；预览诊断的 `summary.json`、`raw_data/`、差图，可视化单图 JSON、图片和 `index.html`，以及压缩的 `summary.json`、`effective_config.json` 和 `artifacts/`。图片支持缩小、放大、适应窗口和重置比例；文本最多预览前 256 KB；模型文件可打开所在目录。任务完成后可直接跳转至结果目录。
-- 历史与设置：历史保存于 `.vtools_ui/history.json`，新增的任务日志保存在 `.vtools_ui/logs/`；结果目录、历史数量和任务解释器保存在 `.vtools_ui/settings.json`。
+- 历史与设置：历史保存于 `.vtools_ui/history.json`，新增的任务日志保存在 `.vtools_ui/logs/`；结果目录、历史数量和任务解释器保存在 `.vtools_ui/settings.json`。环境选择器支持 Conda、uv 项目环境及手动指定的 Python 解释器。
 
 工作台保留模型任务的 YAML、CLI 覆盖项和独立子进程语义。路径输入中的相对路径按项目根目录解析；YAML 内部相对路径仍由各工具自身解释。
+
+运行环境按实际输入选择，不能仅按左侧工具分类推断依赖。`Checkpoint 检查` 需要 PyTorch 读取权重；`跳过模型构建` 的环境检查仍用于检查所选外部 Python，不表示改用内置环境。没有配置外部环境时，轻量功能仍可执行；模型功能会明确提示选择解释器。
+
+安装版首次生成配置副本时，会将模板中相对的 `project.root` 固定为原模板所在目录解析得到的绝对路径，避免复制后输入位置改变。已经保存的配置副本不会被覆盖；旧副本仍使用相对 `project.root` 时，请在配置编辑器确认其实际根目录。
 
 ## 安全与运行限制
 

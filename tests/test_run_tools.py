@@ -9,6 +9,16 @@ import run_tools
 
 
 class UnifiedEntry(unittest.TestCase):
+    def test_falsey_non_mapping_yaml_does_not_dispatch_default_tool(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "tools.yaml"
+            for value in ("[]", "false", "0", "''"):
+                config.write_text(value, encoding="utf-8")
+                with self.subTest(value=value), patch.object(sys, "argv", ["run_tools", "--config", str(config)]), \
+                        patch.object(run_tools.importlib, "import_module") as dispatch:
+                    self.assertEqual(run_tools.main(), 2)
+                dispatch.assert_not_called()
+
     def test_invalid_yaml_does_not_fall_back_to_diagnostics(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp) / "tools.yaml"
