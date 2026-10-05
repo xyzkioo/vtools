@@ -205,6 +205,7 @@ vtools/
 
 | 文档 | 内容 |
 | --- | --- |
+| [模块介绍总览](docs/README.md) | 各模块用途、入口、输入输出与使用边界 |
 | [桌面工作台](vtools_ui/README.md) | UI 启动、桌面包和软件更新 |
 | [环境检验向导](env_test/README.md) | Python、PyTorch、CUDA 和 Ultralytics Fork 配置 |
 | [检测诊断](model_diagnostics/README.md) | 数据集检查、错误类型和诊断报告 |
