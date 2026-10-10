@@ -6,6 +6,7 @@ import argparse
 import json
 import mimetypes
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -14,13 +15,14 @@ import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from vtools_ui import __version__
 
 from .catalog import ROOT, public_catalog
 from .core import (
-    IMAGE_SUFFIXES, TEXT_SUFFIXES, clear_history, environments, flatten_config, history, list_results,
+    IMAGE_SUFFIXES, TEXT_SUFFIXES, STATE_DIR, clear_history, environments, flatten_config, history, list_results,
     load_config, parse_yaml, patch_config, preview_text, project_path, read_settings,
     python_executable_path, result_file, save_config, save_settings,
 )
@@ -101,6 +103,16 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._json(load_config(self._first(query, "path")))
         elif path == "/api/history":
             self._json({"history": history()})
+        elif path == "/api/runs/log":
+            run_id = self._first(query, "id")
+            expected = self._run_log_path(run_id)
+            limit = 2 * 1024 * 1024
+            with expected.open("rb") as handle:
+                size = expected.stat().st_size
+                if size > limit:
+                    handle.seek(size - limit)
+                content = handle.read().decode("utf-8", errors="replace")
+            self._json({"text": content, "truncated": size > limit, "path": str(expected)})
         elif path == "/api/runs/current":
             self._json({"state": self.server.manager.state()})
         elif path == "/api/runs/events":
@@ -153,7 +165,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 data = parse_yaml(str(body.get("text", "")))
                 self._json({"data": data, "fields": flatten_config(data)})
             elif path == "/api/config/patch":
-                self._json(patch_config(str(body.get("text", "")), str(body.get("path", "")), body.get("value")))
+                self._json(patch_config(
+                    str(body.get("text", "")), str(body.get("path", "")), body.get("value"),
+                    from_form=body.get("from_form") is True,
+                ))
             elif path == "/api/config/save":
                 self._json(save_config(str(body.get("path", "")), str(body.get("text", ""))))
             elif path == "/api/update/install":
@@ -166,6 +181,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             elif path == "/api/runs/stop":
                 self.server.manager.stop()
                 self._json({"state": self.server.manager.state()})
+            elif path == "/api/runs/log/open":
+                target = self._run_log_path(str(body.get("id", "")))
+                self._open_local(target.parent if body.get("folder", False) else target)
+                self._json({"ok": True})
             elif path == "/api/results/open":
                 target = result_file(self.server.results_root, str(body.get("path", "")))
                 self._open_local(target.parent if body.get("folder", True) else target)
@@ -174,6 +193,18 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._json({"error": "接口不存在"}, HTTPStatus.NOT_FOUND)
         except (ValueError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
             self._error(exc)
+
+    def _run_log_path(self, run_id: str) -> Path:
+        if not re.fullmatch(r"[0-9a-f]{32}", run_id):
+            raise ValueError("运行日志不存在")
+        current = self.server.manager.state()
+        record = next((item for item in history() if item.get("id") == run_id), None)
+        if record is None and current and current.get("id") == run_id:
+            record = current
+        expected = (STATE_DIR / "logs" / f"{run_id}.log").resolve()
+        if not record or not record.get("log_path") or Path(record["log_path"]).resolve() != expected or not expected.is_file():
+            raise ValueError("运行日志不存在")
+        return expected
 
     @staticmethod
     def _open_local(path: Path) -> None:
@@ -200,8 +231,16 @@ class ApiHandler(BaseHTTPRequestHandler):
 
 
 class DesktopBridge:
-    def __init__(self) -> None:
+    def __init__(self, clipboard_writer: Callable[[str], bool] | None = None) -> None:
         self.window = None
+        self._clipboard_writer = clipboard_writer
+
+    def copy_text(self, text: str) -> bool:
+        if not isinstance(text, str):
+            raise ValueError("剪贴板内容必须是文本")
+        if self._clipboard_writer is None:
+            return False
+        return self._clipboard_writer(text)
 
     def pick_path(self, kind: str) -> str:
         if self.window is None:
@@ -283,7 +322,11 @@ def run(argv: list[str] | None = None) -> int:
                 pass
         else:
             import webview
-            bridge = DesktopBridge()
+            clipboard_writer = None
+            if sys.platform.startswith("linux"):
+                from .clipboard import create_qt_clipboard_writer
+                clipboard_writer = create_qt_clipboard_writer()
+            bridge = DesktopBridge(clipboard_writer)
             window = webview.create_window(
                 "vtools 工作台", url, js_api=bridge, width=1280, height=800,
                 min_size=(1080, 680), background_color="#f4f4f6",

@@ -693,6 +693,11 @@ def main() -> int:
         config["dataset"] = dataset
     apply_python_paths(config)
     selected = resolve_compression_modules(config, only=args.only, enable=args.enable, disable=args.disable)
+    config = dict(config)
+    config["modules"] = dict(selected)
+    if selected.get("compression.prune.structured") and _section(config, "model").get("task") == "detect":
+        from model_compression.core.detection import _warn_structured_memory
+        _warn_structured_memory(config)
     run_dir = prepare_run_directory(config, args.run_dir)
     if run_dir is None:
         run_dir = Path(_section(config, "project").get("root", Path.cwd())) / "model_compression" / "runs" / "adhoc"
@@ -731,6 +736,7 @@ def main() -> int:
             print(f"[{module_id}] 跳过：{reason}")
             continue
         try:
+            print(f"[{module_id}] 开始", flush=True)
             from model_compression.core.detection import is_detection, run_detection_operation
             if is_detection(config) and module_id != "comparison.report":
                 result = run_detection_operation(module_id, config, state, run_dir, run_id)

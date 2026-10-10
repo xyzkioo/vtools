@@ -26,6 +26,8 @@ python model_compression/run_model_compression.py
 
 默认会在 `model_compression/runs/runN/` 生成 `effective_config.json` 和扁平化的 `summary.json`。模型文件统一位于 `artifacts/structured_pruning`、`artifacts/unstructured_pruning`、`artifacts/distillation`、`artifacts/quantization` 或 `artifacts/multi_processing`。分类流程没有配置数据集时，基线仍会记录参数量并将评测标记为跳过；YOLO 检测基线需要填写 `dataset.data` 才能进行 mAP 评估。执行内容只由 `modules` 开关决定。
 
+`effective_config.json` 的 `modules` 记录 YAML 与 `--only`、`--enable`、`--disable` 合并后的实际开关。结构化检测压缩启动前检查 CUDA 显存；总量低于 8 GiB 或当前空闲低于 6 GiB 时提示风险。日志标注剪枝前后评估、测速、依赖图追踪、微调和保存阶段，附阶段边界的 CUDA 空闲、已分配、已保留及本进程阶段峰值；OOM 错误会标明阶段。这不是精确容量预测，实际峰值还受输入尺寸、batch size、其他进程及模型结构影响。
+
 典型运行目录如下：
 
 ```text

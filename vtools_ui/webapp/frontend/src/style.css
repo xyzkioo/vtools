@@ -35,3 +35,14 @@ html,body,#root{background:var(--page)}
 html{overflow:hidden}
 .app-shell{position:fixed;inset:0;height:auto;min-height:0}
 .sidebar,.main-shell{height:auto}
+
+.console-log-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.console-log-actions{display:flex;align-items:center;gap:12px;flex:none}.console-log-actions button{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.console-body-head{gap:15px}.console-body pre{user-select:text}
+
+.config-field .config-hint{color:#73737e;font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+
+/* Group graphical configuration fields by their functional module. */
+.config-groups{display:flex;flex-direction:column;gap:18px}
+.config-group{border:1px solid var(--line);border-radius:12px;padding:17px;background:#fff}
+.config-group-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:15px;padding-bottom:11px;border-bottom:1px solid #f0f0f2}
+.config-group-heading h3{margin:0;font-size:14px;color:#464650}
+.config-group-heading span{font-size:11px;color:var(--muted);white-space:nowrap}

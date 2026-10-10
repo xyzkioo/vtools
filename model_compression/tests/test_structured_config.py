@@ -7,9 +7,15 @@ from unittest.mock import patch
 
 from model_compression.modules.dependency_pruning import _structured_section, _input_size
 from model_compression.modules.structured import _ultralytics_amp_weights_dir
+from model_compression.core.detection import _structured_stage
 
 
 class StructuredConfigTests(unittest.TestCase):
+    def test_oom_error_identifies_stage(self):
+        with patch('model_compression.core.detection._cuda_memory_note', side_effect=lambda **_kwargs: ''):
+            with self.assertRaisesRegex(RuntimeError, '剪枝前测速.*降低评估 batch_size'):
+                _structured_stage('剪枝前测速', lambda: (_ for _ in ()).throw(RuntimeError('CUDA out of memory')))
+
     def test_structured_settings_use_canonical_nested_section(self):
         config = {'compression': {'structured': {'channel_sparsity': .3, 'pruning_input_size': 128}},
                   'structured': {'channel_sparsity': .1}, 'dataset': {'input_size': 640}}

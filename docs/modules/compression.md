@@ -32,6 +32,8 @@ python model_compression/run_model_compression.py --config model_compression/con
 
 默认输出 `model_compression/runs/runN/`，含 `effective_config.json`、`summary.json` 和 `artifacts/` 下各处理阶段的模型。跨运行继续处理时，将上一阶段产物明确填入下一次的 `model.weights`。
 
+`effective_config.json.modules` 是 YAML 与 CLI 模块开关合并后的实际选择。结构化剪枝会在日志中标出评估、测速、依赖图追踪和微调阶段及 CUDA 显存信息；低于 8 GiB 总显存或 6 GiB 空闲显存时给出风险提示，不自动跳过任务。
+
 ## 使用边界
 
 非结构化稀疏不保证文件变小或推理更快；正式性能要在目标硬件上测速。检测蒸馏使用 Ultralytics 原生训练接口，分类蒸馏模块不能替代它。微调需要训练时间和资源，结构化质量门禁失败应查看精度结果。

@@ -7,13 +7,86 @@ import os
 import shutil
 import statistics
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, TypeVar
 
 from .model_runtime import parameter_metrics, resolve_device
 from .provenance import artifact_info
 from ..modules.pruning import prune_unstructured
 from ..modules.dependency_pruning import prune_detector_dependency_aware
 from ..modules.structured import build_structured_detector, finetune_structured_detector
+
+_T = TypeVar('_T')
+
+
+def _cuda_device(torch: Any, value: Any) -> Any:
+    text = str(value or 'auto').strip().lower()
+    if text == 'auto':
+        return torch.device('cuda', torch.cuda.current_device())
+    if text.isdigit():
+        text = f'cuda:{text}'
+    return torch.device(text)
+
+
+def _cuda_memory_note(*, include_peak: bool = False, device_value: Any = 'auto') -> str:
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return ''
+        device = _cuda_device(torch, device_value)
+        if device.type != 'cuda':
+            return ''
+        free, total = torch.cuda.mem_get_info(device)
+        allocated = torch.cuda.memory_allocated(device)
+        reserved = torch.cuda.memory_reserved(device)
+        gib = 1024 ** 3
+        note = (f'；CUDA 空闲 {free / gib:.2f}/{total / gib:.2f} GiB，'
+                f'{device} 本进程已分配 {allocated / gib:.2f} GiB、已保留 {reserved / gib:.2f} GiB')
+        if include_peak:
+            note += (f'，本阶段分配峰值 {torch.cuda.max_memory_allocated(device) / gib:.2f} GiB、'
+                     f'保留峰值 {torch.cuda.max_memory_reserved(device) / gib:.2f} GiB')
+        return note
+    except (ImportError, RuntimeError, AssertionError):
+        return ''
+
+
+def _structured_stage(name: str, action: Callable[[], _T], *, device_value: Any = 'auto') -> _T:
+    try:
+        import torch
+        device = _cuda_device(torch, device_value)
+        if torch.cuda.is_available() and device.type == 'cuda':
+            torch.cuda.reset_peak_memory_stats(device)
+    except (ImportError, RuntimeError, AssertionError):
+        pass
+    print(f'[结构化剪枝] 开始：{name}{_cuda_memory_note(device_value=device_value)}', flush=True)
+    try:
+        result = action()
+    except Exception as exc:
+        detail = str(exc)
+        if 'out of memory' in detail.lower() or 'cuda error: out of memory' in detail.lower():
+            detail += '；可降低评估 batch_size、输入尺寸、微调 batch_size 或改用 CPU/更大显存设备'
+        raise RuntimeError(f'结构化剪枝阶段「{name}」失败{_cuda_memory_note(include_peak=True, device_value=device_value)}：{detail}') from exc
+    print(f'[结构化剪枝] 完成：{name}{_cuda_memory_note(include_peak=True, device_value=device_value)}', flush=True)
+    return result
+
+
+def _warn_structured_memory(config: Mapping[str, Any]) -> None:
+    if str(config.get('model', {}).get('device', 'auto')).strip().lower() == 'cpu':
+        return
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        device = _cuda_device(torch, config.get('model', {}).get('device', 'auto'))
+        if device.type != 'cuda':
+            return
+        free, total = torch.cuda.mem_get_info(device)
+        gib = 1024 ** 3
+        if total < 8 * gib or free < 6 * gib:
+            print(f'[结构化剪枝] 显存风险：{device} 当前空闲 {free / gib:.2f} GiB，'
+                  f'总量 {total / gib:.2f} GiB。评估、测速、依赖图追踪和微调均可能出现显存峰值；'
+                  '该提示不是精确容量预测。', flush=True)
+    except (ImportError, RuntimeError, AssertionError):
+        return
 
 
 def _resolved_dataset_root(data_path: Path, raw_root: Any) -> Path:
@@ -301,10 +374,15 @@ def run_detection_operation(module_id, config, state, run_dir, run_id):
         metadata['note'] = '非结构化剪枝减少非零权重，不保证 PT 文件更小或普通推理更快。'
         weights = target
     elif module_id == 'compression.prune.structured':
-        before = evaluate_detector(detector, config, run_dir, 'before_structured_pruning')
-        before_speed = benchmark_detector(detector, config)
+        device_value = config.get('model', {}).get('device', 'auto')
+        def stage(name: str, action: Callable[[], _T]) -> _T:
+            return _structured_stage(name, action, device_value=device_value)
+
+        before = stage('剪枝前评估', lambda: evaluate_detector(detector, config, run_dir, 'before_structured_pruning'))
+        before_speed = stage('剪枝前测速', lambda: benchmark_detector(detector, config))
         source_file_size = artifact_info(weights)['size_bytes']
-        detector = load_detector(weights)
+        del detector
+        detector = stage('重新加载待剪枝模型', lambda: load_detector(weights))
         data = detection_data(config)
         if data is None:
             raise ValueError('结构化检测压缩需要 dataset.data（YOLO data.yaml）。')
@@ -314,33 +392,36 @@ def run_detection_operation(module_id, config, state, run_dir, run_id):
         structured_dir = run_dir / 'artifacts' / 'structured_pruning'
         structured_dir.mkdir(parents=True, exist_ok=True)
         if structured_method in {'torch_pruning', 'torch-pruning', 'dependency', 'dependency_aware'}:
-            detector.model, structured = prune_detector_dependency_aware(
-                detector.model, config, structured_dir
-            )
+            detector.model, structured = stage('依赖图追踪与通道剪枝',
+                lambda: prune_detector_dependency_aware(detector.model, config, structured_dir))
         elif structured_method in {'scale', 'width_scaling', 'yolo_scale'}:
-            detector, structured = build_structured_detector(detector, weights, config.get('compression', {}), structured_dir)
+            detector, structured = stage('构建缩放模型',
+                lambda: build_structured_detector(detector, weights, config.get('compression', {}), structured_dir))
         else:
             raise ValueError(
                 '未知结构化剪枝方法：'
                 f'{structured_method}；可选 scale 或 torch_pruning。'
             )
-        detector, finetune = finetune_structured_detector(detector, config, data, structured_dir)
+        detector, finetune = stage('微调',
+            lambda: finetune_structured_detector(detector, config, data, structured_dir))
         metadata.update(structured)
         metadata.update(finetune)
         target = _unique_target(structured_dir / 'yolo-structured.pt')
         target.parent.mkdir(parents=True, exist_ok=True)
         expected_signature = _parameter_signature(detector.model)
         _clean_detector_checkpoint(detector)
-        detector.save(str(target))
-        reloaded = load_detector(target)
+        stage('保存剪枝模型', lambda: detector.save(str(target)))
+        del detector
+        reloaded = stage('重新加载剪枝结果', lambda: load_detector(target))
         actual_signature = _parameter_signature(reloaded.model)
         if actual_signature != expected_signature:
             raise RuntimeError(
                 '结构化模型保存后重新加载的参数形状与剪枝结果不一致，疑似旧 EMA 覆盖了新模型；'
                 f'保存前参数量={expected_signature[0]}，加载后参数量={actual_signature[0]}'
             )
-        metadata.update(evaluate_detector(reloaded, config, run_dir, 'after_structured_pruning'))
-        after_speed = benchmark_detector(reloaded, config)
+        metadata.update(stage('剪枝后评估',
+            lambda: evaluate_detector(reloaded, config, run_dir, 'after_structured_pruning')))
+        after_speed = stage('剪枝后测速', lambda: benchmark_detector(reloaded, config))
         metadata.update({f'after_{key}': value for key, value in after_speed.items()})
         metadata.update({f'before_{key}': value for key, value in before_speed.items()})
         metadata['source_model_file_size_bytes'] = source_file_size

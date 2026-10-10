@@ -17,7 +17,6 @@ TOOLS: dict[str, dict] = {
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
         ],
         "modules": [("diagnostics.missed", "漏检与误检"), ("diagnostics.classification", "分类错误"), ("diagnostics.overlap", "重叠分析"), ("output.images", "差图输出")],
-        "common": ["mode", "dataset.data", "dataset.split", "ultralytics_model.weights", "benchmark.device", "benchmark.input_size", "diagnostics.score_threshold", "diagnostics.match_iou"],
     },
     "visualization": {
         "title": "模型可视化", "group": "model", "description": "查看特征图、CAM 和检测阶段追踪。",
@@ -30,7 +29,6 @@ TOOLS: dict[str, dict] = {
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
         ],
         "modules": [("visualization.features", "特征图"), ("visualization.cam", "CAM"), ("visualization.stage_trace", "阶段追踪")],
-        "common": ["mode", "model.weights", "model.task", "input.source", "input.size", "input.max_images", "layers.preset", "cam.method"],
     },
     "benchmark": {
         "title": "性能测速", "group": "model", "description": "比较 PyTorch、TensorRT 和模型输出一致性。",
@@ -44,7 +42,6 @@ TOOLS: dict[str, dict] = {
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
         ],
         "modules": [("speed.pytorch_call", "PyTorch 调用"), ("speed.tensorrt_call", "TensorRT"), ("memory.pytorch_peak", "显存统计"), ("consistency.detection", "一致性检查")],
-        "common": ["models.0.weights", "models.0.adapter", "models.0.task", "benchmark.device", "benchmark.input_size", "benchmark.batch_size", "benchmark.warmup", "benchmark.repeats"],
     },
     "compression": {
         "title": "模型压缩", "group": "model", "description": "运行基线、量化、剪枝和蒸馏实验。",
@@ -62,7 +59,6 @@ TOOLS: dict[str, dict] = {
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
         ],
         "modules": [("baseline.evaluate", "基线评估"), ("compression.quantize.dynamic_int8", "动态 INT8"), ("compression.prune.unstructured", "非结构化剪枝"), ("distillation.classification", "知识蒸馏"), ("compression.prune.structured", "结构化通道缩放")],
-        "common": ["model.weights", "model.task", "dataset.data", "model.device", "compression.sparsity", "compression.structured.method", "compression.structured.target_scale", "compression.structured.finetune_epochs"],
     },
     "transform": {
         "title": "格式转换", "group": "utility", "description": "数据和模型格式转换。",

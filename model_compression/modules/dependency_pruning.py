@@ -142,68 +142,77 @@ def prune_detector_dependency_aware(
     records: list[dict[str, Any]] = []
 
     for layer_index, layer in candidates:
-        with torch.enable_grad():
-            graph = tp.DependencyGraph().build_dependency(
-                model, example_inputs=example_inputs,
-                output_transform=output_transform, verbose=False,
+        graph = None
+        group = None
+        scores = None
+        print(f'[结构化剪枝] 追踪层 {layer_index}，当前通道 {layer.out_channels}', flush=True)
+        try:
+            with torch.enable_grad():
+                graph = tp.DependencyGraph().build_dependency(
+                    model, example_inputs=example_inputs,
+                    output_transform=output_transform, verbose=False,
+                )
+            current_channels = int(layer.out_channels)
+            # Keep a complete channel-aligned group for the importance calculation.
+            group = graph.get_pruning_group(
+                layer,
+                tp.prune_conv_out_channels,
+                list(range(current_channels)),
             )
-        current_channels = int(layer.out_channels)
-        # Keep a complete channel-aligned group for the importance calculation.
-        group = graph.get_pruning_group(
-            layer,
-            tp.prune_conv_out_channels,
-            list(range(current_channels)),
-        )
-        scores = importance(group)
-        if scores is None or int(scores.numel()) != current_channels:
-            records.append({
-                "layer_index": layer_index,
-                "channels_before": current_channels,
-                "channels_pruned": 0,
-                "status": "skipped_no_importance",
-            })
-            continue
+            scores = importance(group)
+            if scores is None or int(scores.numel()) != current_channels:
+                records.append({
+                    "layer_index": layer_index,
+                    "channels_before": current_channels,
+                    "channels_pruned": 0,
+                    "status": "skipped_no_importance",
+                })
+                continue
 
-        requested = int(current_channels * ratio)
-        if requested <= 0:
+            requested = int(current_channels * ratio)
+            if requested <= 0:
+                records.append({
+                    "layer_index": layer_index,
+                    "channels_before": current_channels,
+                    "channels_pruned": 0,
+                    "status": "skipped_ratio",
+                })
+                continue
+            if round_to > 1:
+                requested = (requested // round_to) * round_to
+            # Never remove all channels, and keep at least one alignment block.
+            requested = min(requested, current_channels - max(1, round_to))
+            if requested <= 0:
+                records.append({
+                    "layer_index": layer_index,
+                    "channels_before": current_channels,
+                    "channels_pruned": 0,
+                    "status": "skipped_min_channels",
+                })
+                continue
+            indices = torch.argsort(scores, descending=False)[:requested].tolist()
+            group = graph.get_pruning_group(layer, tp.prune_conv_out_channels, indices)
+            if not graph.check_pruning_group(group):
+                records.append({
+                    "layer_index": layer_index,
+                    "channels_before": current_channels,
+                    "channels_pruned": 0,
+                    "status": "skipped_invalid_dependency_group",
+                })
+                continue
+            group.prune()
             records.append({
                 "layer_index": layer_index,
                 "channels_before": current_channels,
-                "channels_pruned": 0,
-                "status": "skipped_ratio",
+                "channels_pruned": requested,
+                "channels_after": int(layer.out_channels),
+                "status": "pruned",
             })
-            continue
-        if round_to > 1:
-            requested = (requested // round_to) * round_to
-        # Never remove all channels, and keep at least one alignment block.
-        requested = min(requested, current_channels - max(1, round_to))
-        if requested <= 0:
-            records.append({
-                "layer_index": layer_index,
-                "channels_before": current_channels,
-                "channels_pruned": 0,
-                "status": "skipped_min_channels",
-            })
-            continue
-        indices = torch.argsort(scores, descending=False)[:requested].tolist()
-        group = graph.get_pruning_group(layer, tp.prune_conv_out_channels, indices)
-        if not graph.check_pruning_group(group):
-            records.append({
-                "layer_index": layer_index,
-                "channels_before": current_channels,
-                "channels_pruned": 0,
-                "status": "skipped_invalid_dependency_group",
-            })
-            continue
-        group.prune()
-        records.append({
-            "layer_index": layer_index,
-            "channels_before": current_channels,
-            "channels_pruned": requested,
-            "channels_after": int(layer.out_channels),
-            "status": "pruned",
-        })
+        finally:
+            # DependencyGraph keeps traced tensors alive; release them before the next trace.
+            del scores, group, graph
 
+    del example_inputs
     model.requires_grad_(False)
     target_params = _parameter_count(model)
     return model, {

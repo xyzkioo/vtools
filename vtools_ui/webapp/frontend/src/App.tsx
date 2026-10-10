@@ -9,19 +9,19 @@ import {
 
 type Field = { key: string; label: string; kind: string; required?: boolean; default?: unknown; options?: string[]; hint?: string; when?: Record<string, string> }
 type Variant = { title: string; fields: Field[]; defaults: Record<string, unknown> }
-type Tool = { title: string; description: string; group: string; config?: string; fields?: Field[]; modules?: [string, string][]; common?: string[]; variants?: Record<string, Variant> }
+type Tool = { title: string; description: string; group: string; config?: string; fields?: Field[]; modules?: [string, string][]; variants?: Record<string, Variant> }
 type Catalog = Record<string, Tool>
-type RunState = { id: string; tool_id: string; status: string; started_at: string; exit_code: number | null; result_dir: string | null; config: string | null }
-type History = { id?: string; time: string; task: string; status: string; config: string; result_dir?: string; exit_code?: number }
+type RunState = { id: string; tool_id: string; status: string; started_at: string; exit_code: number | null; result_dir: string | null; config: string | null; log_path?: string | null }
+type History = { id?: string; time: string; task: string; status: string; config: string; result_dir?: string; exit_code?: number; log_path?: string | null }
 type Result = { path: string; relative: string; size: number; kind: 'image' | 'text' | 'model' }
-type ConfigField = { path: string; value: unknown; kind: string }
+type ConfigField = { path: string; value: unknown; kind: string; hint: string }
 type ConfigDocument = { path: string; text: string; data: Record<string, unknown>; fields: ConfigField[] }
 type Settings = { results_root: string; history_limit: number; python_executable: string }
 type UpdateInfo = { status: 'unsupported' | 'unpublished' | 'current' | 'available' | 'missing_asset'; current_version: string; latest_version?: string; message: string }
 type ResultFolder = { name: string; folders: ResultFolder[]; files: Result[]; count: number }
 
 declare global {
-  interface Window { pywebview?: { api: { pick_path: (kind: string) => Promise<string> } } }
+  interface Window { pywebview?: { api: { pick_path: (kind: string) => Promise<string>; copy_text: (text: string) => Promise<boolean> } } }
 }
 
 const token = new URLSearchParams(location.search).get('token') || ''
@@ -124,9 +124,61 @@ function ResultFolderTree({ node, depth = 0, selectedFile, onSelect }: { node: R
   </details>
 }
 
-function ConfigEditor({ path, tool, onClose, onSaved }: { path: string; tool: Tool; onClose: () => void; onSaved: (path: string) => void }) {
+type ConfigSection = { id: string; title: string; fields: ConfigField[] }
+
+const sectionOrder: Record<string, [string, string][]> = {
+  compression: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['baseline', '基线评估'], ['unstructured', '非结构化剪枝'], ['structured', '结构化剪枝'], ['quantization', '模型量化'], ['distillation', '知识蒸馏'], ['export', '报告与导出']],
+  diagnostics: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['prediction', '预测来源'], ['inference', '推理设置'], ['diagnostics', '检测诊断'], ['overlap', '重叠与遮挡'], ['export', '报告与导出']],
+  visualization: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['features', '特征图与选层'], ['cam', 'CAM 热图'], ['inference', '检测参数'], ['stage', '检测阶段追踪']],
+  benchmark: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['checkpoint', '权重检查'], ['pytorch', 'PyTorch 测速'], ['tensorrt', 'TensorRT 与 ONNX'], ['consistency', '输出一致性'], ['export', '结果汇总']],
+}
+
+function configSectionId(toolId: string, path: string): string {
+  const has = (...prefixes: string[]) => prefixes.some(prefix => path.startsWith(prefix))
+  if (path === 'schema_version' || path === 'mode' || has('project.', 'run.')) return 'general'
+  if (/^(model|models\.\d+|ultralytics_model|custom_adapter)\./.test(path)) return 'model'
+  if (has('dataset.', 'input.')) return 'data'
+  if (toolId === 'compression') {
+    if (has('compression.structured.', 'modules.compression.prune.structured')) return 'structured'
+    if (has('compression.sparsity', 'compression.exclude', 'modules.compression.prune.unstructured')) return 'unstructured'
+    if (has('distillation.', 'modules.distillation.')) return 'distillation'
+    if (has('modules.compression.quantize.')) return 'quantization'
+    if (has('evaluation.', 'modules.baseline.', 'modules.model.')) return 'baseline'
+    if (has('export.', 'modules.comparison.', 'modules.artifact.')) return 'export'
+  } else if (toolId === 'diagnostics') {
+    if (has('predictions_file.', 'mode_b.', 'modules.predict.', 'modules.validation.')) return 'prediction'
+    if (has('diagnostics.overlap.', 'modules.diagnostics.overlap')) return 'overlap'
+    if (has('diagnostics.', 'modules.diagnostics.')) return 'diagnostics'
+    if (has('modules.output.')) return 'export'
+    if (has('benchmark.')) return 'inference'
+  } else if (toolId === 'visualization') {
+    if (has('layers.', 'features.', 'modules.visualization.features')) return 'features'
+    if (has('cam.', 'modules.visualization.cam')) return 'cam'
+    if (has('stage_trace.', 'modules.visualization.stage_trace')) return 'stage'
+    if (has('detection.')) return 'inference'
+  } else if (toolId === 'benchmark') {
+    if (has('modules.checkpoint.', 'benchmark.inspect_checkpoint', 'benchmark.verify_model_load', 'benchmark.fail_on_checkpoint_inspection')) return 'checkpoint'
+    if (has('pytorch.', 'modules.speed.pytorch_', 'modules.memory.', 'modules.model.')) return 'pytorch'
+    if (has('tensorrt.', 'modules.speed.tensorrt_', 'modules.build.', 'modules.export.')) return 'tensorrt'
+    if (has('consistency.', 'modules.consistency.')) return 'consistency'
+    if (has('run_all.')) return 'export'
+    if (has('benchmark.')) return 'data'
+  }
+  return 'other'
+}
+
+function groupConfigFields(toolId: string, fields: ConfigField[]): ConfigSection[] {
+  const sections = [...(sectionOrder[toolId] || []), ['other', '其他与自定义字段']]
+  return sections.map(([id, title]) => ({
+    id, title,
+    fields: fields.filter(field => configSectionId(toolId, field.path) === id)
+      .sort((a, b) => Number(b.path.startsWith('modules.')) - Number(a.path.startsWith('modules.'))),
+  })).filter(section => section.fields.length > 0)
+}
+
+function ConfigEditor({ path, toolId, onClose, onSaved }: { path: string; toolId: string; onClose: () => void; onSaved: (path: string) => void }) {
   const [doc, setDoc] = useState<ConfigDocument | null>(null)
-  const [tab, setTab] = useState<'common' | 'all' | 'yaml'>('common')
+  const [tab, setTab] = useState<'all' | 'yaml'>('all')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [drafts, setDrafts] = useState<Record<string, string | boolean>>({})
@@ -139,19 +191,14 @@ function ConfigEditor({ path, tool, onClose, onSaved }: { path: string; tool: To
     for (const [path, raw] of Object.entries(drafts)) {
       const field = updated.fields.find(item => item.path === path)
       if (!field) continue
-      let value: unknown = raw
-      if (field.kind === 'number') {
-        if (typeof raw !== 'string' || raw.trim() && !Number.isFinite(Number(raw))) throw new Error(`${path} 需要有效数字`)
-        value = raw.trim() ? Number(raw) : null
-      } else if (field.kind === 'list') value = String(raw).split(',').map(item => item.trim()).filter(Boolean)
-      const patched = await api<Omit<ConfigDocument, 'path'>>('config/patch', { text: updated.text, path, value })
+      const patched = await api<Omit<ConfigDocument, 'path'>>('config/patch', { text: updated.text, path, value: raw, from_form: true })
       updated = { ...updated, ...patched }
     }
     setDrafts({})
     setDoc(updated)
     return updated
   }
-  async function changeTab(next: 'common' | 'all' | 'yaml') {
+  async function changeTab(next: 'all' | 'yaml') {
     if (!doc) return
     let updated = doc
     try { updated = await applyDrafts(updated) }
@@ -163,6 +210,7 @@ function ConfigEditor({ path, tool, onClose, onSaved }: { path: string; tool: To
         setError('')
       } catch (err) { setError(String(err)); return }
     }
+    setError('')
     setTab(next)
   }
   async function save() {
@@ -176,13 +224,17 @@ function ConfigEditor({ path, tool, onClose, onSaved }: { path: string; tool: To
     } catch (err) { setError(String(err)) }
     finally { setSaving(false) }
   }
-  const all = doc?.fields || []
-  const common = (tool.common || []).map(key => all.find(item => item.path === key)).filter((item): item is ConfigField => Boolean(item))
-  const visible = tab === 'common' ? common : all
+  const groups = groupConfigFields(toolId, doc?.fields || [])
   return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-label="编辑配置" onMouseDown={event => event.stopPropagation()}>
     <div className="modal-header"><div><div className="eyebrow">CONFIGURATION</div><h2>图形化配置</h2><p className="path-caption">{path}</p></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
-    <div className="tabs">{([['common', '常用配置'], ['all', '全部字段'], ['yaml', 'YAML 原文']] as const).map(([key, label]) => <button key={key} className={tab === key ? 'selected' : ''} onClick={() => changeTab(key)}>{label}</button>)}</div>
-    <div className="modal-content">{!doc ? <p className="muted">正在读取配置…</p> : tab === 'yaml' ? <textarea className="yaml-editor" value={doc.text} onChange={event => setDoc({ ...doc, text: event.target.value })} spellCheck={false} /> : <div className="config-fields">{visible.map(field => <label className="config-field" key={field.path}><span>{field.path}</span>{field.kind === 'bool' ? <input type="checkbox" checked={Boolean(drafts[field.path] ?? field.value)} onChange={event => setDrafts({ ...drafts, [field.path]: event.target.checked })} /> : <input value={String(drafts[field.path] ?? (Array.isArray(field.value) ? field.value.join(', ') : field.value ?? ''))} onChange={event => setDrafts({ ...drafts, [field.path]: event.target.value })} />}</label>)}</div>}</div>
+    <div className="tabs">{([['all', '全部字段'], ['yaml', 'YAML 原文']] as const).map(([key, label]) => <button key={key} className={tab === key ? 'selected' : ''} onClick={() => changeTab(key)}>{label}</button>)}</div>
+    <div className="modal-content">{!doc ? <p className="muted">正在读取配置…</p> : tab === 'yaml' ? <textarea className="yaml-editor" value={doc.text} onChange={event => setDoc({ ...doc, text: event.target.value })} spellCheck={false} /> : <div className="config-groups">{groups.map(group => <section className="config-group" key={group.id}>
+      <div className="config-group-heading"><h3>{group.title}</h3><span>{group.fields.length} 项</span></div>
+      <div className="config-fields">{group.fields.map(field => <label className="config-field" key={field.path}>
+      <span title={field.path}>{field.path}</span>
+      {field.kind === 'bool' ? <input type="checkbox" aria-describedby={`hint-${field.path}`} checked={Boolean(drafts[field.path] ?? field.value)} onChange={event => setDrafts({ ...drafts, [field.path]: event.target.checked })} /> : <input aria-describedby={`hint-${field.path}`} placeholder={field.kind === 'size' ? '高,宽，例如 640,640' : undefined} value={String(drafts[field.path] ?? (Array.isArray(field.value) ? field.value.map(item => typeof item === 'string' ? JSON.stringify(item) : String(item)).join(', ') : field.value ?? ''))} onChange={event => setDrafts({ ...drafts, [field.path]: event.target.value })} />}
+      <small className="config-hint" id={`hint-${field.path}`}>{field.hint}</small>
+    </label>)}</div></section>)}</div>}</div>
     {error && <div className="inline-error"><AlertCircle size={17} />{error}</div>}
     <div className="modal-footer"><span className="muted small">保存前会校验 YAML。</span><button className="button secondary" onClick={onClose}>取消</button><button className="button primary" onClick={save} disabled={!doc || saving}>{saving ? '保存中…' : '保存配置'}</button></div>
   </section></div>
@@ -198,6 +250,7 @@ function App() {
   const [run, setRun] = useState<RunState | null>(null)
   const [log, setLog] = useState('')
   const [logOpen, setLogOpen] = useState(false)
+  const [savedLog, setSavedLog] = useState<{ id: string; path: string } | null>(null)
   const [notice, setNotice] = useState('')
   const [configPath, setConfigPath] = useState('')
   const [configData, setConfigData] = useState<Record<string, unknown>>({})
@@ -307,12 +360,55 @@ function App() {
         tool_id: page, variant: isUtility ? variant : undefined, config_path: modelTool ? configPath : undefined,
         python_executable: settings?.python_executable, values, module_edits: moduleEdits,
       })
-      setRun(payload.state); setLog(''); setLogOpen(true); setNotice('任务已启动')
+      setRun(payload.state); setLog(''); setSavedLog(null); setLogOpen(true); setNotice('任务已启动')
     } catch (err) { setNotice(String(err)) }
   }
   async function stop() {
     try { const data = await api<{ state: RunState }>('runs/stop', {}); setRun(data.state); setNotice(data.state.status === 'stopped' ? '任务已停止' : '正在停止任务') }
     catch (err) { setNotice(String(err)) }
+  }
+  async function showSavedLog(id: string) {
+    try {
+      const saved = await api<{ text: string; truncated: boolean; path: string }>(`runs/log?id=${q(id)}`)
+      setLog(saved.text + (saved.truncated ? '\n\n—— 仅显示日志末尾 2 MB；完整文件：' + saved.path + ' ——' : ''))
+      setSavedLog({ id, path: saved.path })
+      setLogOpen(true)
+      setNotice('日志内容已显示在底部面板；点击“打开文件”可用系统应用打开。')
+    } catch (err) { setNotice(String(err)) }
+  }
+  async function openSavedLog(folder: boolean) {
+    const id = savedLog?.id || run?.id
+    if (!id) return
+    try {
+      await api('runs/log/open', { id, folder })
+      setNotice(folder ? '已请求系统打开日志所在目录' : '已请求系统打开日志文件')
+    } catch (err) { setNotice(String(err)) }
+  }
+  async function copyLog() {
+    if (!log) { setNotice('当前没有可复制的日志'); return }
+    try {
+      const nativeCopy = window.pywebview?.api.copy_text
+      if (nativeCopy && await window.pywebview!.api.copy_text(log)) {
+        setNotice('日志已复制到系统剪贴板')
+        return
+      }
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+        await navigator.clipboard.writeText(log)
+      } catch {
+        const field = document.createElement('textarea')
+        field.value = log
+        field.style.position = 'fixed'
+        field.style.opacity = '0'
+        document.body.appendChild(field)
+        field.select()
+        let copied = false
+        try { copied = document.execCommand('copy') }
+        finally { field.remove() }
+        if (!copied) throw new Error('浏览器禁止写入剪贴板，请用“打开文件”复制完整日志')
+      }
+      setNotice('日志已复制到系统剪贴板')
+    } catch (err) { setNotice(`复制失败：${String(err)}`) }
   }
   async function saveSettings() {
     if (!settingsDraft) return
@@ -424,15 +520,15 @@ function App() {
 
         {page === 'results' && <><div className="page-heading"><div className="eyebrow">OUTPUT LIBRARY</div><h1>结果查看</h1><p>浏览运行目录中的报告、图片和模型产物。</p></div><div className="card results-toolbar"><PathField value={resultRoot} onChange={setResultRoot} kind="dir" /><button className="button secondary" onClick={() => refreshResults(resultRoot)}><RefreshCw size={16} /> {resultsBusy ? '扫描中' : '刷新'}</button></div><div className="result-layout"><div className="card result-list"><div className="result-list-head"><strong>文件列表 <span>{visibleFiles.length}</span></strong><select value={resultFilter} onChange={event => setResultFilter(event.target.value)}><option value="all">全部</option><option value="image">图片</option><option value="text">文档</option><option value="model">模型</option></select></div><div className="result-scroll"><ResultFolderTree node={resultTree} selectedFile={selectedFile} onSelect={selectFile} />{!files.length && <div className="empty-state">当前目录没有可预览的结果文件。</div>}</div></div><div className="card preview-panel">{selectedFile ? <><div className="preview-head"><div><div className="eyebrow">FILE PREVIEW</div><h2>{selectedFile.relative.split(/[\\/]/).at(-1)}</h2><p>{selectedFile.relative} · {(selectedFile.size / 1024).toFixed(1)} KB</p></div><div className="preview-actions"><button className="button secondary" onClick={() => openFile(selectedFile)}><FolderOpen size={16} /> 打开所在目录</button>{selectedFile.kind === 'image' && <div className="image-controls" aria-label="图片缩放"><button className="icon-button" onClick={() => zoomImage(-0.25)} disabled={imageScale <= 0.25} title="缩小" aria-label="缩小"><ZoomOut size={16} /></button><span>{Math.round(imageScale * 100)}%</span><button className="icon-button" onClick={() => zoomImage(0.25)} disabled={imageScale >= 4} title="放大" aria-label="放大"><ZoomIn size={16} /></button><button className={`icon-button ${imageFit ? 'selected' : ''}`} onClick={fitImage} title="适应窗口" aria-label="适应窗口"><Maximize2 size={16} /></button><button className="icon-button" onClick={resetImage} title="重置比例" aria-label="重置比例"><RotateCcw size={16} /></button></div>}</div></div>{selectedFile.kind === 'image' ? <div className={`image-preview ${imageFit ? 'fit' : 'free'}`}><img style={{ transform: `scale(${imageScale})` }} src={`/api/results/preview?path=${q(selectedFile.path)}&token=${q(token)}`} alt={selectedFile.relative} /></div> : selectedFile.kind === 'text' ? <pre className="text-preview">{preview || '正在读取…'}</pre> : <div className="empty-state model-preview"><Boxes size={46} /><strong>模型产物</strong><p>可从所在目录用合适的工具打开此文件。</p></div>}</> : <div className="empty-state preview-empty"><FileImage size={42} /><strong>选择文件查看预览</strong><p>支持图片、JSON、CSV、YAML 和文本。</p></div>}</div></div></>}
 
-        {page === 'history' && <><div className="page-heading"><div className="eyebrow">ACTIVITY LOG</div><h1>任务记录</h1><p>查看每次运行的状态、配置和输出位置。</p></div><div className="card history-card"><div className="history-head"><strong>全部任务 <span>{historyRows.length}</span></strong><button className="link-button" onClick={refreshHistory}><RefreshCw size={16} /> 刷新</button></div><div className="table-wrap"><table><thead><tr><th>时间</th><th>任务</th><th>状态</th><th>配置</th><th>结果</th></tr></thead><tbody>{historyRows.map((row, index) => <tr key={row.id || index}><td>{row.time}</td><td><strong>{catalog[row.task]?.title || row.task}</strong></td><td><span className={`pill ${isGoodHistoryStatus(row.status) ? 'good' : isWarningHistoryStatus(row.status) ? 'warning' : row.status === '失败' ? 'bad' : ''}`}>{row.status}</span></td><td title={row.config} className="truncate">{row.config}</td><td>{row.result_dir ? <button className="link-button" onClick={() => { setResultRoot(row.result_dir!); setPage('results') }}>查看结果 <ArrowRight size={15} /></button> : '—'}</td></tr>)}</tbody></table>{!historyRows.length && <div className="empty-state">暂无任务记录。</div>}</div></div></>}
+        {page === 'history' && <><div className="page-heading"><div className="eyebrow">ACTIVITY LOG</div><h1>任务记录</h1><p>查看每次运行的状态、配置、日志和输出位置。</p></div><div className="card history-card"><div className="history-head"><strong>全部任务 <span>{historyRows.length}</span></strong><button className="link-button" onClick={refreshHistory}><RefreshCw size={16} /> 刷新</button></div><div className="table-wrap"><table><thead><tr><th>时间</th><th>任务</th><th>状态</th><th>配置</th><th>结果</th><th>日志</th></tr></thead><tbody>{historyRows.map((row, index) => <tr key={row.id || index}><td>{row.time}</td><td><strong>{catalog[row.task]?.title || row.task}</strong></td><td><span className={`pill ${isGoodHistoryStatus(row.status) ? 'good' : isWarningHistoryStatus(row.status) ? 'warning' : row.status === '失败' ? 'bad' : ''}`}>{row.status}</span></td><td title={row.config} className="truncate">{row.config}</td><td>{row.result_dir ? <button className="link-button" onClick={() => { setResultRoot(row.result_dir!); setPage('results') }}>查看结果 <ArrowRight size={15} /></button> : '—'}</td><td>{row.id && row.log_path ? <button className="link-button" onClick={() => showSavedLog(row.id!)}>查看日志</button> : '—'}</td></tr>)}</tbody></table>{!historyRows.length && <div className="empty-state">暂无任务记录。</div>}</div></div></>}
 
         {page === 'settings' && settingsDraft && <><div className="page-heading"><div className="eyebrow">PREFERENCES</div><h1>设置</h1><p>管理结果目录、任务记录和 Python 环境。</p></div><div className="card form-card settings-card"><div className="card-heading"><span className="step-number"><Settings2 size={19} /></span><div><h2>工作台设置</h2><p>修改后保存，下一次扫描或运行会使用新值。</p></div></div><div className="form-grid"><label className="form-field wide"><span>默认结果目录</span><PathField value={settingsDraft.results_root} onChange={value => setSettingsDraft({ ...settingsDraft, results_root: value })} kind="dir" /></label><label className="form-field"><span>保留任务记录数</span><input type="number" min={1} max={200} value={settingsDraft.history_limit} onChange={event => setSettingsDraft({ ...settingsDraft, history_limit: Number(event.target.value) })} /></label><label className="form-field wide"><span>模型任务使用的 Python 解释器</span><PathField value={settingsDraft.python_executable} onChange={value => setSettingsDraft({ ...settingsDraft, python_executable: value })} kind="file" /></label></div><div className="settings-actions"><button className="button secondary danger" onClick={async () => { if (!window.confirm('确定清空任务记录吗？')) return; try { await api('history/clear', {}); setHistoryRows([]); setNotice('任务记录已清空') } catch (err) { setNotice(String(err)) } }}>清空任务记录</button><button className="button primary" onClick={saveSettings}>保存设置</button></div></div><div className="card form-card settings-card"><div className="card-heading"><span className="step-number"><RefreshCw size={19} /></span><div><h2>软件更新</h2><p>当前版本 {version || '—'}。自动检查 GitHub Releases 中的新版本。</p></div></div><p>{updateBusy ? '正在检查或安装更新…' : updateInstalled ? '更新已安装，请关闭并重新打开工作台。' : updateError ? '更新失败，请稍后重试。' : updateInfo?.message || '正在检查更新…'}</p>{updateError && <p className="inline-error">{updateError}</p>}<div className="settings-actions"><button className="button secondary" onClick={checkForUpdates} disabled={updateBusy}>检查更新</button>{updateInfo?.status === 'available' && !updateInstalled && <button className="button primary" onClick={installUpdate} disabled={updateBusy || active(run)}>下载并安装 {updateInfo.latest_version}</button>}</div></div></>}
       </main>
 
-      <div className={`task-console ${logOpen ? 'expanded' : ''}`}><div className="console-bar"><div className="console-state"><span className={`state-indicator ${run?.status || 'idle'}`} /> <strong>{run ? statusText[run.status] || run.status : '就绪'}</strong><span>{run ? `${catalog[run.tool_id]?.title || run.tool_id} · ${run.started_at}` : '选择工具开始新的任务'}</span></div><div className="console-actions">{active(run) && <button className="button stop" onClick={stop}><Square size={13} fill="currentColor" /> 停止任务</button>}<button className="console-toggle" onClick={() => setLogOpen(!logOpen)}><TerminalSquare size={17} /> 运行详情 <ChevronDown size={15} /></button></div></div>{logOpen && <div className="console-body"><div className="console-body-head"><span>实时日志</span><button onClick={() => navigator.clipboard.writeText(log)} title="复制日志"><Copy size={15} /></button></div><pre ref={logRef}>{log || (active(run) ? '等待任务输出…' : '运行日志会显示在这里。')}</pre></div>}</div>
+      <div className={`task-console ${logOpen ? 'expanded' : ''}`}><div className="console-bar"><div className="console-state"><span className={`state-indicator ${run?.status || 'idle'}`} /> <strong>{run ? statusText[run.status] || run.status : '就绪'}</strong><span>{run ? `${catalog[run.tool_id]?.title || run.tool_id} · ${run.started_at}` : '选择工具开始新的任务'}</span></div><div className="console-actions">{active(run) && <button className="button stop" onClick={stop}><Square size={13} fill="currentColor" /> 停止任务</button>}<button className="console-toggle" onClick={() => setLogOpen(!logOpen)}><TerminalSquare size={17} /> 运行详情 <ChevronDown size={15} /></button></div></div>{logOpen && <div className="console-body"><div className="console-body-head"><span className="console-log-path" title={savedLog?.path || run?.log_path || undefined}>{savedLog ? `日志文件：${savedLog.path}` : '运行日志'}</span><span className="console-log-actions">{run?.log_path && <button onClick={() => showSavedLog(run.id)}>查看本次日志</button>}{(savedLog || run?.log_path) && <><button onClick={() => openSavedLog(false)}>打开文件</button><button onClick={() => openSavedLog(true)}>打开目录</button></>}<button onClick={copyLog} title="复制当前面板中的日志" aria-label="复制日志"><Copy size={15} /> 复制日志</button></span></div><pre ref={logRef}>{log || (active(run) ? '等待任务输出…' : '运行日志会显示在这里。')}</pre></div>}</div>
     </div>
     {notice && <div className="toast" role="status"><AlertCircle size={17} /><span>{notice}</span><button onClick={() => setNotice('')}><X size={15} /></button></div>}
-    {configEditor && tool && <ConfigEditor path={configPath} tool={tool} onClose={() => setConfigEditor(false)} onSaved={path => { setConfigPath(path); api<ConfigDocument>(`config?path=${q(path)}`).then(data => setConfigData(data.data)); setNotice('配置已保存') }} />}
+    {configEditor && tool && <ConfigEditor path={configPath} toolId={page} onClose={() => setConfigEditor(false)} onSaved={path => { setConfigPath(path); api<ConfigDocument>(`config?path=${q(path)}`).then(data => setConfigData(data.data)); setNotice('配置已保存') }} />}
   </div>
 }
 

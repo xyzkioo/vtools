@@ -233,6 +233,93 @@ class WebWorkbenchTests(unittest.TestCase):
             self.assertFalse(target.with_suffix(".yaml.bak").exists())
             self.assertFalse(core.load_config(str(target))["data"]["modules"]["diagnostics.missed"])
 
+    def test_form_sizes_save_as_integers_and_repair_previously_stringified_values(self) -> None:
+        for initial in ("[832, 832]", "['832', '832']", "'832,832'", "832"):
+            raw = f"dataset:\n  input_size: {initial}\ncustom:\n  keep: text\n"
+            for entered in ("640,640", "[640, 640]", "640"):
+                with self.subTest(initial=initial, entered=entered):
+                    changed = core.patch_config(raw, "dataset.input_size", entered, from_form=True)
+                    self.assertEqual(changed["data"]["dataset"]["input_size"], [640, 640])
+                    self.assertTrue(all(type(item) is int for item in changed["data"]["dataset"]["input_size"]))
+                    self.assertEqual(core.parse_yaml(changed["text"]), changed["data"])
+                    self.assertEqual(changed["data"]["custom"]["keep"], "text")
+                    with tempfile.TemporaryDirectory() as directory:
+                        target = Path(directory) / "config.yaml"
+                        core.save_config(str(target), changed["text"])
+                        loaded = core.load_config(str(target))
+                        self.assertEqual(loaded["data"]["dataset"]["input_size"], [640, 640])
+                        size_field = next(field for field in loaded["fields"] if field["path"] == "dataset.input_size")
+                        self.assertEqual(size_field["kind"], "size")
+                        self.assertIn("高、宽", size_field["hint"])
+
+    def test_form_rejects_invalid_sizes_and_scalar_training_dimensions(self) -> None:
+        raw = "dataset:\n  input_size: [832, 832]\ncompression:\n  structured:\n    train_input_size: 1024\n    pruning_input_size: 640\n"
+        for entered in ("", "640,abc", "640,0", "-1,640", "640.5,640", "[640]", "640,640,3", "true,640"):
+            with self.subTest(entered=entered), self.assertRaises(ValueError):
+                core.patch_config(raw, "dataset.input_size", entered, from_form=True)
+        for name in ("train_input_size", "pruning_input_size"):
+            path = f"compression.structured.{name}"
+            for entered in ("320", "320,320", "[320,320]"):
+                self.assertEqual(core.config_get(core.patch_config(raw, path, entered, from_form=True)["data"], path), 320)
+            for entered in ("640,320", "0", "", "1.5"):
+                with self.subTest(path=path, entered=entered), self.assertRaises(ValueError):
+                    core.patch_config(raw, path, entered, from_form=True)
+
+    def test_form_lists_keep_numbers_and_literal_strings(self) -> None:
+        raw = "thresholds: [0.1, 0.5]\npaths: [old]\nindices: []\nenabled: true\ncount: 2\nrate: 0.1\nproject:\n  python_paths: []\n"
+        for path, entered, expected in (
+            ("thresholds", "0.25,0.75", [0.25, 0.75]),
+            ("paths", '001,true,null,"a,b"', ["001", "true", "null", "a,b"]),
+            ("indices", "1,2", [1, 2]),
+            ("indices", "", []),
+            ("enabled", False, False),
+            ("count", "3", 3),
+            ("rate", "1e-3", 0.001),
+            ("project.python_paths", "001,true,null", ["001", "true", "null"]),
+        ):
+            with self.subTest(path=path, entered=entered):
+                changed = core.patch_config(raw, path, entered, from_form=True)
+                actual = core.config_get(changed["data"], path)
+                self.assertEqual(actual, expected)
+                self.assertIs(type(actual), type(expected))
+        for path, entered in (("thresholds", "0.25,nope"), ("count", "1.5"), ("rate", "inf")):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                core.patch_config(raw, path, entered, from_form=True)
+
+    def test_config_help_is_ui_metadata_and_covers_each_model_in_benchmark(self) -> None:
+        raw = "models:\n  - weights: first.pt\n  - weights: second.pt\nmodules:\n  compression.prune.structured: true\n"
+        fields = {field["path"]: field for field in core.flatten_config(core.parse_yaml(raw))}
+        self.assertEqual(fields["models.0.weights"]["hint"], fields["models.1.weights"]["hint"])
+        self.assertIn("权重", fields["models.1.weights"]["hint"])
+        self.assertIn("结构化", fields["modules.compression.prune.structured"]["hint"])
+        changed = core.patch_config(raw, "modules.compression.prune.structured", False, from_form=True)
+        self.assertNotIn("结构化", changed["text"])
+        self.assertNotIn("hint", changed["data"])
+
+    def test_config_patch_api_parses_raw_form_input_and_returns_error_for_invalid_size(self) -> None:
+        web = WorkbenchServer(TaskManager())
+        thread = threading.Thread(target=web.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{web.server_port}/api/config/patch"
+            raw = "dataset:\n  input_size: [832, 832]\n"
+            for entered in ("640,640", "640,bad"):
+                body = json.dumps({"text": raw, "path": "dataset.input_size", "value": entered, "from_form": True}).encode()
+                request = Request(url, data=body, headers={"X-Vtools-Token": web.token, "Content-Type": "application/json"})
+                if entered == "640,640":
+                    with urlopen(request, timeout=5) as response:
+                        payload = json.load(response)
+                    self.assertEqual(payload["data"]["dataset"]["input_size"], [640, 640])
+                    self.assertIn("hint", payload["fields"][0])
+                else:
+                    with self.assertRaises(HTTPError) as rejected:
+                        urlopen(request, timeout=5)
+                    self.assertEqual(rejected.exception.code, 400)
+        finally:
+            web.shutdown()
+            web.server_close()
+            thread.join(timeout=5)
+
     def test_frozen_config_is_copied_to_user_directory_before_editing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "bundle"
@@ -613,7 +700,7 @@ class WebWorkbenchTests(unittest.TestCase):
                     break
         self.assertEqual(manager.state()["status"], "succeeded_with_issues")
 
-    def test_log_open_failure_reaps_started_process(self) -> None:
+    def test_log_open_failure_prevents_process_start(self) -> None:
         manager = TaskManager()
         started = []
         from vtools_ui.webapp import tasks
@@ -640,8 +727,7 @@ class WebWorkbenchTests(unittest.TestCase):
                     break
         self.assertEqual(manager.state()["status"], "failed")
         self.assertEqual(manager.state()["exit_code"], 127)
-        self.assertEqual(len(started), 1)
-        self.assertIsNotNone(started[0].poll())
+        self.assertEqual(len(started), 0)
 
     def test_successful_process_reports_logs_and_exit_status(self) -> None:
         manager = TaskManager()
@@ -658,6 +744,97 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(manager.state()["status"], "succeeded")
         self.assertEqual(manager.state()["exit_code"], 0)
         self.assertIn("finished", "".join(output))
+
+    @unittest.skipUnless(os.name == "posix", "子进程信号退出只在 POSIX 上验证")
+    def test_compression_signal_exit_writes_failure_summary(self) -> None:
+        from vtools_ui.webapp import tasks
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_dir = root / "state"
+            run_dir = root / "runs" / "run-signal"
+            run_dir.mkdir(parents=True)
+            (run_dir / "effective_config.json").write_text(json.dumps({
+                "model": {"name": "detector", "task": "detect", "weights": "model.pt"},
+                "modules": {"baseline.evaluate": True, "compression.prune.structured": True},
+            }), encoding="utf-8")
+            child = (
+                "import os, signal; "
+                "print('[baseline.evaluate] 开始', flush=True); "
+                "print('[baseline.evaluate] 完成', flush=True); "
+                "print('[compression.prune.structured] 开始', flush=True); "
+                "print('[结构化剪枝] 开始：依赖图追踪与通道剪枝', flush=True); "
+                "os.kill(os.getpid(), signal.SIGKILL)"
+            )
+            command = ["-c", child, "--run-dir", str(run_dir)]
+            with patch.object(tasks, "STATE_DIR", state_dir), \
+                    patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, command, None)), \
+                    patch("vtools_ui.webapp.tasks.add_history"):
+                manager = TaskManager()
+                manager.start({"tool_id": "compression"})
+                cursor = 0
+                for _ in range(10):
+                    events, done = manager.events_after(cursor, timeout=2)
+                    cursor += len(events)
+                    if done:
+                        break
+
+            self.assertEqual(manager.state()["status"], "failed")
+            self.assertEqual(manager.state()["result_dir"], str(run_dir.resolve()))
+            report_path = run_dir / "summary.json"
+            self.assertTrue(report_path.is_file())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["failure_details"]["signal"], "SIGKILL")
+            self.assertEqual(report["failure_details"]["last_module"], "compression.prune.structured")
+            self.assertEqual(report["failure_details"]["last_stage"], "依赖图追踪与通道剪枝")
+            self.assertEqual(report["module_status"]["baseline.evaluate"], "succeeded")
+            self.assertEqual(report["module_status"]["compression.prune.structured"], "failed")
+
+    def test_saved_log_contains_command_and_is_readable_by_run_id(self) -> None:
+        from vtools_ui.webapp import tasks
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            history_path = state_dir / "history.json"
+            with patch.object(tasks, "STATE_DIR", state_dir), \
+                    patch.object(server, "STATE_DIR", state_dir), \
+                    patch.object(core, "HISTORY_PATH", history_path), \
+                    patch("vtools_ui.webapp.tasks.build_command", return_value=(
+                        sys.executable, ["-c", "print('saved output')"], None)):
+                manager = TaskManager()
+                manager.start({"tool_id": "environment"})
+                cursor = 0
+                for _ in range(10):
+                    events, done = manager.events_after(cursor, timeout=2)
+                    cursor += len(events)
+                    if done:
+                        break
+                run_id = manager.state()["id"]
+                web = WorkbenchServer(manager)
+                thread = threading.Thread(target=web.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    url = f"http://127.0.0.1:{web.server_port}/api/runs/log?id={run_id}"
+                    with urlopen(Request(url, headers={"X-Vtools-Token": web.token}), timeout=5) as response:
+                        payload = json.load(response)
+                    self.assertIn("saved output", payload["text"])
+                    self.assertIn("$ ", payload["text"])
+                    with patch.object(server.ApiHandler, "_open_local") as open_local:
+                        for folder in (False, True):
+                            body = json.dumps({"id": run_id, "folder": folder}).encode()
+                            request = Request(url.split("?")[0] + "/open", data=body,
+                                              headers={"X-Vtools-Token": web.token, "Content-Type": "application/json"})
+                            with urlopen(request, timeout=5) as response:
+                                self.assertTrue(json.load(response)["ok"])
+                            expected = Path(payload["path"])
+                            self.assertEqual(open_local.call_args.args[0], expected.parent if folder else expected)
+                    with self.assertRaises(HTTPError) as rejected:
+                        urlopen(Request(url.replace(run_id, 'unknown'), headers={"X-Vtools-Token": web.token}), timeout=5)
+                    self.assertEqual(rejected.exception.code, 400)
+                finally:
+                    web.shutdown()
+                    web.server_close()
+                    thread.join(timeout=5)
 
     def test_dataset_quality_findings_are_completed_with_warning(self) -> None:
         manager = TaskManager()

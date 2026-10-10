@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import secrets
 import shutil
@@ -16,6 +17,7 @@ from typing import Any
 import yaml
 
 from .catalog import ROOT, TOOLS
+from .config_fields import SIZE_FIELDS, SQUARE_SIZE_FIELDS, STRING_LIST_FIELDS, field_hint
 
 STATE_DIR = (
     Path(os.environ.get("VTOOLS_USER_DATA", "")).expanduser()
@@ -300,14 +302,83 @@ def flatten_config(value: Any, prefix: str = "") -> list[dict[str, Any]]:
             result.extend(flatten_config(child, path))
     elif isinstance(value, list):
         if all(not isinstance(item, (dict, list)) for item in value):
-            result.append({"path": prefix, "value": value, "kind": "list"})
+            result.append(_config_field(prefix, value, "list"))
         else:
             for index, child in enumerate(value):
                 result.extend(flatten_config(child, f"{prefix}.{index}"))
     else:
         kind = "bool" if isinstance(value, bool) else "number" if isinstance(value, (int, float)) else "text"
-        result.append({"path": prefix, "value": value, "kind": kind})
+        result.append(_config_field(prefix, value, kind))
     return result
+
+
+def _config_field(path: str, value: Any, kind: str) -> dict[str, Any]:
+    if path in SIZE_FIELDS:
+        kind = "size"
+    elif path in SQUARE_SIZE_FIELDS:
+        kind = "number"
+    return {"path": path, "value": value, "kind": kind, "hint": field_hint(path, kind)}
+
+
+def _form_value(path: str, raw: Any, original: Any) -> Any:
+    """Parse graphical input before patching, preserving scalar/list types."""
+
+    if path in SIZE_FIELDS or path in SQUARE_SIZE_FIELDS:
+        values = _form_list(str(raw))
+        if len(values) == 1 and not str(raw).strip().startswith("["):
+            values *= 2
+        if len(values) != 2 or any(type(item) is not int or item <= 0 for item in values):
+            raise ValueError(f"{path} 需要正整数尺寸，填写 高,宽（如 640,640）或单个尺寸（如 640）")
+        if path in SQUARE_SIZE_FIELDS:
+            if values[0] != values[1]:
+                raise ValueError(f"{path} 使用方形输入，高、宽需相同，如 640 或 640,640")
+            return values[0]
+        return values
+    if isinstance(original, bool):
+        if not isinstance(raw, bool):
+            raise ValueError(f"{path} 需要布尔值")
+        return raw
+    if isinstance(original, (int, float)):
+        return _form_number(path, raw, integer=isinstance(original, int))
+    if isinstance(original, list):
+        # String lists (paths, layer names, precisions) must remain strings,
+        # including entries such as "001", "true" and "null".
+        strings = path in STRING_LIST_FIELDS or bool(original) and all(isinstance(item, str) for item in original)
+        values = _form_list(str(raw), strings=strings)
+        if original and all(type(item) in (int, float) for item in original):
+            if any(type(item) not in (int, float) or not math.isfinite(item) for item in values):
+                raise ValueError(f"{path} 需要数字列表，如 0.1,0.5")
+        return values
+    return raw
+
+
+def _form_list(raw: str, *, strings: bool = False) -> list[Any]:
+    text = raw.strip()
+    if not text:
+        return []
+    if not text.startswith("["):
+        text = f"[{text}]"
+    try:
+        values = yaml.load(text, Loader=yaml.BaseLoader if strings else yaml.SafeLoader)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"列表格式无效：{exc}") from exc
+    if not isinstance(values, list) or any(isinstance(item, (dict, list)) for item in values):
+        raise ValueError("请填写由数字或文本组成的一维列表")
+    return values
+
+
+def _form_number(path: str, raw: Any, *, integer: bool) -> int | float | None:
+    if not isinstance(raw, str):
+        raise ValueError(f"{path} 需要有效数字")
+    if not raw.strip():
+        return None
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{path} 需要有效数字") from exc
+    if not math.isfinite(value) or (integer and not value.is_integer()):
+        raise ValueError(f"{path} 需要{'整数' if integer else '有限数字'}")
+    return int(value) if integer else value
 
 
 def load_config(path: str) -> dict[str, Any]:
@@ -320,8 +391,10 @@ def load_config(path: str) -> dict[str, Any]:
     return {"path": str(target), "text": text, "data": data, "fields": flatten_config(data)}
 
 
-def patch_config(text: str, path: str, value: Any) -> dict[str, Any]:
+def patch_config(text: str, path: str, value: Any, *, from_form: bool = False) -> dict[str, Any]:
     data = parse_yaml(text)
+    if from_form:
+        value = _form_value(path, value, config_get(data, path))
     config_set(data, path, value)
     updated = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
     return {"text": updated, "data": data, "fields": flatten_config(data)}

@@ -164,7 +164,9 @@ python run_tools.py --tool pytorch --config speed_test/benchmark_config.yaml
 python run_tools.py --tool compression --config model_compression/config/config.yaml
 ```
 
-配置文件是模型工具的完整参数来源；命令行和桌面界面只覆盖本次运行需要修改的字段。使用具体入口前，可先查看帮助：
+配置文件是模型工具的完整参数来源；命令行和桌面界面只覆盖本次运行需要修改的字段。桌面图形化配置把全部字段按功能分组（剪枝、量化、蒸馏等），可切换到 YAML 原文；字段旁显示简短中文说明，不写入 YAML。分辨率输入 `640,640` 会保存为整数列表 `[640,640]`（高、宽）；压缩的训练尺寸和剪枝依赖图尺寸使用方形输入，保存为单个整数 `640`。
+
+使用具体入口前，可先查看帮助：
 
 ```bash
 python model_diagnostics/run_model_diagnostics.py --help
@@ -183,6 +185,10 @@ python model_compression/run_model_compression.py --help
 - 报告、差图、CSV、HTML 和模型产物。
 
 运行结果、缓存、权重和数据集不属于源码提交内容。工具默认只读取用户输入，生成物写入对应的 `runs/`、`outputs/` 或用户指定目录。
+
+模型压缩的 `effective_config.json` 会保存 CLI 覆盖后的模块开关。工作台任务可在“任务记录”中重新打开已保存的运行日志；结构化剪枝会在日志中标出各评估、测速、剪枝和微调阶段及显存风险。
+
+日志面板可打开完整日志文件或所在目录；Linux 桌面使用系统剪贴板复制日志。
 
 ## 项目结构
 
