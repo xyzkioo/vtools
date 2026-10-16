@@ -46,6 +46,8 @@ python packaging/build_deb.py
 
 生成的 `dist/vtools_<版本>_<架构>.deb` 可以通过文件管理器双击安装。安装后在应用菜单搜索“vtools 工作台”，点击图标即可启动。安装包会把完整目录包放到 `/opt/vtools/`，并安装应用菜单入口和图标。卸载可通过系统软件管理器完成。
 
+也可在仓库根目录执行 `sudo apt install ./dist/vtools_<版本>_<架构>.deb`。v0.4.7 的实际包信息、校验值和验证范围见[版本说明](../docs/releases/v0.4.7.md)。升级后完全退出旧工作台再重新打开。
+
 更新安装包时先修改 `vtools_ui/__init__.py` 的版本，再重新构建目录包和 `.deb`。安装更高版本的 `.deb` 会升级已安装的工作台，无需卸载旧版。
 
 从 0.3.1 起，工作台启动时会检查 [GitHub Releases](https://github.com/xyzkioo/vtools/releases) 的最新正式发布版，也可在“设置 → 软件更新”手动检查。发布时标签使用 `v<版本>`，上传同版本、同架构的 `vtools_<版本>_<架构>.deb`；GitHub 提供的 SHA-256 摘要用于下载校验。发现新版后，点击“下载并安装”，系统会弹出管理员授权窗口。安装完成后重新打开工作台。GitHub 尚未发布安装包时，界面会显示“GitHub 尚无发布版”。

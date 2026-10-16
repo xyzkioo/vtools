@@ -12,3 +12,5 @@ python -m pip install pyyaml
 ```
 
 工具不会在模块列表或查看配置时导入 PyTorch。动态 INT8 量化默认运行在 CPU，实际延迟和文件大小必须在目标设备上重新评测。
+
+`distillation.detection` 另需支持 `distill_model/dis` 参数和 `DistillationModel` 的外部 Ultralytics Fork；vtools 同级的 `ultralytics-cn` 提供该接口。可用 `project.ultralytics_repo` 或 `VTOOLS_ULTRALYTICS_REPO` 指定路径。训练、验证与损失函数在 Fork 内执行，不随 vtools 的 deb 打包模型库。

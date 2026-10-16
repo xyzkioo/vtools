@@ -54,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable", action="append", help="临时启用模块")
     parser.add_argument("--disable", action="append", help="临时关闭模块")
     parser.add_argument("--weights", type=Path, help="临时覆盖 model.weights")
+    parser.add_argument("--teacher-weights", type=Path, help="检测蒸馏教师权重（distillation.teacher_weights）")
+    parser.add_argument("--student-weights", type=Path, help="检测蒸馏学生初始化权重（distillation.student_weights）")
     parser.add_argument("--data", type=Path, help="YOLO 数据集 data.yaml")
     parser.add_argument("--task", choices=["detect", "classify"], help="模型任务")
     parser.add_argument("--train", type=Path, help="临时覆盖 dataset.train")
@@ -473,6 +475,7 @@ _SUMMARY_CATEGORIES = {
     "compression.prune.unstructured": "unstructured_pruning",
     "compression.prune.structured": "structured_pruning",
     "distillation.classification": "distillation",
+    "distillation.detection": "distillation",
     "compression.quantize.dynamic_int8": "quantization",
     "artifact.export": "multi_processing",
 }
@@ -483,6 +486,8 @@ _PARAMETER_KEYS = {
     "sparsity", "structured_method", "target_scale", "architecture_yaml",
     "finetune_epochs", "finetune", "temperature", "alpha", "epochs",
     "best_epoch", "teacher_weights", "student_weights", "method",
+    "teacher_parameter_count", "student_initial_parameter_count", "student_final_parameter_count",
+    "dis", "imgsz", "batch_size",
 }
 
 
@@ -603,7 +608,9 @@ def _build_summary(config: Mapping[str, Any], run_dir: Path, run_id: str,
     summary["module_status"] = module_status
     for category, items in category_results.items():
         if category == "baseline":
-            merged: dict[str, Any] = {"status": "succeeded" if all(item.get("status") == "succeeded" for item in items) else "failed",
+            statuses = {item.get("status") for item in items}
+            baseline_status = 'failed' if 'failed' in statuses else 'succeeded' if 'succeeded' in statuses else 'skipped'
+            merged: dict[str, Any] = {"status": baseline_status,
                                       "module": "baseline.evaluate"}
             for item in items:
                 for field in ("parameters", "metrics"):
@@ -613,6 +620,9 @@ def _build_summary(config: Mapping[str, Any], run_dir: Path, run_id: str,
                     merged["artifact"] = item["artifact"]
                 if item.get("verification") is not None:
                     merged["verification"] = item["verification"]
+            reasons = list(dict.fromkeys(item['reason'] for item in items if item.get('reason')))
+            if reasons:
+                merged['reason'] = '；'.join(reasons)
             summary[category] = merged
         elif len(items) == 1:
             summary[category] = items[0]
@@ -655,11 +665,18 @@ def main() -> int:
         return 0
     config = load_config(args.config)
     if (args.weights or args.train or args.val or args.device or args.data or args.task
+            or args.teacher_weights or args.student_weights
             or args.structured_method is not None or args.structured_scale is not None or args.structured_epochs is not None
             or args.structured_initial_weights is not None):
         config = dict(config)
         model = dict(_section(config, "model"))
         dataset = dict(_section(config, "dataset"))
+        distillation = dict(_section(config, "distillation"))
+        if args.teacher_weights:
+            distillation["teacher_weights"] = str(args.teacher_weights.expanduser().resolve())
+        if args.student_weights:
+            distillation["student_weights"] = str(args.student_weights.expanduser().resolve())
+        config["distillation"] = distillation
         if args.weights:
             model["weights"] = str(args.weights.expanduser().resolve())
         if args.data:
@@ -693,6 +710,9 @@ def main() -> int:
         config["dataset"] = dataset
     apply_python_paths(config)
     selected = resolve_compression_modules(config, only=args.only, enable=args.enable, disable=args.disable)
+    from model_compression.core.module_selection import standalone_detection_distillation
+    distillation_only = (_section(config, 'model').get('task') == 'detect'
+                         and standalone_detection_distillation(selected))
     config = dict(config)
     config["modules"] = dict(selected)
     if selected.get("compression.prune.structured") and _section(config, "model").get("task") == "detect":
@@ -714,7 +734,7 @@ def main() -> int:
     failed_dependencies: set[str] = set()
     transform_modules = {
         "compression.quantize.dynamic_int8", "compression.prune.unstructured",
-        "compression.prune.structured", "distillation.classification",
+        "compression.prune.structured", "distillation.classification", "distillation.detection",
         "artifact.export", "comparison.report",
     }
     operations = (
@@ -724,11 +744,17 @@ def main() -> int:
         ("compression.prune.unstructured", lambda: _run_prune(config, state, run_dir, run_id)),
         ("compression.prune.structured", lambda: _run_structured_prune(config, state, run_dir, run_id)),
         ("distillation.classification", lambda: _run_distillation(config, state, run_dir, run_id)),
+        ("distillation.detection", lambda: (_ for _ in ()).throw(ValueError("检测蒸馏仅支持 detect 任务，请设置 model.task: detect。"))),
         ("comparison.report", lambda: _run_comparison(state)),
         ("artifact.export", lambda: _run_export(config, state, run_dir)),
     )
     for module_id, function in operations:
         if not selected.get(module_id, False):
+            continue
+        if distillation_only and module_id in {'model.parameters', 'baseline.evaluate'}:
+            reason = '独立检测蒸馏使用内部学生参数统计和适配后的学生基线，无需公共模型权重'
+            results.append({'module': module_id, 'status': 'skipped', 'reason': reason})
+            print(f'[{module_id}] 跳过：{reason}', flush=True)
             continue
         if module_id in transform_modules and ("baseline.evaluate" in failed_dependencies or failed_dependencies & transform_modules):
             reason = "前置模块失败，已跳过依赖阶段"
@@ -750,7 +776,7 @@ def main() -> int:
             failed_dependencies.add(module_id)
             failed_result: dict[str, Any] = {"module": module_id, "status": "failed", "error": message}
             category = _SUMMARY_CATEGORIES.get(module_id)
-            if category:
+            if category and module_id != "distillation.detection":
                 candidates = sorted((run_dir / "artifacts" / category).glob("*.pt"), key=lambda path: path.stat().st_mtime)
                 if candidates:
                     failed_result["artifact"] = artifact_info(candidates[-1])

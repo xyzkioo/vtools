@@ -572,7 +572,17 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         else:
             args += ["--tool", backend or tool["entry"], "--config", config]
         title = tool["title"] if not backend else {"pytorch": "PyTorch 测速", "tensorrt": "TensorRT 测速", "consistency": "输出一致性检查", "all": "一键测速", "checkpoint": "Checkpoint 检查"}[backend]
+        compression_mode = values.get("processing_mode") if tool_id == "compression" else None
+        mode_modules = None
+        compression_task = None
+        if tool_id == "compression":
+            compression_task = _option(values.get("task"), ["detect", "classify"], "模型任务")
+        if compression_mode is not None:
+            from model_compression.core.module_selection import COMPRESSION_MODES, compression_mode_modules
+            mode_modules = compression_mode_modules(str(compression_mode), compression_task)
         resource = values.get("resource")
+        if compression_mode is not None and not COMPRESSION_MODES[str(compression_mode)]["public_weights"]:
+            resource = None
         if resource:
             resource = _field_path(resource)
             if tool_id == "diagnostics":
@@ -586,15 +596,29 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
             else:
                 args += ["--model", resource]
         for key, flag in (("data", "--data"), ("source", "--source"), ("train", "--train"), ("val", "--val")):
+            if compression_mode is not None and ((compression_task == "detect" and key in {"train", "val"})
+                                                  or (compression_task == "classify" and key == "data")):
+                continue
             if values.get(key) and ((key == "data" and tool_id in {"diagnostics", "compression"}) or (key == "source" and (tool_id == "visualization" or tool_id == "benchmark" and backend != "checkpoint")) or (key in {"train", "val"} and tool_id == "compression")):
                 args += [flag, _field_path(values[key])]
         if tool_id == "compression":
-            args += ["--task", _option(values.get("task"), ["detect", "classify"], "模型任务")]
+            args += ["--task", compression_task]
+            for key, flag in (("teacher_weights", "--teacher-weights"),
+                              ("student_weights", "--student-weights")):
+                if compression_mode is not None and compression_mode != "detection_distillation":
+                    continue
+                if values.get(key):
+                    args += [flag, _field_path(values[key])]
         if values.get("device") and values["device"] != "auto" and backend != "checkpoint":
             args += ["--device", _option(values["device"], ["auto", "cpu", "cuda:0"], "设备")]
         edits = request.get("module_edits") or {}
         if not isinstance(edits, dict):
             raise ValueError("模块修改必须是对象")
+        if mode_modules is not None:
+            if edits:
+                raise ValueError("选择处理模式时不能同时指定模块开关。")
+            for module_id in mode_modules:
+                args += ["--only", module_id]
         available = {item[0] for item in tool.get("modules", [])}
         loaded = load_config(config)
         config = loaded["path"]

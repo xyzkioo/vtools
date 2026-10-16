@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import types
@@ -26,24 +27,47 @@ class StructuredConfigTests(unittest.TestCase):
         self.assertEqual(_structured_section({'compression': {'structured': {}},
                                              'structured': {'channel_sparsity': .9}}), {})
 
-    def test_amp_check_weights_use_run_directory_and_are_restored(self):
+    @staticmethod
+    def _mock_ultralytics():
         previous = Path("original-weights")
         utils = types.ModuleType("ultralytics.utils")
         utils.WEIGHTS_DIR = previous
         utils.SETTINGS = {"weights_dir": str(previous)}
         ultralytics = types.ModuleType("ultralytics")
         ultralytics.utils = utils
-        modules = {
-            "ultralytics": ultralytics,
-            "ultralytics.utils": utils,
-        }
+        return utils, {"ultralytics": ultralytics, "ultralytics.utils": utils}
 
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, modules):
-            run_dir = Path(tmp) / "run"
-            with _ultralytics_amp_weights_dir(run_dir) as cache_dir:
-                self.assertEqual(cache_dir, (run_dir / "ultralytics-cache" / "weights").resolve())
-                self.assertEqual(utils.WEIGHTS_DIR, cache_dir)
-                self.assertEqual(utils.SETTINGS["weights_dir"], str(cache_dir))
-                self.assertTrue(cache_dir.is_dir())
+    def test_amp_check_weights_are_reused_and_settings_restored(self):
+        utils, modules = self._mock_ultralytics()
+        previous = utils.WEIGHTS_DIR
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, modules), \
+                patch.dict(os.environ, {"XDG_CACHE_HOME": tmp}):
+            with _ultralytics_amp_weights_dir() as first:
+                self.assertEqual(first, (Path(tmp) / "ultralytics" / "weights").resolve())
+                self.assertEqual(utils.WEIGHTS_DIR, first)
+                self.assertEqual(utils.SETTINGS["weights_dir"], str(first))
+                (first / "yolo26n.pt").write_bytes(b"cached-check-weights")
+            self.assertEqual(utils.WEIGHTS_DIR, previous)
+            self.assertEqual(utils.SETTINGS["weights_dir"], str(previous))
+            with _ultralytics_amp_weights_dir() as second:
+                self.assertEqual(second, first)
+                self.assertEqual((second / "yolo26n.pt").read_bytes(), b"cached-check-weights")
+
+    def test_amp_cache_defaults_to_user_home(self):
+        utils, modules = self._mock_ultralytics()
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, modules), \
+                patch.dict(os.environ, {"XDG_CACHE_HOME": ""}), \
+                patch.object(Path, "home", return_value=Path(tmp)):
+            with _ultralytics_amp_weights_dir() as cache_dir:
+                self.assertEqual(cache_dir, Path(tmp) / ".cache" / "ultralytics" / "weights")
+
+    def test_amp_settings_are_restored_after_training_error(self):
+        utils, modules = self._mock_ultralytics()
+        previous = utils.WEIGHTS_DIR
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(sys.modules, modules), \
+                patch.dict(os.environ, {"XDG_CACHE_HOME": tmp}):
+            with self.assertRaisesRegex(RuntimeError, "training failed"):
+                with _ultralytics_amp_weights_dir():
+                    raise RuntimeError("training failed")
             self.assertEqual(utils.WEIGHTS_DIR, previous)
             self.assertEqual(utils.SETTINGS["weights_dir"], str(previous))

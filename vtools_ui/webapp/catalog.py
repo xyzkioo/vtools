@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from model_compression.core.module_selection import COMPRESSION_MODES
+
 ROOT = Path(__file__).resolve().parents[2]
 
 TOOLS: dict[str, dict] = {
@@ -44,21 +46,26 @@ TOOLS: dict[str, dict] = {
         "modules": [("speed.pytorch_call", "PyTorch 调用"), ("speed.tensorrt_call", "TensorRT"), ("memory.pytorch_peak", "显存统计"), ("consistency.detection", "一致性检查")],
     },
     "compression": {
-        "title": "模型压缩", "group": "model", "description": "运行基线、量化、剪枝和蒸馏实验。",
+        "title": "模型压缩", "group": "model", "description": "选择一种处理模式，运行评估、剪枝、量化或蒸馏实验。",
+        "modes": COMPRESSION_MODES,
         "config": "model_compression/config/config.yaml", "entry": "compression",
         "fields": [
             {"key": "task", "label": "模型任务", "kind": "select", "options": ["detect", "classify"], "default": "detect"},
-            {"key": "resource", "label": "模型权重", "kind": "file",
-             "hint": "选择模型文件（通常为 .pt、.pth 或 .onnx）。"},
+            {"key": "resource", "label": "公共模型权重", "kind": "file",
+             "hint": "用于基线评估、剪枝或量化；检测蒸馏只需要教师和学生权重。"},
             {"key": "data", "label": "检测数据集 YAML", "kind": "file", "when": {"task": "detect"},
              "hint": "选择完整的 data.yaml；它应指向 train/val 图片路径，并包含 names/classes。图片和对应标签目录由 YAML 定义。"},
+            {"key": "teacher_weights", "label": "蒸馏教师权重", "kind": "file", "when": {"task": "detect"},
+             "hint": "检测蒸馏必填；教师类别名称及顺序须与数据集一致，需要支持原生蒸馏的 ultralytics-cn Fork。"},
+            {"key": "student_weights", "label": "蒸馏学生初始化权重", "kind": "file", "when": {"task": "detect"},
+             "hint": "可直接使用通用预训练小模型；自动按数据集适配检测头，无需预先训练，架构须与教师蒸馏特征层兼容。"},
             {"key": "train", "label": "训练集目录", "kind": "dir", "when": {"task": "classify"},
              "hint": "选择分类训练集根目录；下面按类别分子目录，例如 train/cat/*.jpg、train/dog/*.jpg。"},
             {"key": "val", "label": "验证集目录", "kind": "dir", "when": {"task": "classify"},
              "hint": "选择分类验证集根目录；下面按类别分子目录，例如 val/cat/*.jpg、val/dog/*.jpg。"},
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
         ],
-        "modules": [("baseline.evaluate", "基线评估"), ("compression.quantize.dynamic_int8", "动态 INT8"), ("compression.prune.unstructured", "非结构化剪枝"), ("distillation.classification", "知识蒸馏"), ("compression.prune.structured", "结构化通道缩放")],
+        "modules": [("baseline.evaluate", "基线评估"), ("compression.quantize.dynamic_int8", "动态 INT8"), ("compression.prune.unstructured", "非结构化剪枝"), ("distillation.classification", "分类知识蒸馏"), ("distillation.detection", "检测知识蒸馏"), ("compression.prune.structured", "结构化通道缩放")],
     },
     "transform": {
         "title": "格式转换", "group": "utility", "description": "数据和模型格式转换。",

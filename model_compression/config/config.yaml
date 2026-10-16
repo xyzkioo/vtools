@@ -52,6 +52,12 @@ distillation:
   batch_size: 16
   learning_rate: 0.001
   seed: 0
+  dis: 6.0
+  imgsz: 832
+  optimizer: auto
+  patience: 100
+  amp: true
+  workers: 0
 evaluation:
   split: val
 export:
@@ -63,5 +69,6 @@ modules:
   compression.prune.unstructured: true
   compression.prune.structured: false
   distillation.classification: false
+  distillation.detection: false
   comparison.report: false
   artifact.export: false

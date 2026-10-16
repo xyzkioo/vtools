@@ -12,9 +12,51 @@ COMPRESSION_MODULES: dict[str, bool] = {
     "compression.prune.unstructured": False,
     "compression.prune.structured": False,
     "distillation.classification": False,
+    "distillation.detection": False,
     "comparison.report": False,
     "artifact.export": False,
 }
+
+
+COMPRESSION_MODES: dict[str, dict[str, Any]] = {
+    'baseline': {'label': '基线评估', 'tasks': ['detect', 'classify'],
+                 'description': '统计公共模型参数并评估精度。', 'primary_module': None,
+                 'modules': ['model.parameters', 'baseline.evaluate'], 'public_weights': True},
+    'structured': {'label': '结构化剪枝', 'tasks': ['detect'],
+                   'description': '对公共模型裁剪通道或缩小结构，并按配置微调、评估。',
+                   'primary_module': 'compression.prune.structured',
+                   'modules': ['model.parameters', 'baseline.evaluate', 'compression.prune.structured'], 'public_weights': True},
+    'unstructured': {'label': '非结构化剪枝', 'tasks': ['detect', 'classify'],
+                     'description': '对公共模型的部分权重置零，并评估剪枝结果。',
+                     'primary_module': 'compression.prune.unstructured',
+                     'modules': ['model.parameters', 'baseline.evaluate', 'compression.prune.unstructured'], 'public_weights': True},
+    'detection_distillation': {'label': '检测知识蒸馏', 'tasks': ['detect'],
+                               'description': '使用教师和学生权重；自动适配学生、评估学生基线并训练，无需公共模型权重。',
+                               'primary_module': 'distillation.detection',
+                               'modules': ['distillation.detection'], 'public_weights': False},
+    'quantization': {'label': '动态 INT8 量化', 'tasks': ['classify'],
+                     'description': '对公共分类模型执行动态 INT8 量化，并评估结果。',
+                     'primary_module': 'compression.quantize.dynamic_int8',
+                     'modules': ['model.parameters', 'baseline.evaluate', 'compression.quantize.dynamic_int8'], 'public_weights': True},
+    'classification_distillation': {'label': '分类知识蒸馏', 'tasks': ['classify'],
+                                    'description': '使用 YAML 中的 teacher/student 配置训练分类学生。',
+                                    'primary_module': 'distillation.classification',
+                                    'modules': ['model.parameters', 'baseline.evaluate', 'distillation.classification'], 'public_weights': True},
+}
+
+
+def compression_mode_modules(mode: str, task: str) -> list[str]:
+    definition = COMPRESSION_MODES.get(mode)
+    if definition is None:
+        raise ValueError(f'未知处理模式：{mode}')
+    if task not in definition['tasks']:
+        raise ValueError(f'处理模式「{definition["label"]}」不支持 {task} 任务。')
+    return list(definition['modules'])
+
+
+def standalone_detection_distillation(modules: Mapping[str, bool]) -> bool:
+    allowed = {'model.parameters', 'baseline.evaluate', 'distillation.detection', 'comparison.report', 'artifact.export'}
+    return bool(modules.get('distillation.detection')) and all(not enabled or key in allowed for key, enabled in modules.items())
 
 
 def _split(values: Iterable[str] | None) -> list[str]:
@@ -72,4 +114,5 @@ def resolve_compression_modules(
     return modules
 
 
-__all__ = ["COMPRESSION_MODULES", "resolve_compression_modules"]
+__all__ = ["COMPRESSION_MODULES", "COMPRESSION_MODES", "compression_mode_modules",
+           "standalone_detection_distillation", "resolve_compression_modules"]

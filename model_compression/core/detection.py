@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import copy
 import math
 import os
 import shutil
@@ -101,6 +102,10 @@ def _link_or_copy(source: Path, target: Path) -> None:
     if source.is_dir():
         target.mkdir(parents=True, exist_ok=True)
         for child in source.iterdir():
+            # Existing Ultralytics caches must not be hardlinked into a run:
+            # rebuilding them could otherwise truncate a user's cache inode.
+            if child.is_file() and child.suffix.lower() in {'.cache', '.npy'}:
+                continue
             _link_or_copy(child, target / child.name)
         return
     try:
@@ -199,6 +204,41 @@ def detection_data(config: Mapping[str, Any]) -> Path | None:
     return next(iter(candidates), None)
 
 
+def _isolated_distillation_data(data_path: Path, run_dir: Path) -> Path:
+    """Mirror train and val label trees so Fork cache writes stay run-local."""
+    import yaml
+
+    raw = yaml.safe_load(data_path.read_text(encoding='utf-8')) or {}
+    if not isinstance(raw, dict):
+        raise ValueError('检测蒸馏数据集 YAML 必须是对象。')
+    root = _resolved_dataset_root(data_path, raw.get('path'))
+    target_root = run_dir / '_input' / 'distillation_dataset'
+    for split in ('train', 'val'):
+        entry = raw.get(split)
+        if not isinstance(entry, str) or not entry.strip():
+            raise ValueError(f'检测蒸馏 data.yaml 必须指定 {split} 图片目录。')
+        images = Path(entry).expanduser()
+        images = (images if images.is_absolute() else root / images).resolve()
+        if not images.is_dir():
+            raise ValueError(f'检测蒸馏 {split} 必须是现有图片目录：{images}')
+        if images.parent.name.lower() == 'images':
+            labels = images.parent.parent / 'labels' / images.name
+        elif images.name.lower() == 'images':
+            labels = images.parent / 'labels'
+        else:
+            raise ValueError(f'检测蒸馏仅支持标准 images/labels 数据集布局：{images}')
+        if not labels.is_dir():
+            raise FileNotFoundError(f'检测蒸馏找不到对应标签目录：{labels}')
+        _link_or_copy(images, target_root / 'images' / split)
+        _link_or_copy(labels, target_root / 'labels' / split)
+        raw[split] = f'images/{split}'
+    raw['path'] = str(target_root)
+    target = run_dir / '_input' / 'distillation_data.yaml'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding='utf-8')
+    return target
+
+
 def is_detection(config: Mapping[str, Any]) -> bool:
     model = config.get('model') or {}
     task = str(model.get('task') or '').strip().lower()
@@ -242,6 +282,152 @@ def _parameter_signature(model) -> tuple[int, tuple[tuple[str, tuple[int, ...]],
     return sum(int(param.numel()) for _, param in params), tuple(
         (str(name), tuple(int(dim) for dim in param.shape)) for name, param in params
     )
+
+
+def _distillation_feature_sizes(detector: Any, indices: list[int], imgsz: int) -> list[tuple[int, int]]:
+    """Check actual neck feature sizes at a small stride-aligned resolution."""
+    import torch
+
+    network = detector.model
+    captured: dict[int, tuple[int, int]] = {}
+    handles = []
+    original_training = network.training
+
+    def capture(index: int):
+        def hook(_module, _inputs, output):
+            if not isinstance(output, torch.Tensor) or output.ndim != 4:
+                raise ValueError(f'检测蒸馏特征层 {index} 未输出四维特征张量。')
+            captured[index] = tuple(int(size) for size in output.shape[-2:])
+        return hook
+
+    try:
+        for index in indices[:-1]:
+            handles.append(network.model[index].register_forward_hook(capture(index)))
+        network.eval()
+        size = max(32, min(imgsz, 256) // 32 * 32)
+        device = next(network.parameters()).device
+        channels = int(network.yaml.get('channels', 3))
+        with torch.no_grad():
+            network(torch.zeros(1, channels, size, size, device=device))
+        return [captured[index] for index in indices[:-1]]
+    finally:
+        for handle in handles:
+            handle.remove()
+        network.train(original_training)
+
+
+def _check_distillation_architecture(teacher: Any, student: Any, distillation_model: Any, imgsz: int) -> None:
+    teacher_head = teacher.model.model[-1]
+    student_head = student.model.model[-1]
+    teacher_nc = int(teacher_head.nc)
+    student_nc = int(student_head.nc)
+    if teacher_nc != student_nc:
+        raise ValueError(f'检测蒸馏教师/学生类别数不一致：{teacher_nc} != {student_nc}')
+    teacher_layers = distillation_model.get_distill_layers(teacher.model)
+    student_layers = distillation_model.get_distill_layers(student.model)
+    if teacher_layers != student_layers:
+        raise ValueError(f'当前 Fork 要求教师与学生的蒸馏特征层索引一致：教师={teacher_layers}，学生={student_layers}；请选用兼容架构。')
+    teacher_sizes = _distillation_feature_sizes(teacher, teacher_layers, imgsz)
+    student_sizes = _distillation_feature_sizes(student, student_layers, imgsz)
+    if teacher_sizes != student_sizes:
+        raise ValueError(f'检测蒸馏教师/学生特征空间尺寸不一致：教师={teacher_sizes}，学生={student_sizes}')
+
+
+def _distillation_class_names(value: Any, owner: str) -> dict[int, str]:
+    if isinstance(value, list):
+        names = dict(enumerate(value))
+    elif isinstance(value, Mapping):
+        names = {}
+        for key, name in value.items():
+            if isinstance(key, bool) or not isinstance(key, (str, int)) or not str(key).isdigit():
+                raise ValueError(f'{owner} names 的类别 ID 必须从 0 连续编号。')
+            index = int(key)
+            if index in names:
+                raise ValueError(f'{owner} names 包含重复类别 ID。')
+            names[index] = name
+    else:
+        raise ValueError(f'{owner} 必须提供 names 类别名称及顺序。')
+    if not names or set(names) != set(range(len(names))):
+        raise ValueError(f'{owner} names 的类别 ID 必须从 0 连续编号。')
+    if any(not isinstance(name, str) or not name.strip() for name in names.values()):
+        raise ValueError(f'{owner} names 必须包含非空类别名称。')
+    names = {index: names[index].strip() for index in range(len(names))}
+    if len(set(names.values())) != len(names):
+        raise ValueError(f'{owner} names 包含重复类别名称。')
+    return names
+
+
+def _prepare_distillation_student(teacher: Any, student: Any, data: Path, seed: int) -> dict[str, Any]:
+    """Validate teacher semantics, then adapt a generic student's actual output layers."""
+    import torch
+    import yaml
+
+    raw = yaml.safe_load(data.read_text(encoding='utf-8'))
+    if not isinstance(raw, Mapping):
+        raise ValueError('检测蒸馏数据集 YAML 必须是对象。')
+    names = _distillation_class_names(raw.get('names'), '检测蒸馏数据集')
+    nc = len(names)
+    if 'nc' in raw and (isinstance(raw['nc'], bool) or raw['nc'] != nc):
+        raise ValueError('检测蒸馏数据集 nc 与 names 类别数不一致。')
+    teacher_nc = int(teacher.model.model[-1].nc)
+    if teacher_nc != nc:
+        raise ValueError(f'检测蒸馏教师与数据集类别数不一致：教师={teacher_nc}，数据集={nc}；请选择与教师匹配的 dataset.data。')
+    teacher_names = _distillation_class_names(getattr(teacher.model, 'names', None), '检测蒸馏教师')
+    if teacher_names != names:
+        raise ValueError('检测蒸馏教师与数据集类别名称或顺序不一致；请核对 dataset.data 的 names，不能仅修改类别数量。')
+
+    source = student.model
+    source_nc = int(source.model[-1].nc)
+    source_names = _distillation_class_names(getattr(source, 'names', None), '检测蒸馏学生')
+    if len(source_names) != source_nc:
+        raise ValueError('检测蒸馏学生 names 与实际检测头类别数不一致，无法安全迁移分类输出。')
+    metadata = {'adapted': source_nc != nc or source_names != names,
+                'source_nc': source_nc, 'target_nc': nc, 'names': names}
+    if not metadata['adapted']:
+        return metadata
+    source_yaml = getattr(source, 'yaml', None)
+    if not isinstance(source_yaml, Mapping):
+        raise ValueError('学生模型缺少可重建的 model.yaml，无法自动适配检测头。')
+    # Match the native trainer's model constructor. Preserve the caller's RNG
+    # and seed the new head so the saved initialization is reproducible.
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(seed)
+        target = type(source)(copy.deepcopy(dict(source_yaml)),
+                              ch=int(raw.get('channels', 3)), nc=nc, verbose=False)
+    target.names = dict(names)
+    source_state = source.state_dict()
+    target_state = target.state_dict()
+    # Classification logits encode class order. Transfer matching class rows
+    # explicitly, and leave new classes initialized even when nc is unchanged.
+    class_keys = set()
+    head_index = len(target.model) - 1
+    for attr in ('cv3', 'one2one_cv3'):
+        for index, branch in enumerate(getattr(target.model[-1], attr, ())):
+            if getattr(branch[-1], 'out_channels', None) == nc:
+                class_keys.update(f'model.{head_index}.{attr}.{index}.{len(branch) - 1}.{p}'
+                                  for p in ('weight', 'bias'))
+    transfer = {key: value for key, value in source_state.items()
+                if key in target_state and key not in class_keys and value.shape == target_state[key].shape}
+    # Reject pruned/custom backbones that cannot be reconstructed faithfully.
+    head_prefix = f'model.{head_index}.'
+    if any(key not in transfer for key in target_state if not key.startswith(head_prefix)):
+        raise ValueError('学生主干结构与 model.yaml 不一致，无法安全重建；请使用架构完整的学生初始化权重。')
+    target.load_state_dict(transfer, strict=False)
+    source_lookup = {name: index for index, name in source_names.items()}
+    with torch.no_grad():
+        for key in class_keys & source_state.keys():
+            src, dst = source_state[key], target_state[key]
+            if src.shape[1:] == dst.shape[1:]:
+                for index, name in names.items():
+                    if name in source_lookup:
+                        dst[index].copy_(src[source_lookup[name]])
+    if hasattr(source, 'args'):
+        target.args = copy.deepcopy(source.args)
+    student.model = target
+    _clean_detector_checkpoint(student)
+    metadata['transferred_tensor_count'] = len(transfer)
+    print(f'[检测蒸馏] 已适配学生检测头：{source_nc} → {nc} 类；复用兼容权重，无需预先训练学生。', flush=True)
+    return metadata
 
 
 def _unique_target(path: Path) -> Path:
@@ -341,6 +527,8 @@ def benchmark_detector(detector, config: Mapping[str, Any]) -> dict[str, Any]:
 
 def run_detection_operation(module_id, config, state, run_dir, run_id):
     """Use detection metrics and Ultralytics checkpoints for supported operations."""
+    if module_id == 'distillation.detection':
+        return _run_detection_distillation(config, state, run_dir, run_id)
     if module_id in {'compression.quantize.dynamic_int8', 'distillation.classification'}:
         raise ValueError('该模块为分类流程；YOLO 检测当前支持基线评估、非结构化剪枝、结构化缩放和导出。')
     explicit = config.get('model', {}).get('weights')
@@ -503,3 +691,91 @@ def run_detection_operation(module_id, config, state, run_dir, run_id):
     result = {'module': module_id, 'status': 'succeeded', 'version_id': head,
               'artifact': artifact_info(weights), 'metadata': metadata}
     return result
+
+
+def _run_detection_distillation(config, state, run_dir, run_id):
+    """Validate, train, reload and register a standalone distilled detector."""
+    from ..modules.detection_distillation import (
+        detection_distillation_settings, train_detection_distillation,
+    )
+
+    section = config.get('distillation') or {}
+    for field in ('teacher_weights', 'student_weights'):
+        if not section.get(field):
+            raise ValueError(f'检测蒸馏需要明确指定 distillation.{field}。')
+    teacher_path = Path(section['teacher_weights']).expanduser().resolve()
+    student_path = Path(section['student_weights']).expanduser().resolve()
+    settings = detection_distillation_settings(config)
+    try:
+        from ultralytics.nn.distill_model import DistillationModel
+    except ImportError as exc:
+        raise RuntimeError('当前 Ultralytics 缺少 Detect 原生蒸馏，请使用 ultralytics-cn Fork。') from exc
+    data = detection_data(config)
+    if data is None:
+        raise ValueError('检测蒸馏必须指定 dataset.data（含 train、val 的 YOLO data.yaml）。')
+    teacher = load_detector(teacher_path)
+    student = load_detector(student_path)
+    initialization = _prepare_distillation_student(teacher, student, data, settings['seed'])
+    _check_distillation_architecture(teacher, student, DistillationModel, settings['imgsz'])
+    output_dir = run_dir / 'artifacts' / 'distillation'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    initial_path = student_path
+    if initialization['adapted']:
+        initial_path = output_dir / 'student-initialized.pt'
+        student.save(initial_path)
+        # Evaluate and train from the same serialized initialization. Validation
+        # may fuse its in-memory copy; it must not alter the training checkpoint.
+        student = load_detector(initial_path)
+    initialization['checkpoint'] = str(initial_path)
+    training_data = _isolated_distillation_data(data, run_dir)
+    # Use one dataset snapshot and image size for both comparisons. The input
+    # mirror also prevents validation/training caches from touching user data.
+    evaluation_config = dict(config)
+    evaluation_config['dataset'] = {**config.get('dataset', {}),
+                                    'data': str(training_data), 'input_size': settings['imgsz']}
+    teacher_params = parameter_metrics(teacher.model)['parameter_count']
+    initial_params = parameter_metrics(student.model)['parameter_count']
+    initial_signature = _parameter_signature(student.model)
+    before = evaluate_detector(student, evaluation_config, run_dir, 'before_detection_distillation')
+    del teacher, student
+
+    training = train_detection_distillation(
+        student_weights=initial_path, teacher_weights=teacher_path,
+        data=training_data, config=config, output_dir=output_dir,
+    )
+    final_path = Path(training['best_checkpoint'])
+    reloaded = load_detector(final_path)
+    if isinstance(reloaded.model, DistillationModel):
+        raise RuntimeError('蒸馏检查点仍包含 DistillationModel，尚未生成独立学生模型。')
+    final_params = parameter_metrics(reloaded.model)['parameter_count']
+    if _parameter_signature(reloaded.model) != initial_signature:
+        raise RuntimeError(f'蒸馏后的学生网络结构与初始化不一致：初始参数量={initial_params}，最终参数量={final_params}')
+    after = evaluate_detector(reloaded, evaluation_config, run_dir, 'after_detection_distillation')
+    metadata = {
+        'task': 'detect', 'teacher_weights': str(teacher_path),
+        'student_weights': str(student_path),
+        'student_initialization': initialization,
+        'teacher_parameter_count': teacher_params,
+        'student_initial_parameter_count': initial_params,
+        'student_final_parameter_count': final_params,
+        'student_vs_teacher_parameter_reduction': (1 - final_params / teacher_params) if teacher_params else None,
+        'before_distillation': before,
+        **after,
+        'map50_delta': after['evaluation_map50'] - before['evaluation_map50'],
+        'map50_95_delta': after['evaluation_map50_95'] - before['evaluation_map50_95'],
+        **training,
+        'model_file_size_bytes': artifact_info(final_path)['size_bytes'],
+    }
+    # Parent must be the explicit student initialization, never an unrelated
+    # current head (which may have been populated by an earlier operation).
+    head, current_path = state.current(config.get('model', {}).get('weights'))
+    if not head or Path(current_path).resolve() != initial_path:
+        source = state.add_version(name='yolo-student-initial', artifact=initial_path,
+            parent_version_id=None, run_id=run_id, method='student_initial', metadata=before)
+        head = source['id']
+    version = state.add_version(name='yolo-distilled', artifact=final_path,
+        parent_version_id=head, run_id=run_id, method='detection_distillation', metadata=metadata)
+    state.advance(version['id'])
+    return {'module': 'distillation.detection', 'status': 'succeeded',
+            'version_id': version['id'], 'artifact': artifact_info(final_path),
+            'metadata': metadata, 'verification': {'reload': True, 'validation': 'evaluated', 'task': 'detect'}}

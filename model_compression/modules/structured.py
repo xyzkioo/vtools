@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,10 +16,11 @@ from typing import Any, Iterator, Mapping
 
 
 @contextmanager
-def _ultralytics_amp_weights_dir(run_dir: Path) -> Iterator[Path]:
-    """Keep Ultralytics AMP-check downloads inside this writable run."""
+def _ultralytics_amp_weights_dir() -> Iterator[Path]:
+    """Reuse AMP-check weights from the user cache across training runs."""
 
-    cache_dir = (run_dir / "ultralytics-cache" / "weights").resolve()
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache").expanduser()
+    cache_dir = (cache_root / "ultralytics" / "weights").resolve()
     cache_dir.mkdir(parents=True, exist_ok=True)
     try:
         import ultralytics.utils as ultralytics_utils  # type: ignore
@@ -29,7 +31,7 @@ def _ultralytics_amp_weights_dir(run_dir: Path) -> Iterator[Path]:
     # check_amp imports WEIGHTS_DIR from ultralytics.utils inside the function,
     # so changing checks.WEIGHTS_DIR has no effect. Redirect the actual source
     # plus the download helper's in-memory setting. Use dict.__setitem__ to
-    # avoid persisting this task-local path to the user's settings file.
+    # avoid persisting this temporary override to the user's settings file.
     missing = object()
     previous_dir = getattr(ultralytics_utils, "WEIGHTS_DIR", missing)
     settings = getattr(ultralytics_utils, "SETTINGS", None)
@@ -235,7 +237,7 @@ def finetune_structured_detector(
     for key in ("fraction", "warmup_bias_lr", "warmup_epochs"):
         if key in section:
             train_kwargs[key] = section[key]
-    with _ultralytics_amp_weights_dir(run_dir):
+    with _ultralytics_amp_weights_dir():
         detector.train(trainer=PreservedModelTrainer, **train_kwargs)
     trainer = getattr(detector, "trainer", None)
     best = getattr(trainer, "best", None) if trainer is not None else None

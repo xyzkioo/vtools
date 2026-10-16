@@ -6,6 +6,7 @@ import re
 
 SIZE_FIELDS = {"dataset.input_size", "benchmark.input_size", "input.size"}
 SQUARE_SIZE_FIELDS = {
+    "distillation.imgsz",
     "compression.structured.train_input_size", "compression.structured.pruning_input_size",
 }
 STRING_LIST_FIELDS = {
@@ -85,6 +86,12 @@ FIELD_HINTS = {
     "distillation.batch_size": "蒸馏训练的批大小。",
     "distillation.learning_rate": "蒸馏训练的初始学习率。",
     "distillation.seed": "训练随机种子，便于复现实验。",
+    "distillation.dis": "检测蒸馏特征损失权重，默认 6.0；依赖支持 distill_model 的 Ultralytics Fork。",
+    "distillation.imgsz": "检测蒸馏训练方形输入尺寸，如 832。",
+    "distillation.optimizer": "检测蒸馏的优化器；auto 自动选择。",
+    "distillation.patience": "检测蒸馏早停耐心轮数。",
+    "distillation.amp": "检测蒸馏是否使用自动混合精度。",
+    "distillation.workers": "检测蒸馏的数据加载进程数。",
     "export.path": "模型导出路径；留空使用当前运行目录。",
     "input.source": "可视化输入图片或图片目录，相对 project.root 解析。",
     "input.dataset_root": "非标准图片目录布局的数据集根目录；通常可留空。",
@@ -163,7 +170,8 @@ FIELD_HINTS = {
     "modules.compression.quantize.dynamic_int8": "动态 INT8 量化；检测模型当前不支持。",
     "modules.compression.prune.unstructured": "将部分权重置零；通常不会直接减少 dense 推理耗时。",
     "modules.compression.prune.structured": "结构化压缩并微调；具体方法由 compression.structured.method 决定。",
-    "modules.distillation.classification": "使用教师模型训练学生分类模型；检测任务当前不支持。",
+    "modules.distillation.classification": "使用教师 logits 蒸馏学生分类模型；仅支持 classify。",
+    "modules.distillation.detection": "使用 Ultralytics Fork 原生特征蒸馏训练检测学生模型；仅支持 detect。",
     "modules.comparison.report": "生成压缩前后的对比报告。",
     "modules.artifact.export": "导出压缩模型产物。",
     "modules.predict.generate": "运行模型生成预测；已有预测文件模式无需启用。",

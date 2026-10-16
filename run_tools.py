@@ -22,6 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disable", action="append")
     parser.add_argument("--list-modules", action="store_true")
     parser.add_argument("--weights", type=Path, help="可选：覆盖诊断、可视化、测速或压缩入口的模型权重")
+    parser.add_argument("--teacher-weights", type=Path, help="检测蒸馏教师权重")
+    parser.add_argument("--student-weights", type=Path, help="检测蒸馏学生初始化权重")
     parser.add_argument("--source", type=Path, help="可选：覆盖可视化入口的输入来源")
     parser.add_argument("--train", type=Path, help="可选：覆盖模型压缩训练集目录")
     parser.add_argument("--val", type=Path, help="可选：覆盖模型压缩验证集目录")
@@ -115,6 +117,10 @@ def main() -> int:
         if args.device:
             sys.argv.extend(["--device", args.device])
     if tool == "compression":
+        for flag in ("teacher_weights", "student_weights"):
+            value = getattr(args, flag)
+            if value is not None:
+                sys.argv.extend([f"--{flag.replace('_', '-')}", str(value)])
         if args.data:
             sys.argv.extend(["--data", str(args.data)])
         if args.task:
