@@ -5,10 +5,10 @@
 ## 本轮更新（2026-11-01）：GitHub 文档 PR
 
 - 用户授权先向 GitHub 提交 PR。本轮提交两份审查报告、`docs/README.md` 导航及本交接文档；业务修复继续列为待办。
-- 仓库：`xyzkioo/vtools`；目标分支 `main`；计划使用远程分支 `docs/project-audit-2026-11-01`。创建前确认远端 main 与本地审查基准均为 `cc39d05b9bf1f45b79744c1dbcf2ecc40f54e32f`。
+- 仓库：`xyzkioo/vtools`；目标分支 `main`；远程分支 `docs/project-audit-2026-11-01`。创建前确认远端 main 与本地审查基准均为 `cc39d05b9bf1f45b79744c1dbcf2ecc40f54e32f`。
 - 两份报告合计记录 14 项问题（2 项 P1、9 项 P2、3 项 P3）及单独标注的清理候选，证据和硬件验证边界保留在报告中。
 - 本轮文档空白、私有绝对路径和 47 个本地 Markdown 链接检查通过；业务代码未变，未重新执行上轮回归。
-- 发布状态：正在准备远程提交与 PR，尚未创建 PR；完成后在本节更新结果。
+- GitHub 状态：已创建 [PR #2：记录项目功能缺陷与代码冗余审查](https://github.com/xyzkioo/vtools/pull/2)，状态为 open、非草稿，尚未合并。审查材料首个远程提交为 `8d237321750abcabc7b1767f7132c0fb36ede3b8`，随后补充本节的 PR 结果记录。
 - 通过 GitHub 连接器操作远程分支与提交，本地工作树仍在 `main`，审查文档尚未提交到本地 Git 历史。
 
 ---
