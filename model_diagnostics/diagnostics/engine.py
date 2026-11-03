@@ -269,6 +269,16 @@ def _load_coco_predictions(data: Any, images: Dict[str, ImageInfo], warnings: Li
     return predictions
 
 
+def _read_yolo_label_lines(label_path: Path) -> List[str]:
+    try:
+        return label_path.read_text(encoding="utf-8").splitlines()
+    except UnicodeError as exc:
+        raise ValueError(
+            f"YOLO 标签不是 UTF-8 文本：{label_path}；"
+            "请从原始标注重新导出标准 YOLO 标签（class xc yc w h）"
+        ) from exc
+
+
 def _load_yolo_ground_truth(path: Path, images_dir: Optional[Path], ds: Dataset) -> None:
     if images_dir is None:
         raise ValueError("YOLO 标签需要 --images-dir 才能把归一化坐标还原到像素坐标")
@@ -285,7 +295,7 @@ def _load_yolo_ground_truth(path: Path, images_dir: Optional[Path], ds: Dataset)
         with Image.open(image_path) as image:
             width, height = image.size
         ds.images[image_id] = ImageInfo(image_id=image_id, width=width, height=height, file_name=str(image_path))
-        for index, line in enumerate(label_path.read_text(encoding="utf-8").splitlines()):
+        for index, line in enumerate(_read_yolo_label_lines(label_path)):
             fields = line.split()
             if len(fields) < 5:
                 ds.warnings.append(f"{label_path}:{index + 1} 字段不足，已跳过")
@@ -479,7 +489,7 @@ def _load_ultralytics_ground_truth(
         if not label_path.exists():
             ds.warnings.append(f"{image_path} 缺少标签文件 {label_path}，按背景图处理")
             continue
-        for index, line in enumerate(label_path.read_text(encoding="utf-8").splitlines()):
+        for index, line in enumerate(_read_yolo_label_lines(label_path)):
             fields = line.split()
             if not fields:
                 continue
@@ -700,7 +710,7 @@ def _safe_div(numerator: float, denominator: float) -> Optional[float]:
 def _prf(tp: int, fp: int, fn: int) -> Dict[str, Optional[float]]:
     precision = _safe_div(tp, tp + fp)
     recall = _safe_div(tp, tp + fn)
-    f1 = _safe_div(2 * precision * recall, precision + recall) if precision is not None and recall is not None else None
+    f1 = _safe_div(2 * tp, 2 * tp + fp + fn)
     return {"precision": precision, "recall": recall, "f1": f1}
 
 

@@ -19,7 +19,7 @@ import sys
 import tempfile
 import shutil
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -189,10 +189,7 @@ def coco_candidate_keys(path: Path, image_root: Path, dataset_root: Path) -> set
 
 
 def load_coco_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except UnicodeDecodeError:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict) or not isinstance(data.get("images"), list):
         raise ValueError(f"不是有效的 COCO 标注文件：{path}（缺少 images 数组）")
     return data
@@ -232,7 +229,7 @@ def build_coco_updates(
 
 def validate_plan(plan: list[RenameItem]) -> None:
     targets = [item.new for item in plan]
-    duplicate_targets = {path for path in targets if targets.count(path) > 1}
+    duplicate_targets = {path for path, count in Counter(targets).items() if count > 1}
     if duplicate_targets:
         names = ", ".join(sorted(str(path) for path in duplicate_targets))
         raise ValueError(f"目标文件名重复：{names}")

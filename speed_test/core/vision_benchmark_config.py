@@ -115,6 +115,12 @@ def load_config(path: Optional[str | Path] = None) -> dict[str, Any]:
     config["run"] = run
 
     benchmark = _as_mapping(config.get("benchmark"), "benchmark")
+    obsolete_checks = sorted(set(benchmark) & {'inspect_checkpoint', 'verify_model_load'})
+    if obsolete_checks:
+        raise ValueError(
+            f'已移除 benchmark 旧权重检查字段：{", ".join(obsolete_checks)}；'
+            '请使用 modules.checkpoint.inspect / modules.checkpoint.load_check。'
+        )
     benchmark["input_size"] = _normalize_input_size(benchmark.get("input_size", "832"))
     for key in ("image", "source"):
         if benchmark.get(key) is not None:

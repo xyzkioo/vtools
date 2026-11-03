@@ -35,7 +35,7 @@ from typing import Any
 import torch
 
 if __package__ in {None, ""}:
-    _PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    _PROJECT_ROOT = Path(__file__).resolve().parents[2]
     if str(_PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -259,6 +259,8 @@ def main() -> list[dict[str, Any]]:
     benchmark_values = config_file.get("benchmark", {})
     pytorch_values = config_file.get("pytorch", {})
     modules = resolve_speed_modules(config_file, only=args.only, enable=args.enable, disable=args.disable)
+    if args.skip_pipeline:
+        modules['speed.pytorch_pipeline'] = False
     has_model_info = any(modules.get(key) for key in ("model.parameters", "model.flops", "memory.pytorch_peak"))
     has_checkpoint_check = any(modules.get(key) for key in ("checkpoint.inspect", "checkpoint.load_check"))
     if not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline") and not has_model_info and not has_checkpoint_check:
@@ -290,7 +292,8 @@ def main() -> list[dict[str, Any]]:
     if args.source is None:
         args.source = benchmark_values.get("image", benchmark_values.get("source"))
 
-    if modules.get("checkpoint.inspect") or modules.get("checkpoint.load_check"):
+    inspection_rows: list[dict[str, Any]] = []
+    if has_checkpoint_check:
         inspection_results = inspect_entries(
             model_entries,
             benchmark_values,
@@ -303,10 +306,13 @@ def main() -> list[dict[str, Any]]:
             if item.architecture_status in {"missing", "unknown"}
             or item.adapter_load_status == "failed"
         ]
-        inspection_rows = []
         for item in inspection_results:
             failed = item in inspection_failures
             inspection_rows.append({"model": item.name, "status": "failed" if failed else "succeeded", "error": item.raw_error or item.adapter_error, "architecture_status": item.architecture_status, "adapter_load_status": item.adapter_load_status})
+        if inspection_failures and benchmark_values.get('fail_on_checkpoint_inspection', False):
+            save_rows(args.output, inspection_rows)
+            print(f'权重检查失败，已停止；结果已保存：{args.output.resolve()}')
+            return inspection_rows
         if has_checkpoint_check and not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline") and not has_model_info:
             save_rows(args.output, inspection_rows)
             print(f"权重检查完成；结果已保存：{args.output.resolve()}")
@@ -352,7 +358,7 @@ def main() -> list[dict[str, Any]]:
         print(f"GPU：{torch.cuda.get_device_name(device)}")
     print("=" * 92)
 
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = [row for row in inspection_rows if row['status'] == 'failed']
     for model_entry in model_entries:
         spec = ModelSpec(str(model_entry["name"]), Path(str(model_entry["weights"])))
         adapter = create_adapter(
@@ -362,6 +368,8 @@ def main() -> list[dict[str, Any]]:
             args.iou,
             args.max_det,
         )
+        if modules.get('speed.pytorch_pipeline') and source is None and adapter.supports_real_predict:
+            raise ValueError(f'{spec.name} 的 adapter pipeline 需要 --source 或 benchmark.image/source，未执行测速。')
         if not spec.weights.is_file():
             raise FileNotFoundError(f"模型文件不存在：{spec.weights}")
         for precision in precisions:
@@ -387,9 +395,9 @@ def main() -> list[dict[str, Any]]:
                 model = adapter.prepare_model(model, device, precision, args.fuse)
                 forward = benchmark_forward(adapter, model, measurement_config) if (modules.get("speed.pytorch_call") or (info_only and modules.get("memory.pytorch_peak"))) else None
                 pipeline = None
-                # Ultralytics 的 predict 没有 source 时会采用内部 demo 数据，
-                # 这不属于用户想测试的真实输入，因此默认跳过。
-                pipeline_enabled = modules.get("speed.pytorch_pipeline", False) and not args.skip_pipeline
+                # Ultralytics 的 predict 没有 source 时会采用内部 demo 数据；
+                # 上面已要求真实输入，避免把 demo 计时当作用户数据。
+                pipeline_enabled = modules.get("speed.pytorch_pipeline", False)
                 if pipeline_enabled and (source is not None or not adapter.supports_real_predict):
                     pipeline = benchmark_pipeline(adapter, model, config, source)
                 if forward is not None and modules.get("speed.pytorch_call"):

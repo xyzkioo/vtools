@@ -67,6 +67,8 @@
 
 结构化微调与检测蒸馏共用 AMP 检查权重缓存，默认位置为 `~/.cache/ultralytics/weights/`；设置 `XDG_CACHE_HOME` 时使用其下的 `ultralytics/weights/`。训练数据镜像和学生产物仍保存在各次运行目录。安装包信息和本次验证边界见 [v0.4.7 说明](docs/releases/v0.4.7.md)。
 
+检测压缩运行时会把标准 YOLO 图片与标签复制到本次运行目录，供验证、结构化微调和检测蒸馏使用；分类 ImageFolder 的训练/验证类别目录不一致会直接报错。测速的真实 adapter pipeline 需要明确提供输入，checkpoint 检查失败会保留在结果中。
+
 ## 快速开始
 
 ### 方式一：使用 Ubuntu `.deb`

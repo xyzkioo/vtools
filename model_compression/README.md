@@ -69,6 +69,8 @@ python run_tools.py --tool compression --config config/tools.yaml
 
 ## 配置要点
 
+默认分类 ImageFolder 加载器要求训练集和验证集具有相同的类别目录；类别映射不一致会报错，避免验证标签错位。检测评估、结构化微调和检测蒸馏会把标准 `images/`、`labels/` 目录中的输入复制到本次 `runN/_input/`，原图和标签不与运行副本共享 inode。需要隔离的 split 若不符合该目录布局，运行会明确失败。大型数据集需为运行目录预留副本空间。
+
 `model.adapter: torch` 支持完整的 `torch.nn.Module` checkpoint，或在配置了 `model.factory: package.module:function` 时加载 `state_dict`。自定义网络和数据集可以复制 [adapters/torch_adapter_template.py](adapters/torch_adapter_template.py)，实现 `build_model`、`load_weights` 和可选的 `build_dataloader`。
 
 分类流程的 `dataset.train` 与 `dataset.val` 默认按 ImageFolder 目录读取；adapter 返回的 DataLoader 也可以产生 `(images, labels)` 或 `{"image": ..., "label": ...}`。YOLO 检测流程使用 `model.task: detect` 和 `dataset.data` 指向 `data.yaml`，保留每张图的多框标签，支持基线评估、非结构化剪枝和结构化通道缩放。结构化模块默认根据 `compression.structured.target_scale` 从模型 YAML 的 `scales` 生成更小的 dense 网络；也可以将 `compression.structured.method` 设为 `torch_pruning`，使用 `torch-pruning` 的依赖图物理删除主干/颈部阶段通道，并同步调整依赖的卷积、BN、Concat 与残差分支。依赖感知模式需要额外安装 `torch-pruning>=1.4.1`，检测头输出层默认保留。推荐填写对应规模的 `initial_weights`，并使用与原模型接近的微调轮数，避免把未经充分训练的模型当成可用结果。微调和检测蒸馏期间 Ultralytics 的 AMP 检查权重共用用户缓存 `~/.cache/ultralytics/weights/`（可由 `XDG_CACHE_HOME` 更改缓存根目录），不依赖安装目录的写权限，也不随运行目录重复下载。默认精度门禁要求 mAP50-95 下降不超过 0.05，未通过时结果标记为失败且不能作为后续阶段输入；需要保留实验产物时可将 `compression.structured.quality_gate` 设为 `false`。报告记录参数量、文件大小、mAP 和固定输入测速；把 `finetune_epochs` 设为 0 可只做结构检查。配置字段与依赖见 [config/config.yaml](config/config.yaml) 和 [REQUIREMENTS.md](REQUIREMENTS.md)。分类蒸馏使用：

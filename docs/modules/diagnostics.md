@@ -33,6 +33,8 @@ python model_diagnostics/run_model_diagnostics.py --config model_diagnostics/con
 
 预测使用原图像素坐标 `[x1, y1, x2, y2]`、`score`、`class_id`。详细格式和指标见 [诊断文档](../../model_diagnostics/docs/README.md)。
 
+诊断入口只接受本节及 `predict.generate`、`validation.ultralytics` 的模块 ID；测速、导出和可视化模块需在各自入口运行。
+
 ## 输出
 
 默认输出 `model_diagnostics/runs/runN/<mode_name>/`。`run_info.json` 保存配置和运行信息，`summary.json` 保存汇总，`raw_data/` 保存详细 CSV 与预测，差图按错误类别保存。

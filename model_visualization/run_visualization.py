@@ -9,11 +9,11 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from vtools_runtime.module_selection import resolve_module_selection
 from model_visualization.adapters.ultralytics import UltralyticsAdapter
 from model_visualization.core.capture import ActivationCapture, compute_cam, render_features
 from model_visualization.core.common import (
@@ -55,29 +55,10 @@ def _set_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None
         raise ValueError("modules 必须是 module_id: true/false 的对象")
     if not isinstance(configured_value, Mapping):
         raise ValueError("配置必须包含 modules: module_id: true/false")
-    unknown_config = set(map(str, configured_value)) - module_ids
-    if unknown_config:
-        raise ValueError(f"未知可视化模块：{', '.join(sorted(unknown_config))}")
-    states = {key: bool(configured_value.get(key, False)) for key in module_ids}
-    only = {item.strip() for value in args.only or [] for item in str(value).split(",") if item.strip()}
-    enable = {item.strip() for value in args.enable or [] for item in str(value).split(",") if item.strip()}
-    disable = {item.strip() for value in args.disable or [] for item in str(value).split(",") if item.strip()}
-    if args.only is not None and (enable or disable):
-        raise ValueError("--only 不能与 --enable/--disable 同时使用")
-    unknown = (only | enable | disable) - module_ids
-    if unknown:
-        raise ValueError(f"未知可视化模块：{', '.join(sorted(unknown))}")
-    # argparse uses None when --only is absent; --only '' intentionally selects none.
-    if args.only is not None:
-        states = {key: key in only for key in module_ids}
-    else:
-        overlap = enable & disable
-        if overlap:
-            raise ValueError(f"模块同时启用和禁用：{', '.join(sorted(overlap))}")
-        for key in enable:
-            states[key] = True
-        for key in disable:
-            states[key] = False
+    states = resolve_module_selection(
+        {key: False for key in module_ids}, config,
+        only=args.only, enable=args.enable, disable=args.disable, label='可视化',
+    )
     config["modules"] = states
     if args.mode:
         config["mode"] = args.mode
@@ -253,10 +234,10 @@ def run(config: dict[str, Any], run_dir: Path) -> int:
     adapter = UltralyticsAdapter(config)
     # Always archive the effective module names alongside visual outputs; this
     # makes a run reproducible even when the user did not first run list_layers.
-    write_csv(run_dir / "layers.csv", adapter.list_layers())
     if mode == "list_layers":
         _run_list_layers(adapter, config, run_dir)
         return 0
+    write_csv(run_dir / "layers.csv", adapter.list_layers())
     input_values = config.get("input") if isinstance(config.get("input"), Mapping) else {}
     source_root = Path(str(input_values.get("source"))).expanduser().resolve()
     images = list_images(str(source_root), input_values.get("max_images"))

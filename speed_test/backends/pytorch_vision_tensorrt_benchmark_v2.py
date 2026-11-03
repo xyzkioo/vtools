@@ -30,15 +30,13 @@ import csv
 import gc
 import platform
 import sys
-import time
 from pathlib import Path
 from typing import Any, Optional
 
-import numpy as np
 import torch
 
 if __package__ in {None, ""}:
-    _PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    _PROJECT_ROOT = Path(__file__).resolve().parents[2]
     if str(_PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -46,13 +44,10 @@ from core.vision_benchmark_common import (
     BenchmarkConfig,
     InputBundle,
     ModelSpec,
-    benchmark_forward,
-    benchmark_pipeline,
     cleanup_model,
     create_adapter,
     dtype_for_precision,
     flatten_tensors,
-    load_image_or_source,
     normalize_precision,
     resolve_device,
     statistics,
@@ -63,7 +58,7 @@ from core.vision_checkpoint_inspector import inspect_entries
 from core.vision_run_manager import prepare_run_directory, resolve_cli_path
 from backends.tensorrt_engine_builder import build_engine_from_onnx
 from core.build_metadata import collect_build_metadata, compare_build_request, read_build_metadata, write_build_metadata
-from core.module_selection import SPEED_MODULES, resolve_speed_modules
+from core.module_selection import resolve_speed_modules
 
 
 def parse_input_size(value: str) -> tuple[int, int]:
@@ -104,9 +99,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--precision", default=None, choices=["fp32", "fp16", "bf16"])
     parser.add_argument("--warmup", type=int, default=None)
     parser.add_argument("--repeats", type=int, default=None)
-    parser.add_argument("--source", help="可选图片/视频/目录；只用于 PyTorch adapter pipeline")
-    parser.add_argument("--skip-pytorch", action="store_true")
-    parser.add_argument("--skip-pipeline", action="store_true")
     parser.add_argument("--fuse", action="store_true", default=None)
     parser.add_argument("--engine-dir", type=Path, default=None)
     parser.add_argument("--onnx-dir", type=Path, default=None)
@@ -405,9 +397,20 @@ def make_row(
 
 def main() -> list[dict[str, Any]]:
     args = build_parser().parse_args()
+    owned_modules = (
+        'checkpoint.inspect', 'checkpoint.load_check', 'model.parameters', 'model.flops',
+        'speed.tensorrt_call', 'export.onnx', 'build.tensorrt',
+    )
     if args.list_modules:
-        print("\n".join(SPEED_MODULES))
+        print("\n".join(owned_modules))
         return []
+    explicit = {
+        item.strip() for value in (args.only or []) + (args.enable or [])
+        for item in value.split(',') if item.strip()
+    }
+    foreign = sorted(explicit - set(owned_modules))
+    if foreign:
+        raise ValueError(f'TensorRT 入口不执行以下模块：{", ".join(foreign)}；请使用对应后端或 run_all.py。')
     config_file = load_config(args.config)
     run_dir = prepare_run_directory(config_file, args.run_dir)
     apply_python_paths(config_file, args.model)
@@ -423,8 +426,8 @@ def main() -> list[dict[str, Any]]:
     # there instead of silently reporting a TensorRT-stage placeholder.
     has_model_info = any(modules.get(key) for key in ("model.parameters", "model.flops"))
     has_checkpoint_check = any(modules.get(key) for key in ("checkpoint.inspect", "checkpoint.load_check"))
-    if not any(modules.get(key) for key in ("speed.tensorrt_call", "speed.pytorch_call", "build.tensorrt", "export.onnx")) and not has_model_info and not has_checkpoint_check:
-        raise ValueError("至少启用一个 TensorRT/PyTorch 测速、模型信息、权重检查或导出模块")
+    if not any(modules.get(key) for key in ("speed.tensorrt_call", "build.tensorrt", "export.onnx")) and not has_model_info and not has_checkpoint_check:
+        raise ValueError("至少启用一个 TensorRT 测速、模型信息、权重检查或导出模块")
 
     args.device = args.device or benchmark_values.get("device", "auto")
     args.input_size = args.input_size or benchmark_values.get("input_size", "832")
@@ -467,10 +470,9 @@ def main() -> list[dict[str, Any]]:
         adapter_override=args.adapter,
         task_override=args.task,
     )
-    if args.source is None:
-        args.source = benchmark_values.get("image", benchmark_values.get("source"))
 
-    if modules.get("checkpoint.inspect") or modules.get("checkpoint.load_check"):
+    inspection_rows: list[dict[str, Any]] = []
+    if has_checkpoint_check:
         inspection_results = inspect_entries(
             model_entries,
             benchmark_values,
@@ -483,11 +485,14 @@ def main() -> list[dict[str, Any]]:
             if item.architecture_status in {"missing", "unknown"}
             or item.adapter_load_status == "failed"
         ]
-        inspection_rows = []
         for item in inspection_results:
             failed = item in inspection_failures
             inspection_rows.append({"model": item.name, "status": "failed" if failed else "succeeded", "error": item.raw_error or item.adapter_error, "architecture_status": item.architecture_status, "adapter_load_status": item.adapter_load_status})
-        if has_checkpoint_check and not any(modules.get(key) for key in ("speed.tensorrt_call", "speed.pytorch_call", "build.tensorrt", "export.onnx")) and not has_model_info:
+        if inspection_failures and benchmark_values.get('fail_on_checkpoint_inspection', False):
+            save_rows(args.output, inspection_rows)
+            print(f'权重检查失败，已停止；结果已保存：{args.output.resolve()}')
+            return inspection_rows
+        if has_checkpoint_check and not any(modules.get(key) for key in ("speed.tensorrt_call", "build.tensorrt", "export.onnx")) and not has_model_info:
             save_rows(args.output, inspection_rows)
             print(f"权重检查完成；结果已保存：{args.output.resolve()}")
             return inspection_rows
@@ -504,7 +509,6 @@ def main() -> list[dict[str, Any]]:
     if precision == "bf16":
         # TensorRT 不同版本的 BF16 支持差异较大，但仍保留统一入口。
         print("[提示] BF16 engine 需要当前 TensorRT Python API 和 GPU 同时支持。")
-    source = load_image_or_source(args.source) if args.source else None
     args.engine_dir.mkdir(parents=True, exist_ok=True)
     args.onnx_dir.mkdir(parents=True, exist_ok=True)
 
@@ -534,7 +538,7 @@ def main() -> list[dict[str, Any]]:
     print(f"adapters：{adapters} | precision：{precision} | builder：{args.builder}")
     print("=" * 92)
 
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = [row for row in inspection_rows if row['status'] == 'failed']
     for model_entry in model_entries:
         spec = ModelSpec(str(model_entry["name"]), Path(str(model_entry["weights"])))
         adapter = create_adapter(
@@ -557,39 +561,8 @@ def main() -> list[dict[str, Any]]:
             dtype = dtype_for_precision(precision, device)
             inputs = adapter.make_inputs(args.batch, (height, width), device, dtype, for_export=True)
 
-            run_pytorch = modules.get("speed.pytorch_call", False) and not args.skip_pytorch
-            run_pipeline = modules.get("speed.pytorch_pipeline", False) and not args.skip_pipeline
-            if run_pytorch:
-                forward = benchmark_forward(adapter, model, config)
-                rows.append(
-                    make_row(
-                        spec,
-                        adapter.adapter_name,
-                        config,
-                        "pytorch",
-                        "model_call",
-                        "input already on device; no preprocessing/postprocessing",
-                        forward,
-                    )
-                )
-                if run_pipeline and (source is not None or not adapter.supports_real_predict):
-                    pipeline = benchmark_pipeline(adapter, model, config, source)
-                    rows.append(
-                        make_row(
-                            spec,
-                            adapter.adapter_name,
-                            config,
-                            "pytorch",
-                            "adapter_pipeline",
-                            "adapter.predict boundary; exact preprocessing depends on adapter",
-                            pipeline,
-                        )
-                    )
-
             if not modules.get("speed.tensorrt_call") and not modules.get("build.tensorrt") and not modules.get("export.onnx"):
-                # TensorRT 关闭时，PyTorch 独立模块可以在没有 TensorRT
-                # 环境的机器上完成；不要为了准备 engine 而导入/构建它。
-                if has_model_info and not modules.get("speed.pytorch_call") and not modules.get("speed.pytorch_pipeline"):
+                if has_model_info:
                     rows.append(make_row(
                         spec,
                         adapter.adapter_name,

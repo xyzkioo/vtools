@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 import copy
 import math
-import os
 import shutil
 import statistics
 import time
@@ -96,84 +95,70 @@ def _resolved_dataset_root(data_path: Path, raw_root: Any) -> Path:
 
 
 def _link_or_copy(source: Path, target: Path) -> None:
-    """Mirror a dataset directory into a run directory without editing input."""
+    """Copy a dataset into the run directory so upstream repairs cannot edit input."""
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
         target.mkdir(parents=True, exist_ok=True)
         for child in source.iterdir():
-            # Existing Ultralytics caches must not be hardlinked into a run:
-            # rebuilding them could otherwise truncate a user's cache inode.
+            # Native dataset scans rebuild these files in the run directory.
             if child.is_file() and child.suffix.lower() in {'.cache', '.npy'}:
                 continue
             _link_or_copy(child, target / child.name)
         return
-    try:
-        # Hardlinks keep the mirror cheap while preserving the shadow path;
-        # Ultralytics then writes its cache beside the hardlinked labels.
-        os.link(source, target)
-    except OSError:
-        shutil.copy2(source, target)
+    shutil.copy2(source, target)
 
 
-def _isolated_validation_data(data_path: Path, run_dir: Path, split: str) -> Path:
-    """Point standard YOLO validation paths at run-local label-cache locations.
-
-    Ultralytics stores ``labels.cache`` beside the first label directory. A
-    run-local mirror keeps that generated file out of the user's dataset while
-    retaining the original bytes through hardlinks (or a safe copy fallback).
-    Non-standard layouts are left untouched because their label mapping cannot
-    be inferred safely here.
-    """
+def _isolated_dataset_data(data_path: Path, run_dir: Path, splits: tuple[str, ...]) -> Path:
+    """Mirror standard YOLO image/label splits before native training or validation."""
 
     try:
         import yaml
-    except ImportError:
-        return data_path
-    try:
-        raw = yaml.safe_load(data_path.read_text(encoding="utf-8")) or {}
-    except (OSError, ValueError, yaml.YAMLError):
-        return data_path
+    except ImportError as exc:
+        raise RuntimeError('隔离检测数据集需要 PyYAML。') from exc
+    raw = yaml.safe_load(data_path.read_text(encoding='utf-8'))
     if not isinstance(raw, dict):
-        return data_path
-    source = raw.get(split)
-    if not isinstance(source, str) or not source.strip() or any(char in source for char in "[]"):
-        return data_path
+        raise ValueError(f'检测数据集 YAML 必须是对象：{data_path}')
     dataset_root = _resolved_dataset_root(data_path, raw.get("path"))
-    source_path = Path(source).expanduser()
-    source_path = (source_path if source_path.is_absolute() else dataset_root / source_path).resolve()
-    if not source_path.is_dir():
-        return data_path
-    try:
-        relative_source = source_path.relative_to(dataset_root)
-    except ValueError:
-        return data_path
-    relative_parts = relative_source.parts
-    if not relative_parts:
-        return data_path
-    if relative_parts[0].lower() == "images":
-        suffix = Path(*relative_parts[1:])
-        original_labels = dataset_root / "labels" / suffix
-    elif relative_parts[-1].lower() == "images":
-        suffix = Path(*relative_parts[:-1])
-        original_labels = source_path.parent / "labels"
-    else:
-        return data_path
-    if not original_labels.is_dir():
-        return data_path
     mirror_root = run_dir / "_input" / "dataset"
-    mirror_images = mirror_root / "images" / suffix
-    mirror_labels = mirror_root / "labels" / suffix
-    if not mirror_images.exists():
-        _link_or_copy(source_path, mirror_images)
-    if not mirror_labels.exists():
-        _link_or_copy(original_labels, mirror_labels)
+    for split in splits:
+        source = raw.get(split)
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError(f'检测数据集必须指定 {split} 图片目录。')
+        source_path = Path(source).expanduser()
+        source_path = (source_path if source_path.is_absolute() else dataset_root / source_path).resolve()
+        if not source_path.is_dir():
+            raise ValueError(f'检测数据集 {split} 必须是现有图片目录：{source_path}')
+        try:
+            relative_parts = source_path.relative_to(dataset_root).parts
+        except ValueError as exc:
+            raise ValueError(f'检测数据集 {split} 必须位于 data.yaml 的 path 目录内：{source_path}') from exc
+        if relative_parts and relative_parts[0].lower() == 'images':
+            suffix = Path(*relative_parts[1:])
+            original_labels = dataset_root / 'labels' / suffix
+        elif relative_parts and relative_parts[-1].lower() == 'images':
+            suffix = Path(*relative_parts[:-1])
+            original_labels = source_path.parent / 'labels'
+        else:
+            raise ValueError(f'检测数据集 {split} 仅支持标准 images/labels 目录布局：{source_path}')
+        if not original_labels.is_dir():
+            raise FileNotFoundError(f'检测数据集 {split} 找不到对应标签目录：{original_labels}')
+        mirror_images = mirror_root / 'images' / suffix
+        mirror_labels = mirror_root / 'labels' / suffix
+        if not mirror_images.exists():
+            _link_or_copy(source_path, mirror_images)
+        if not mirror_labels.exists():
+            _link_or_copy(original_labels, mirror_labels)
+        raw[split] = str(Path('images') / suffix)
     raw["path"] = str(mirror_root)
-    raw[split] = str(Path("images") / suffix)
     isolated = run_dir / "_input" / "data.yaml"
     isolated.parent.mkdir(parents=True, exist_ok=True)
     isolated.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return isolated
+
+
+def _isolated_validation_data(data_path: Path, run_dir: Path, split: str) -> Path:
+    return _isolated_dataset_data(data_path, run_dir, (split,))
 
 
 def detection_data(config: Mapping[str, Any]) -> Path | None:
@@ -590,8 +575,11 @@ def run_detection_operation(module_id, config, state, run_dir, run_id):
                 '未知结构化剪枝方法：'
                 f'{structured_method}；可选 scale 或 torch_pruning。'
             )
+        finetune_data = (stage('隔离微调数据',
+            lambda: _isolated_dataset_data(data, run_dir, ('train', 'val')))
+            if int(structured_section.get('finetune_epochs', 80)) > 0 else data)
         detector, finetune = stage('微调',
-            lambda: finetune_structured_detector(detector, config, data, structured_dir))
+            lambda: finetune_structured_detector(detector, config, finetune_data, structured_dir))
         metadata.update(structured)
         metadata.update(finetune)
         target = _unique_target(structured_dir / 'yolo-structured.pt')
