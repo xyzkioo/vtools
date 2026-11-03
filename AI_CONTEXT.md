@@ -2,6 +2,31 @@
 
 最后修改：2026-11-03
 
+## 本轮更新（2026-11-03）：v0.4.9 正式 Release
+
+- [v0.4.9 Release](https://github.com/xyzkioo/vtools/releases/tag/v0.4.9) 已正式发布并标记为 Latest，非草稿、非预发布；GitHub `releases/latest` 已返回 v0.4.9。附件为 `vtools_0.4.9_amd64.deb` 与 `.deb.sha256`，上传后逐项核对大小和 GitHub SHA-256 摘要，再由草稿转为正式版。
+- 发布标签 `v0.4.9` 指向源码提交 `6a643cca359c103ea0b7518fa821c4e40dde66c6`，包含 v0.4.8 审查修复及后续标签解码提示。安装包为 amd64、252,338,232 字节，SHA-256 为 `4820c85d7473ce9d58c0f0e8093d1d524024c9ff7fbabb3a1f47223c83646767`。详情见 `docs/releases/v0.4.9.md`；二进制产物仍由 Git 忽略，仅作为 Release 附件交付。
+- Python、前端 package.json/package-lock.json 与 VERSION.md 已同步至 0.4.9，按前端、PyInstaller 目录包、Debian 包的顺序重新构建。目录包 `--help` 返回 0，内置运行时确认版本 0.4.9 与二进制标签的具体路径提示；Debian 解压流可完整读取，包内诊断引擎、共享模块、前端入口与源码逐字节一致。语法、差异空白、发布文档链接和本地校验文件检查通过。
+- 本轮沿用业务修复提交前的 232 项回归结果（231 通过、1 项按环境条件跳过）；版本和打包调整未改业务逻辑。未重新安装本机桌面包，已安装版本仍是 0.4.8；未执行真实训练、GPU/TensorRT、K230 端到端或桌面自动更新交互。
+- 用户已将规则限定为默认分支，管理员仅在 PR 合并时可绕过审批；PR #4 已于本日合并，#2、#3 已关闭。此次版本与交接同步使用 [发布 PR #5](https://github.com/xyzkioo/vtools/pull/5)。下方 PR 状态为各记录写入时的历史。
+- 现有 GitHub 连接器不支持创建 Release 和上传二进制附件，因此通过官方 GitHub CLI 的设备授权登录 `xyzkioo` 完成发布。CLI 已安装到 `~/.local/bin/gh`，Git 登录辅助程序指向该持久路径；不在仓库中记录密码或令牌。
+
+### 本轮文件索引
+
+- `VERSION.md`、`vtools_ui/__init__.py`、前端 `package.json` / `package-lock.json`：0.4.9 版本同步。
+- `docs/releases/v0.4.9.md`、`docs/README.md`、`packaging/README.md`：发行说明、校验值与构建边界。
+- `dist/vtools_0.4.9_amd64.deb`、`dist/vtools_0.4.9_amd64.deb.sha256`：本地发布产物，不纳入源码提交。
+
+---
+
+## 本轮更新（2026-11-03）：统一 PR 评审入口
+
+- [PR #4](https://github.com/xyzkioo/vtools/pull/4) 已改为以 `main` 为目标，包含完整修复、测试、版本与前端资源、审查文档和交接记录，共 2 个提交、49 个文件。已确认其包含先前审查文档 PR #2 和修复 PR #3 的内容，并关闭 #2、#3，统一审核 #4。
+- 仓库规则同时保护修复分支和交接分支，要求 PR 及至少 1 名有写权限的审阅者批准，导致追加交接文档的提交也被阻止。PR 作者为 `xyzkioo`，作者不能自行批准自己的 PR。后续应由协作者审核，或由仓库所有者明确调整适合个人维护的审批规则；不通过继续创建 PR 追加状态文档。
+- 本节是 PR 整理后的本地状态补记，尚未推送；待规则允许更新现有 PR 分支后追加到 PR #4。下方 PR #3 的状态是整理前历史。
+
+---
+
 ## 本轮更新（2026-11-03）：修复提交与诊断输入排查
 
 - 修复已通过 GitHub 连接器推送到 `fix/review-fixes-0.4.8`，代码提交为 `9ce9db3bea2a2d38725963737d2a42f332b31c1a`，并创建 [PR #3](https://github.com/xyzkioo/vtools/pull/3)，状态为 open、非草稿，尚未合并。`main` 保护规则要求通过 PR；命令行 Git 没有 HTTPS 凭据。远端修复目录树 `06f6f678da07fa0019fa56e38397f0f45697d6f4` 与本地已验证代码提交完全一致。
