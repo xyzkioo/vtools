@@ -93,10 +93,10 @@ TensorRT CSV 使用的速度字段与 PyTorch 基本相同，另外记录 ONNX�
 | 列 | 含义 | 如何解读 |
 | --- | --- | --- |
 | `model`、`weights`、`adapter` | 模型身份和加载方式 | 与 PyTorch 行核对，确认两边来自同一权重/adapter。 |
-| `backend` | `pytorch` 或 `tensorrt` | TensorRT CSV 可能同时写入用于参考的 PyTorch 行和 TensorRT 行。比较 engine 时筛选 `backend=tensorrt`。 |
-| `precision` | engine/参考模型精度 | 例如 `fp16`；不要把 FP16 TensorRT 和 FP32 PyTorch 当作同一条件。 |
+| `backend` | TensorRT 计时行的后端 | 正常计时行为 `tensorrt`；检查失败行可能留空。PyTorch 计时由独立后端保存。 |
+| `precision` | engine 精度 | 例如 `fp16`；不要把 FP16 TensorRT 和 FP32 PyTorch 当作同一条件。 |
 | `height`、`width`、`batch` | engine 输入形状 | engine 通常绑定这些形状；形状不一致不能直接比较。 |
-| `params` | PyTorch 参考模型参数量 | TensorRT `engine_call` 行通常为空，因为 engine 不是 `nn.Module`。 |
+| `params` | 从原模型读取的参数量 | TensorRT `engine_call` 行通常为空，因为 engine 不是 `nn.Module`。 |
 | `scope`、`scope_note` | 计时边界 | TensorRT 正常速度行通常为 `engine_call`。 |
 | `mean_ms`、`median_ms`、`p90_ms`、`min_ms`、`max_ms`、`std_ms` | engine 调用延迟统计 | 含义与 PyTorch 相同。 |
 | `fps_per_sample` | 按中位 engine 延迟换算的吞吐 | 公式同上；只是 engine 内部吞吐，不自动等于端到端应用 FPS。 |
@@ -133,7 +133,7 @@ TensorRT CSV 使用的速度字段与 PyTorch 基本相同，另外记录 ONNX�
 
 | 列 | 含义 |
 | --- | --- |
-| `record_type` | 该行是测量还是阶段摘要。先按此列筛选再分析。 |
+| `record_type` | 该行是后端明细还是阶段摘要；后端明细也可能是失败的 checkpoint 检查。先按此列筛选再分析。 |
 | `backend` | `pytorch`、`tensorrt` 或 `consistency` 等阶段名称。 |
 | `status` | 测量行或阶段的状态。 |
 | `error` | 错误或跳过原因；空值表示没有记录错误。 |
@@ -150,9 +150,8 @@ TensorRT CSV 使用的速度字段与 PyTorch 基本相同，另外记录 ONNX�
 | `inconclusive` | 输入没有足够证据得出通过/失败，例如双方都没有检测框。 |
 | `error` | 一致性或加载阶段出现未处理的运行错误。 |
 
-`run_all.py` 为了把各阶段结果写入汇总，进程可能仍以退出码 0 结束；是否成功
-应以 `vision_benchmark_summary.csv` 的 `status` 和 `error` 为准，而不是只看
-退出码。
+`run_all.py` 遇到失败阶段返回非零退出码；详细失败原因以
+`vision_benchmark_summary.csv` 的 `status` 和 `error` 为准。
 
 ## 5. 一致性 CSV：`consistency.csv`
 

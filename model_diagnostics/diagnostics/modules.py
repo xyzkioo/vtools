@@ -13,20 +13,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from vtools_runtime.module_selection import resolve_module_selection
+
 
 MODULE_DEFAULTS: dict[str, bool] = {
-    "checkpoint.inspect": False,
-    "checkpoint.load_check": False,
-    "model.parameters": False,
-    "model.flops": False,
-    "speed.pytorch_call": True,
-    "speed.pytorch_pipeline": False,
-    "speed.tensorrt_call": True,
-    "memory.pytorch_peak": False,
-    "export.onnx": False,
-    "build.tensorrt": False,
-    "consistency.tensor": True,
-    "consistency.detection": False,
     "predict.generate": False,
     "validation.ultralytics": False,
     "diagnostics.missed": True,
@@ -42,9 +32,6 @@ MODULE_DEFAULTS: dict[str, bool] = {
     "output.bad_cases": True,
     "output.images": False,
     "output.html": False,
-    "visualization.features": False,
-    "visualization.cam": False,
-    "visualization.stage_trace": False,
 }
 
 
@@ -67,13 +54,6 @@ def run(module_id: str, context: Any, options: Mapping[str, Any] | None = None) 
     raise ValueError(f"模块 {module_id} 没有独立 runner")
 
 
-def _split_values(values: Iterable[str] | None) -> list[str]:
-    result: list[str] = []
-    for value in values or ():
-        result.extend(item.strip() for item in str(value).split(",") if item.strip())
-    return result
-
-
 def resolve_modules(
     config: Mapping[str, Any],
     *,
@@ -82,36 +62,10 @@ def resolve_modules(
     disable: Iterable[str] | None = None,
 ) -> dict[str, bool]:
     """合并 YAML 与命令行模块选择，并校验冲突和未知 ID。"""
-    values = dict(MODULE_DEFAULTS)
-    configured = config.get("modules")
-    if configured is not None:
-        if not isinstance(configured, Mapping):
-            raise ValueError("modules 必须是 module_id: true/false 的对象")
-        unknown = sorted(set(str(key) for key in configured) - set(values))
-        if unknown:
-            raise ValueError(f"未知模块：{', '.join(unknown)}；请使用 --list-modules 查看可用模块")
-        # Once a new-style modules section is present, omitted IDs are off.
-        # This keeps a partial config from silently enabling extra work.
-        values = {key: False for key in values}
-        values.update({str(key): bool(value) for key, value in configured.items()})
-    only_values = _split_values(only)
-    enable_values = _split_values(enable)
-    disable_values = _split_values(disable)
-    if only is not None and (enable_values or disable_values):
-        raise ValueError("--only 不能与 --enable/--disable 同时使用")
-    requested = set(only_values) | set(enable_values) | set(disable_values)
-    unknown = sorted(requested - set(values))
-    if unknown:
-        raise ValueError(f"未知模块：{', '.join(unknown)}；请使用 --list-modules 查看可用模块")
-    # None means no override; an explicitly empty --only turns every module off.
-    if only is not None:
-        values = {key: key in set(only_values) for key in values}
-    else:
-        values.update({key: True for key in enable_values})
-        values.update({key: False for key in disable_values})
-    overlap = set(enable_values) & set(disable_values)
-    if overlap:
-        raise ValueError(f"模块同时启用和禁用：{', '.join(sorted(overlap))}")
+    values = resolve_module_selection(
+        MODULE_DEFAULTS, config, only=only, enable=enable, disable=disable,
+        unknown_hint='；请使用 --list-modules 查看可用模块',
+    )
     if values.get("output.images") and not any(values.get(key) for key in values if key.startswith("diagnostics.")):
         raise ValueError("output.images 需要至少启用一个 diagnostics.* 模块")
     if values.get("output.images") and not values.get("output.bad_cases"):

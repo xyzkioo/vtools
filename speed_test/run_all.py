@@ -139,33 +139,47 @@ def main() -> int:
     stage_status: list[dict[str, str]] = []
     current_rows: list[dict[str, Any]] = []
     tensorrt_failed = False
+    checkpoint_stopped = False
     module_args: list[str] = []
-    for flag in ("only", "enable", "disable"):
-        for value in getattr(args, flag) or []:
-            module_args.extend([f"--{flag}", value])
     for value in args.model or []:
         module_args.extend(["--model", value])
-    if args.source:
-        module_args.extend(["--source", str(args.source)])
     for flag in ("device", "adapter", "task"):
         value = getattr(args, flag)
         if value:
             module_args.extend([f"--{flag}", str(value)])
 
     if run_pytorch_stage:
-        state, rows = _invoke("pytorch", "backends.pytorch_vision_speed_benchmark_v2", config_path, run_dir, module_args)
+        pytorch_module_args = list(module_args)
+        pytorch_module_args.extend(['--only', ','.join(
+            key for key in (
+                'checkpoint.inspect', 'checkpoint.load_check', 'model.parameters', 'model.flops',
+                'speed.pytorch_call', 'speed.pytorch_pipeline', 'memory.pytorch_peak',
+            ) if selected_modules.get(key)
+        )])
+        if args.source:
+            pytorch_module_args.extend(["--source", str(args.source)])
+        state, rows = _invoke("pytorch", "backends.pytorch_vision_speed_benchmark_v2", config_path, run_dir, pytorch_module_args)
         stage_status.append(state)
         current_rows.extend(rows)
+        checkpoint_stopped = bool(config.get('benchmark', {}).get('fail_on_checkpoint_inspection')) and any(
+            row.get('status') == 'failed' and 'architecture_status' in row for row in rows
+        )
     else:
         print("[跳过] 本次模块选择不需要 PyTorch 阶段")
 
-    if run_tensorrt_stage:
+    if checkpoint_stopped:
+        reason = '权重检查失败，已停止后续阶段'
+        if run_tensorrt_stage:
+            stage_status.append({'backend': 'tensorrt', 'status': 'skipped', 'error': reason})
+        if any(selected_modules.get(key) for key in ('consistency.tensor', 'consistency.detection')):
+            stage_status.append({'backend': 'consistency', 'status': 'skipped', 'error': reason})
+        print(f'[跳过] {reason}')
+    elif run_tensorrt_stage:
         trt_module_args = list(module_args)
-        if not (args.only or args.enable or args.disable) and run_pytorch_stage:
-            # PyTorch stage already owns these modules in a one-click run.
-            # Pass explicit disables to TensorRT so each module runs once.
-            trt_module_args.extend(["--disable", "speed.pytorch_call"])
-            trt_module_args.extend(["--disable", "speed.pytorch_pipeline"])
+        trt_module_args.extend(['--only', ','.join(
+            key for key in ('speed.tensorrt_call', 'export.onnx', 'build.tensorrt')
+            if selected_modules.get(key)
+        )])
         state, rows = _invoke("tensorrt", "backends.pytorch_vision_tensorrt_benchmark_v2", config_path, run_dir, trt_module_args)
         stage_status.append(state)
         current_rows.extend(rows)
@@ -176,16 +190,23 @@ def main() -> int:
     run_consistency_stage = any(
         selected_modules.get(key) for key in ("consistency.tensor", "consistency.detection")
     )
-    if run_consistency_stage:
+    if run_consistency_stage and not checkpoint_stopped:
         if tensorrt_failed:
             # 不在本次转换失败之后悄悄验证磁盘里遗留的旧 engine。
             reason = "本次 TensorRT 阶段失败，一致性未执行；修复后重跑，或单独检查指定的已有 engine"
             stage_status.append({"backend": "consistency", "status": "skipped", "error": reason})
             print(f"[跳过] {reason}")
         else:
-            state, _ = _invoke("consistency", "checks.vision_consistency", config_path, run_dir, module_args)
+            consistency_args = list(module_args)
+            consistency_args.extend(['--only', ','.join(
+                key for key in ('consistency.tensor', 'consistency.detection')
+                if selected_modules.get(key)
+            )])
+            if args.source:
+                consistency_args.extend(["--source", str(args.source)])
+            state, _ = _invoke("consistency", "checks.vision_consistency", config_path, run_dir, consistency_args)
             stage_status.append(state)
-    else:
+    elif not checkpoint_stopped:
         print("[跳过] 本次模块选择不需要一致性检查")
 
     summary = Path(

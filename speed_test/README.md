@@ -215,6 +215,7 @@ run:
 `modules.checkpoint.load_check` 控制。前者报告文件是完整模型对象、包含
 `model/ema` 的训练 checkpoint，还是只有 `state_dict`；后者会用当前 adapter
 在 CPU 上尝试加载一次，以便尽早发现自定义模块或权重不匹配问题。
+旧的 `benchmark.inspect_checkpoint`、`benchmark.verify_model_load` 字段已移除，配置中继续使用会报错。
 检查失败是否终止仍由 `benchmark` 中的选项控制：
 
 ```yaml
@@ -223,7 +224,7 @@ benchmark:
 ```
 
 `fail_on_checkpoint_inspection: true` 会在检查失败时立即停止；默认 `false`
-会先打印诊断信息，再让测速阶段继续执行。
+会先打印诊断信息，再让测速阶段继续执行。两种设置都会把失败检查行写入本次结果；一键入口的后续阶段在立即停止时标记为跳过。
 
 ## 2. adapter 怎么选
 
@@ -298,8 +299,7 @@ def export_onnx(model, output_path, inputs, opset, dynamic=False): ...
 
 - `make_inputs` 负责纯模型调用和 ONNX 导出的输入；分类、分割、检测、多输入
   模型都可以在这里返回自己的输入结构。
-- `predict` 是可选的真实 pipeline 边界，只有配置了 `benchmark.image` 且
-  `modules.speed.pytorch_pipeline: true` 时才会执行。
+- `predict` 是可选的真实 pipeline 边界。启用 `modules.speed.pytorch_pipeline` 且 adapter 需要真实输入时，必须配置 `benchmark.image` 或传 `--source`；缺失输入会报错。
 - state_dict 不能直接被默认 `checkpoint` adapter 恢复，必须在
   `build_model` 中先实例化网络再 `load_state_dict`。
 - TensorRT 阶段需要模型能导出 ONNX；复杂输出或多输入模型建议自行实现
@@ -528,7 +528,7 @@ def validation_outputs(outputs, output_names):
 - `modules` 是测试功能的唯一开关。`run_all.py` 会让 PyTorch 模块和 TensorRT 模块各自
   只执行一次；正确性检查仍会各做必要的推理，但不执行测速的 30 次预热/100 次计时循环。
 - 速度汇总只使用本次返回的明细，不在运行失败后拼入磁盘上的旧 CSV。
-  `record_type: measurement` 是测速记录，`stage_summary` 是阶段状态，不是一次测量。
+  `record_type: measurement` 是后端明细（包括失败的 checkpoint 检查），`stage_summary` 是阶段状态；只有带有效延迟和计时 `scope` 的行才是测速记录。
   TensorRT 明细中有失败时，阶段也会显示失败，并跳过本轮一致性检查。
 - 无 GPU 单元测试：`python -m unittest discover -s tests -v`。
   覆盖输出名称、形状/空值/非有限值、容差、检测框重排/漏框/类别变化和失败状态传播。

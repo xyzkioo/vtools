@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any, Iterable, Mapping
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
+from vtools_runtime.module_selection import resolve_module_selection
 
 
 SPEED_MODULES = {
@@ -21,41 +29,6 @@ SPEED_MODULES = {
 }
 
 
-def _split(values: Iterable[str] | None) -> list[str]:
-    result: list[str] = []
-    for value in values or ():
-        result.extend(item.strip() for item in str(value).split(",") if item.strip())
-    return result
-
-
 def resolve_speed_modules(config: Mapping[str, Any], *, only: Iterable[str] | None = None, enable: Iterable[str] | None = None, disable: Iterable[str] | None = None) -> dict[str, bool]:
-    modules = dict(SPEED_MODULES)
-    configured = config.get("modules")
-    if isinstance(configured, Mapping):
-        unknown = set(map(str, configured)) - set(modules)
-        if unknown:
-            raise ValueError(f"未知测速模块：{', '.join(sorted(unknown))}")
-        # A new-style modules section is an explicit allow-list.  Legacy
-        # configs without this section keep the compatibility defaults below.
-        modules = {key: False for key in modules}
-        modules.update({str(key): bool(value) for key, value in configured.items()})
-    elif configured is not None:
-        raise ValueError("modules 必须是 module_id: true/false 的对象")
-    only_values, enable_values, disable_values = _split(only), _split(enable), _split(disable)
-    if only is not None and (enable_values or disable_values):
-        raise ValueError("--only 不能与 --enable/--disable 同时使用")
-    requested = set(only_values + enable_values + disable_values)
-    unknown = requested - set(modules)
-    if unknown:
-        raise ValueError(f"未知测速模块：{', '.join(sorted(unknown))}")
-    overlap = set(enable_values) & set(disable_values)
-    if overlap:
-        raise ValueError(f"模块同时启用和禁用：{', '.join(sorted(overlap))}")
-    # Preserve an explicitly empty selection instead of restoring YAML defaults.
-    if only is not None:
-        selected = set(only_values)
-        modules = {key: key in selected for key in modules}
-    else:
-        modules.update({key: True for key in enable_values})
-        modules.update({key: False for key in disable_values})
-    return modules
+    return resolve_module_selection(SPEED_MODULES, config, only=only, enable=enable,
+                                    disable=disable, label='测速')

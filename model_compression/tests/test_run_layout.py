@@ -6,7 +6,7 @@ from pathlib import Path
 
 from model_compression.core.run_manager import prepare_run_directory, write_json
 from model_compression.core.model_runtime import resolve_device, save_model
-from model_compression.core.detection import _isolated_validation_data
+from model_compression.core.detection import _isolated_dataset_data, _isolated_validation_data
 from model_compression.run_model_compression import _RunState, _build_summary
 
 
@@ -55,6 +55,29 @@ class RunLayoutTests(unittest.TestCase):
             self.assertTrue((run_dir / "_input" / "dataset" / "images" / "val").exists())
             self.assertTrue((run_dir / "_input" / "dataset" / "labels" / "val").exists())
             self.assertFalse((labels.parent / "val.cache").exists())
+            mirrored = run_dir / "_input" / "dataset" / "images" / "val" / "a.jpg"
+            mirrored.write_bytes(b"repaired image")
+            self.assertEqual((images / "a.jpg").read_bytes(), b"image")
+
+    def test_training_mirror_copies_both_splits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for split in ("train", "val"):
+                images = root / "dataset" / "images" / split
+                labels = root / "dataset" / "labels" / split
+                images.mkdir(parents=True)
+                labels.mkdir(parents=True)
+                (images / "a.jpg").write_bytes(split.encode())
+                (labels / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+            data = root / "dataset" / "data.yaml"
+            data.write_text("path: .\ntrain: images/train\nval: images/val\nnames: [cat]\n", encoding="utf-8")
+            isolated = _isolated_dataset_data(data, root / "run1", ("train", "val"))
+            import yaml
+            copied = yaml.safe_load(isolated.read_text(encoding="utf-8"))
+            self.assertEqual((copied["train"], copied["val"]), ("images/train", "images/val"))
+            self.assertEqual((Path(copied["path"]) / "images" / "train" / "a.jpg").read_bytes(), b"train")
+            self.assertNotEqual((Path(copied["path"]) / "images" / "val" / "a.jpg").stat().st_ino,
+                                (root / "dataset" / "images" / "val" / "a.jpg").stat().st_ino)
 
     def test_explicit_run_directory_cannot_overwrite_old_run(self):
         with tempfile.TemporaryDirectory() as tmp:

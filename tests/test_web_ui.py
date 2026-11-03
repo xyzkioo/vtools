@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from enum import IntEnum
 from pathlib import Path
@@ -671,6 +674,32 @@ class WebWorkbenchTests(unittest.TestCase):
                     break
         self.assertEqual(manager.state()["status"], "stopped")
         self.assertNotEqual(manager.state()["exit_code"], 0)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux /proc")
+    def test_stop_kills_worker_after_parent_exits(self) -> None:
+        parent_code = (
+            "import subprocess,sys,time; "
+            "child=subprocess.Popen([sys.executable,'-c',"
+            "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)']); "
+            "print(child.pid, flush=True); time.sleep(30)"
+        )
+        process = subprocess.Popen([sys.executable, "-c", parent_code],
+                                   stdout=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            self.assertIsNotNone(process.stdout)
+            child_pid = int(process.stdout.readline().strip())
+            time.sleep(0.2)
+            TaskManager._terminate_process(process)
+            status = Path(f"/proc/{child_pid}/stat")
+            self.assertTrue(not status.exists() or status.read_text().split()[2] == "Z")
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
 
     def test_benchmark_execution_error_is_not_reported_as_warning(self) -> None:
         manager = TaskManager()

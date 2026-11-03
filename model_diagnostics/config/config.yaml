@@ -98,5 +98,3 @@ diagnostics:
     class_scope: all
   bad_cases:
     top_k: 50
-mode_b:
-  task: classify

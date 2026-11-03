@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
+from vtools_runtime.module_selection import resolve_module_selection
+
 
 COMPRESSION_MODULES: dict[str, bool] = {
     "model.parameters": True,
@@ -59,13 +61,6 @@ def standalone_detection_distillation(modules: Mapping[str, bool]) -> bool:
     return bool(modules.get('distillation.detection')) and all(not enabled or key in allowed for key, enabled in modules.items())
 
 
-def _split(values: Iterable[str] | None) -> list[str]:
-    result: list[str] = []
-    for value in values or ():
-        result.extend(item.strip() for item in str(value).split(",") if item.strip())
-    return result
-
-
 def resolve_compression_modules(
     config: Mapping[str, Any],
     *,
@@ -79,39 +74,8 @@ def resolve_compression_modules(
     与 speed_test/model_diagnostics 的行为保持一致。
     """
 
-    modules = dict(COMPRESSION_MODULES)
-    configured = config.get("modules")
-    if isinstance(configured, Mapping):
-        unknown = set(map(str, configured)) - set(modules)
-        if unknown:
-            raise ValueError(f"未知模型压缩模块：{', '.join(sorted(unknown))}")
-        modules = {key: False for key in modules}
-        modules.update({str(key): bool(value) for key, value in configured.items()})
-    elif configured is not None:
-        raise ValueError("modules 必须是 module_id: true/false 的对象")
-
-    only_values, enable_values, disable_values = (
-        _split(only),
-        _split(enable),
-        _split(disable),
-    )
-    if only is not None and (enable_values or disable_values):
-        raise ValueError("--only 不能与 --enable/--disable 同时使用")
-    requested = set(only_values + enable_values + disable_values)
-    unknown = requested - set(modules)
-    if unknown:
-        raise ValueError(f"未知模型压缩模块：{', '.join(sorted(unknown))}")
-    overlap = set(enable_values) & set(disable_values)
-    if overlap:
-        raise ValueError(f"模块同时启用和禁用：{', '.join(sorted(overlap))}")
-    # Preserve an explicitly empty selection instead of restoring YAML defaults.
-    if only is not None:
-        selected = set(only_values)
-        modules = {key: key in selected for key in modules}
-    else:
-        modules.update({key: True for key in enable_values})
-        modules.update({key: False for key in disable_values})
-    return modules
+    return resolve_module_selection(COMPRESSION_MODULES, config, only=only, enable=enable,
+                                    disable=disable, label='模型压缩')
 
 
 __all__ = ["COMPRESSION_MODULES", "COMPRESSION_MODES", "compression_mode_modules",

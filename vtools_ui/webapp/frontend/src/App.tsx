@@ -147,7 +147,7 @@ function configSectionId(toolId: string, path: string): string {
     if (has('evaluation.', 'modules.baseline.', 'modules.model.')) return 'baseline'
     if (has('export.', 'modules.comparison.', 'modules.artifact.')) return 'export'
   } else if (toolId === 'diagnostics') {
-    if (has('predictions_file.', 'mode_b.', 'modules.predict.', 'modules.validation.')) return 'prediction'
+    if (has('predictions_file.', 'modules.predict.', 'modules.validation.')) return 'prediction'
     if (has('diagnostics.overlap.', 'modules.diagnostics.overlap')) return 'overlap'
     if (has('diagnostics.', 'modules.diagnostics.')) return 'diagnostics'
     if (has('modules.output.')) return 'export'
@@ -158,7 +158,7 @@ function configSectionId(toolId: string, path: string): string {
     if (has('stage_trace.', 'modules.visualization.stage_trace')) return 'stage'
     if (has('detection.')) return 'inference'
   } else if (toolId === 'benchmark') {
-    if (has('modules.checkpoint.', 'benchmark.inspect_checkpoint', 'benchmark.verify_model_load', 'benchmark.fail_on_checkpoint_inspection')) return 'checkpoint'
+    if (has('modules.checkpoint.', 'benchmark.fail_on_checkpoint_inspection')) return 'checkpoint'
     if (has('pytorch.', 'modules.speed.pytorch_', 'modules.memory.', 'modules.model.')) return 'pytorch'
     if (has('tensorrt.', 'modules.speed.tensorrt_', 'modules.build.', 'modules.export.')) return 'tensorrt'
     if (has('consistency.', 'modules.consistency.')) return 'consistency'

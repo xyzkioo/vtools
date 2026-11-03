@@ -55,7 +55,7 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 
 输出目录中，`run_info.json` 保存实际配置和运行信息，`summary.json` 只保存整体指标、去重错误事件数量、错误图片数量和警告数量；详细 CSV 与预测文件统一放在 `raw_data/`。`bad_cases.csv` 只作为图片索引，保留图片 ID、原始路径、短图片路径、错误类型、错误数和渲染状态，不复制逐事件或逐图统计。图片按 `background/`、`classification/`、`duplicate/`、`localization/`、`missed/` 和 `mixed/` 分类，短图片名使用对应类型前缀，例如 `mixed_000001_<hash>.jpg`。含多种事件的图片只生成一张并放入 `mixed/`。
 
-数据集优先使用 Ultralytics `data.yaml`（`path`、`train`、`val`、`test`、`names`），程序会自动定位对应的 `labels/*.txt` 和图片；Ultralytics Platform 的 `.ndjson` 也可通过官方兼容转换读取。同时兼容 canonical JSON/JSONL、COCO GT/预测结果和旧式 YOLO 标签目录。统一检测格式为原图像素坐标 `[x1, y1, x2, y2]`、`score`、`class_id`。
+数据集优先使用 Ultralytics `data.yaml`（`path`、`train`、`val`、`test`、`names`），程序会自动定位对应的 `labels/*.txt` 和图片；YOLO 标签须为 UTF-8 文本，无法解码时会报出具体路径，需从原始标注重新导出。Ultralytics Platform 的 `.ndjson` 也可通过官方兼容转换读取。同时兼容 canonical JSON/JSONL、COCO GT/预测结果和旧式 YOLO 标签目录。统一检测格式为原图像素坐标 `[x1, y1, x2, y2]`、`score`、`class_id`。
 
 完整指标、数据格式、适配器钩子和确认方法见 [docs/README.md](docs/README.md)。
 
@@ -87,7 +87,7 @@ IoU≥0.5 的标注框对数。重复图片采用文件 SHA-256，只检测字�
 
 `config/config.yaml` 中的 `modules` 是诊断功能的唯一开关。常规 mAP、AP50
 和阈值曲线由 Ultralytics 原生 `val` 提供，诊断入口不会重复计算；只有显式打开
-`diagnostics.threshold_sweep` 等模块时才会执行对应分析。
+`diagnostics.threshold_sweep` 等模块时才会执行对应分析。测速、模型信息、一致性、导出和可视化模块属于各自工具，若填进诊断配置会报未知模块。
 
 ```yaml
 modules:

@@ -12,6 +12,18 @@ from model_visualization.run_visualization import _logical_image_id, _set_cli_ov
 
 
 class VisualizationOutput(unittest.TestCase):
+    def test_list_layers_writes_one_csv(self):
+        config = {"mode": "list_layers", "modules": {}, "model": {"adapter": "ultralytics"}}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("model_visualization.run_visualization.UltralyticsAdapter") as adapter, \
+             patch("model_visualization.run_visualization.write_csv") as write_csv:
+            adapter.return_value.list_layers.return_value = []
+            adapter.return_value.runtime_state = {}
+            adapter.return_value.head_name = None
+            self.assertEqual(run(config, Path(directory)), 0)
+            adapter.return_value.list_layers.assert_called_once()
+            write_csv.assert_called_once()
+
     def test_disabled_modules_do_not_load_weights_or_forward(self):
         config = {"mode": "visualize", "modules": {"visualization.features": False, "visualization.cam": False, "visualization.stage_trace": False}}
         with tempfile.TemporaryDirectory() as directory:

@@ -26,6 +26,8 @@ python speed_test/run_all.py --config speed_test/benchmark_config.yaml
 
 `model.parameters`、`model.flops` 用于模型规模统计。内置 adapter 支持 Ultralytics 和完整 Module checkpoint，自定义模型使用 adapter 模板。相对输入路径按 `project.root` 解析。
 
+需要真实图片的 `speed.pytorch_pipeline` 必须提供 `benchmark.image` 或 `--source`。checkpoint 检查由 `modules.checkpoint.inspect/load_check` 控制；失败行写入结果，`benchmark.fail_on_checkpoint_inspection: true` 会停止后续阶段。
+
 ## 输出
 
 默认输出 `speed_test/runs/runN/`，保存后端 CSV、汇总 CSV、`run_info.json` 和按需生成的 `consistency.csv/json`。一键入口共用一个 run；ONNX/engine 使用配置指定的公共缓存。指标见 [CSV 指南](../../speed_test/CSV_METRICS_GUIDE.md)。

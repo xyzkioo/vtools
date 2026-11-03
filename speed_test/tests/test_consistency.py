@@ -421,6 +421,30 @@ class WorkflowTests(unittest.TestCase):
                 run_all_main()
                 self.assertEqual(invoke.call_count, 1)
 
+    def test_strict_checkpoint_failure_stops_later_stages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = {
+                "_config_path": str(root / "config.yaml"),
+                "project": {"root": str(root)},
+                "run": {"enabled": True, "root": str(root / "runs")},
+                "run_all": {"summary_output": str(root / "summary.csv")},
+                "benchmark": {"fail_on_checkpoint_inspection": True},
+                "modules": {"checkpoint.inspect": True, "speed.tensorrt_call": True,
+                            "consistency.tensor": True},
+            }
+            failed = ({"backend": "pytorch", "status": "failed", "error": "checkpoint"},
+                      [{"model": "sample", "status": "failed", "architecture_status": "unknown"}])
+            with patch("run_all.load_config", return_value=config), patch("sys.argv", ["run_all.py"]), \
+                    patch("run_all._invoke", return_value=failed) as invoke:
+                self.assertEqual(run_all_main(), 2)
+            self.assertEqual(invoke.call_count, 1)
+            with (root / "summary.csv").open(encoding="utf-8-sig") as file:
+                rows = list(csv.DictReader(file))
+            self.assertEqual([row["backend"] for row in rows if row["record_type"] == "stage_summary"],
+                             ["pytorch", "tensorrt", "consistency"])
+            self.assertEqual(rows[0]["status"], "failed")
+
     def test_run_all_only_routes_pytorch_module_once(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -436,6 +460,23 @@ class WorkflowTests(unittest.TestCase):
                 run_all_main()
             self.assertEqual(invoke.call_count, 1)
             self.assertEqual(invoke.call_args.args[0], "pytorch")
+
+    def test_run_all_does_not_repeat_checkpoint_in_tensorrt_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = {
+                "_config_path": str(root / "config.yaml"),
+                "project": {"root": str(root)},
+                "run": {"enabled": True, "root": str(root / "runs")},
+                "run_all": {"summary_output": str(root / "summary.csv")},
+                "modules": {"checkpoint.inspect": True, "speed.tensorrt_call": True},
+            }
+            with patch("run_all.load_config", return_value=config), patch("sys.argv", ["run_all.py"]), \
+                    patch("run_all._invoke", return_value=({"status": "succeeded"}, [])) as invoke:
+                self.assertEqual(run_all_main(), 0)
+            self.assertEqual(invoke.call_count, 2)
+            self.assertEqual(invoke.call_args_list[0].args[-1][-1], "checkpoint.inspect")
+            self.assertEqual(invoke.call_args_list[1].args[-1][-1], "speed.tensorrt_call")
 
     def test_run_all_empty_only_does_not_start_default_backends(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -13,6 +13,9 @@ from typing import Any, Mapping, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RUN_CONFIG = PROJECT_ROOT / "config" / "config.yaml"
+REPOSITORY_ROOT = PROJECT_ROOT.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 
 def _read_run_config(path: Path) -> Mapping[str, Any]:

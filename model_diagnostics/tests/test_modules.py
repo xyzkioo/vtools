@@ -1,11 +1,15 @@
+import tempfile
 import unittest
 from collections import defaultdict
+from pathlib import Path
+
+from PIL import Image
 
 try:
-    from diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, validate_config
+    from diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, load_ground_truth, validate_config
     from diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
 except ModuleNotFoundError:
-    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, validate_config
+    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, load_ground_truth, validate_config
     from model_diagnostics.diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
 
 
@@ -40,6 +44,14 @@ class ModuleSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "预留模块"):
             resolve_modules({"modules": {"validation.ultralytics": True}})
 
+    def test_foreign_speed_module_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "未知模块"):
+            resolve_modules({"modules": {"speed.pytorch_call": True}})
+
+    def test_zero_true_positives_have_zero_f1(self):
+        from model_diagnostics.diagnostics.engine import _prf
+        self.assertEqual(_prf(0, 1, 1)["f1"], 0.0)
+
     def test_conflicting_selection_is_rejected(self):
         with self.assertRaises(ValueError):
             resolve_modules({}, enable=["diagnostics.overlap"], disable=["diagnostics.overlap"])
@@ -52,6 +64,25 @@ class ModuleSelectionTests(unittest.TestCase):
     def test_images_require_bad_case_module(self):
         with self.assertRaises(ValueError):
             resolve_modules({"modules": {"diagnostics.overlap": True, "output.images": True}})
+
+
+class GroundTruthInputTests(unittest.TestCase):
+    def test_binary_yolo_label_reports_its_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            images = root / "images" / "val"
+            labels = root / "labels" / "val"
+            images.mkdir(parents=True)
+            labels.mkdir(parents=True)
+            Image.new("RGB", (8, 8)).save(images / "sample.png")
+            label = labels / "sample.txt"
+            label.write_bytes(b"\x00\x48\xc7\x04")
+            data = root / "dataset.yaml"
+            data.write_text("path: .\nval: images/val\nnames: [ball]\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "YOLO 标签不是 UTF-8 文本") as error:
+                load_ground_truth(data, "ultralytics", split="val")
+            self.assertIn(str(label), str(error.exception))
 
 
 class OverlapTests(unittest.TestCase):

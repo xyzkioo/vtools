@@ -231,10 +231,14 @@ def build_dataloaders(config: Mapping[str, Any], adapter: Any = None):
     if not train_path and not val_path:
         return None, None
     common = {"input_size": config.get("input_size", [224, 224])}
-    return (
-        _default_loader(train_path, batch_size=batch_size, train=True, config=common),
-        _default_loader(val_path, batch_size=batch_size, train=False, config=common),
-    )
+    train = _default_loader(train_path, batch_size=batch_size, train=True, config=common)
+    val = _default_loader(val_path, batch_size=batch_size, train=False, config=common)
+    if train is not None and val is not None and train.dataset.class_to_idx != val.dataset.class_to_idx:
+        raise ValueError(
+            '分类训练集与验证集的类别目录必须一致，避免 ImageFolder 分别编号造成错误精度：'
+            f'train={train.dataset.class_to_idx}, val={val.dataset.class_to_idx}'
+        )
+    return train, val
 
 
 def evaluate_classification(model: Any, loader: Any, *, device: Any = "auto") -> dict[str, Any]:

@@ -4,11 +4,25 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from others.filename_transform.image_filename_converter import (
-    RenameItem, CocoUpdate, apply_plan, rollback_plan, write_coco_with_backup,
+    RenameItem, CocoUpdate, apply_plan, load_coco_json, rollback_plan, validate_plan,
+    write_coco_with_backup,
 )
 
 
 class FileOperations(unittest.TestCase):
+    def test_coco_json_with_utf8_bom_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "annotations.json"
+            path.write_text('{"images": [{"file_name": "a.jpg"}]}', encoding="utf-8-sig")
+            self.assertEqual(load_coco_json(path)["images"][0]["file_name"], "a.jpg")
+
+    def test_duplicate_rename_target_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "same.jpg"
+            with self.assertRaisesRegex(ValueError, "目标文件名重复"):
+                validate_plan([RenameItem(Path(tmp) / "a.jpg", target),
+                               RenameItem(Path(tmp) / "b.jpg", target)])
+
     def test_swap_and_rollback_preserve_contents(self):
         with tempfile.TemporaryDirectory() as tmp:
             a, b = Path(tmp)/'a.jpg', Path(tmp)/'b.jpg'

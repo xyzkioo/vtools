@@ -9,6 +9,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -370,26 +371,48 @@ class TaskManager:
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen[bytes]) -> None:
-        if process.poll() is not None:
-            return
         if os.name == "nt":
+            if process.poll() is not None:
+                return
             subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            return
+        # The child is launched in its own session. Its leader may exit while
+        # workers still hold pipes or GPU resources, so wait on the group.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            process.poll()  # reap an exited leader; its former group may now be gone
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
         else:
             try:
-                os.killpg(process.pid, signal.SIGTERM)
+                os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            if os.name == "nt":
-                process.kill()
-            else:
+            for _ in range(20):
+                process.poll()
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process.pid, 0)
                 except ProcessLookupError:
-                    pass
-            process.wait()
+                    break
+                time.sleep(0.05)
+        if process.poll() is None:
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
     def close(self) -> None:
         self.stop()
