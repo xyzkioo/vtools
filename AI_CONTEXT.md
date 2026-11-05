@@ -1,6 +1,31 @@
 # vtools 项目交接
 
-最后修改：2026-11-03
+最后修改：2026-11-05
+
+## 本轮更新（2026-11-05）：0.5.0 本地打包完成
+
+- 按用户指定将四处版本字段同步为 0.5.0，更新 VERSION.md 并按顺序重新构建前端、PyInstaller 目录包与 deb。
+- `dist/vtools_0.5.0_amd64.deb`：Version=0.5.0、Architecture=amd64，大小 252,338,348 字节，SHA-256 `1af0136489d2e3c7010337dd06cf2fc078e22524a02ab7f33447769cb4e7972b`。同目录有 .deb.sha256 与 vtools_0.5.0_build-verification.json。
+- 目录包 --help 和内置运行时检查通过，实际版本、下载设置保存/重读及命令传参正确；包内下载入口、运行时和前端与源码一致。Debian 完整解压流读取通过，可执行文件及 5 项资源哈希匹配目录包；checksum 校验通过。
+- 本机外部 Python/Fork 已确认支持下载配置；另附 `dist/ultralytics-ndjson-download-0.5.0.patch`，补丁逆向检查通过，不在 deb 内部。其他机器必须同步匹配 Fork 的修改；旧 Fork 会明确报错。
+- 上轮业务回归 118 项通过，本轮仅版本、构建和文档调整；前端构建、compileall、diff --check 与相关文档本地链接检查通过。未安装、提交、推送或发布 GitHub Release，未执行用户真实 CDN 全量下载及 GPU/TensorRT/K230 端到端任务。
+- 文件：VERSION.md、vtools_ui/__init__.py、前端 package.json/package-lock.json、docs/releases/v0.5.0.md、docs/README.md、packaging/README.md、dist/ 产物。构建日志 /tmp/vtools-build-050.log、/tmp/vtools-deb-050.log（临时文件可能被清理）。
+
+---
+
+## 本轮更新（2026-11-05）：NDJSON 下载并发与自动重试配置
+
+- 已实现“格式转换 → NDJSON → YOLO → 下载配置”弹窗，沿用工作台弹窗、表单、开关和保存样式。可配置并发 1–128、自动重试、首次失败后的重试次数 0–20、单次超时 1–3600 秒，设置持久保存在工作台 settings.json 的 ndjson_download 字段，影响下次运行。
+- 此工具默认并发 4、失败后重试 4 次（含首次最多 5 次）、超时 120 秒。重试等待从 2 秒开始翻倍，最多 60 秒；HTTP 404 等永久错误不重试。运行日志打印实际配置。
+- 下载 owner 为外部 `/home/xyzkioo/Projects/libraries/ultralytics-cn/ultralytics/data/converter.py`，已添加 download_workers/download_retries/download_timeout/retry_delay 公开参数和验证，下载采用临时文件完成后替换。Fork 公共 API 原默认值保持 128/2/30/1，vtools 入口传入稳健默认值；旧 Fork 不支持参数时明确报错，不静默忽略界面设置。其他机器需同步该 Fork 修改。
+- 保留原有数据集哈希、命名、成功标记和按文件续下机制；已有数据未改动，本轮没有重新下载用户的 916 张图片。不能据合成 HTTP 测试保证现场 CDN 已恢复。
+- 验证：新增 tests/test_ndjson_download.py，覆盖设置持久化、参数验证、关闭重试的传参，以及本地 HTTP 实测并发上限、503 重试、404 不重试、重跑复用和超时不留半成品。通用测试 118 项全部通过（含新增 4 项）；工作台单独 55 项通过；前端 TypeScript/Vite 构建、compileall、两个仓库 diff --check 通过。
+- 首次全套测试受显式 VTOOLS_ULTRALYTICS_REPO 环境变量干扰 Fork 自动发现用例；移除该变量后 118 项通过。测试配置与 UI 保存测试使用临时目录，未覆盖用户实际设置。
+- 实际浏览器验证弹窗、并发调整、重试开关、保存后重新打开；截图 `/tmp/ndjson-download-config.png`，临时文件可能被清理。
+- 文件：transform_tools/ndjson_to_yolo.py、transform_tools/REQUIREMENT.md、vtools_ui/webapp/{catalog.py,core.py,frontend/src/App.tsx}、前端 dist、tests/test_ndjson_download.py、README.md、vtools_ui/README.md。
+- 当前仅源码及前端资源已更新，未重新打包、安装、提交或推送，版本维持 0.4.9；桌面安装包若需交付应按版本规则递增补丁后构建。
+
+---
 
 ## 本轮更新（2026-11-03）：v0.4.9 正式 Release
 
