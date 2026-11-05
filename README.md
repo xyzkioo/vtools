@@ -232,3 +232,5 @@ vtools/
 ## 许可证
 
 vtools 使用 [MIT License](LICENSE)。独立的 [ultralytics-ezcn](https://github.com/xyzkioo/ultralytics-ezcn) 仓库遵循其自身的许可证和源码授权声明。
+
+NDJSON 下载：在“格式转换 → NDJSON → YOLO”点击“下载配置”，可保存并发数、自动重试开关、重试次数和超时。默认并发 4、失败后重试 4 次、超时 120 秒，支持复用已下载图片。需使用支持下载配置的 Ultralytics Fork，详见 [转换工具说明](transform_tools/REQUIREMENT.md)。

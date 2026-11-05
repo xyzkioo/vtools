@@ -70,7 +70,7 @@ TOOLS: dict[str, dict] = {
     "transform": {
         "title": "格式转换", "group": "utility", "description": "数据和模型格式转换。",
         "variants": {
-            "ndjson": {"title": "NDJSON → YOLO", "script": "transform_tools/ndjson_to_yolo.py", "fields": [("input", "NDJSON 文件", "file", "--input", True), ("output", "输出目录", "dir", "--output", True)]},
+            "ndjson": {"title": "NDJSON → YOLO", "script": "transform_tools/ndjson_to_yolo.py", "defaults": {"workers": 4, "auto_retry": True, "retries": 4, "timeout": 120}, "fields": [("input", "NDJSON 文件", "file", "--input", True), ("output", "输出目录", "dir", "--output", True), ("workers", "下载并发数", "number", "--workers", False), ("auto_retry", "自动重试", "bool", "--auto-retry", False), ("retries", "失败后重试次数", "number", "--retries", False), ("timeout", "单次超时（秒）", "number", "--timeout", False)]},
             "kmodel": {"title": "PyTorch → K230", "script": "transform_tools/py2kmodel.py", "defaults": {"size": "320", "samples": "200"}, "fields": [("pt", "PyTorch 权重", "file", "--pt", True), ("output", "输出目录", "dir", "--output-dir", False), ("calib", "校准图片目录", "dir", "--calib-dir", True), ("size", "输入尺寸", "number", "--size", False), ("samples", "校准样本数", "number", "--samples", False), ("rebuild", "覆盖已有产物", "bool", "--rebuild", False)]},
             "validate": {"title": "ONNX / kmodel 校验", "script": "transform_tools/PY2KM_validate.py", "defaults": {"size": "320", "normalize": True}, "fields": [("onnx", "ONNX 模型", "file", "--onnx", True), ("kmodel", "kmodel 模型", "file", "--kmodel", True), ("image", "校验图片或目录", "file_or_dir", "--image", True), ("size", "输入尺寸", "number", "--size", True), ("normalize", "输入除以 255", "bool", "--normalize", False)]},
         },

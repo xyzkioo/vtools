@@ -178,10 +178,25 @@ def _atomic_text(path: Path, content: str) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _ndjson_settings(value: Any) -> dict[str, Any]:
+    defaults = {"workers": 4, "auto_retry": True, "retries": 4, "timeout": 120}
+    if not isinstance(value, dict):
+        raise ValueError("下载配置必须是对象")
+    defaults.update({key: value[key] for key in defaults if key in value})
+    for key, low, high in (("workers", 1, 128), ("retries", 0, 20), ("timeout", 1, 3600)):
+        number = defaults[key]
+        if isinstance(number, bool) or not isinstance(number, int) or not low <= number <= high:
+            raise ValueError(f"{key} 必须是 {low}–{high} 之间的整数")
+    if not isinstance(defaults["auto_retry"], bool):
+        raise ValueError("自动重试必须是开关值")
+    return defaults
+
+
 def read_settings() -> dict[str, Any]:
     defaults = {
         "results_root": _default_results_root(),
         "history_limit": 40,
+        "ndjson_download": _ndjson_settings({}),
         "python_executable": _default_python_executable(),
     }
     if SETTINGS_PATH.exists():
@@ -196,6 +211,10 @@ def read_settings() -> dict[str, Any]:
         defaults["history_limit"] = max(1, min(200, int(defaults["history_limit"])))
     except (TypeError, ValueError):
         defaults["history_limit"] = 40
+    try:
+        defaults["ndjson_download"] = _ndjson_settings(defaults["ndjson_download"])
+    except ValueError:
+        defaults["ndjson_download"] = _ndjson_settings({})
     return defaults
 
 
@@ -212,6 +231,8 @@ def save_settings(changes: dict[str, Any]) -> dict[str, Any]:
         settings["python_executable"] = str(candidate)
     if "history_limit" in changes:
         settings["history_limit"] = max(1, min(200, int(changes["history_limit"])))
+    if "ndjson_download" in changes:
+        settings["ndjson_download"] = _ndjson_settings(changes["ndjson_download"])
     _atomic_text(SETTINGS_PATH, json.dumps(settings, ensure_ascii=False, indent=2))
     return settings
 
@@ -471,11 +492,16 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         variant = tool["variants"].get(variant_id)
         if variant is None:
             raise ValueError("请选择有效的工具类型")
+        if tool_id == "transform" and variant_id == "ndjson":
+            download = {**settings["ndjson_download"], **{k: values[k] for k in settings["ndjson_download"] if k in values}}
+            values = {**values, **_ndjson_settings(download)}
         args = [str(ROOT / variant["script"])]
         for key, label, kind, flag, required in variant["fields"]:
             value = values.get(key)
             if kind == "bool":
-                if key == "normalize":
+                if key == "auto_retry":
+                    args.append("--auto-retry" if value else "--no-auto-retry")
+                elif key == "normalize":
                     if value is False:
                         args.append("--no-norm")
                 elif key == "apply":

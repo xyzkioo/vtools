@@ -17,7 +17,8 @@ type History = { id?: string; time: string; task: string; status: string; config
 type Result = { path: string; relative: string; size: number; kind: 'image' | 'text' | 'model' }
 type ConfigField = { path: string; value: unknown; kind: string; hint: string }
 type ConfigDocument = { path: string; text: string; data: Record<string, unknown>; fields: ConfigField[] }
-type Settings = { results_root: string; history_limit: number; python_executable: string }
+type DownloadSettings = { workers: number; auto_retry: boolean; retries: number; timeout: number }
+type Settings = { ndjson_download: DownloadSettings; results_root: string; history_limit: number; python_executable: string }
 type UpdateInfo = { status: 'unsupported' | 'unpublished' | 'current' | 'available' | 'missing_asset'; current_version: string; latest_version?: string; message: string }
 type ResultFolder = { name: string; folders: ResultFolder[]; files: Result[]; count: number }
 
@@ -241,7 +242,30 @@ function ConfigEditor({ path, toolId, onClose, onSaved }: { path: string; toolId
   </section></div>
 }
 
+function DownloadConfig({ initial, onClose, onSaved }: { initial: DownloadSettings; onClose: () => void; onSaved: (settings: Settings) => void }) {
+  const [draft, setDraft] = useState({ ...initial })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    setSaving(true); setError('')
+    try { onSaved((await api<{ settings: Settings }>('settings', { ndjson_download: draft })).settings) }
+    catch (err) { setError(String(err)) }
+    finally { setSaving(false) }
+  }
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="modal" role="dialog" aria-modal="true" aria-label="下载配置" onMouseDown={event => event.stopPropagation()}>
+    <div className="modal-header"><div><div className="eyebrow">CONFIGURATION</div><h2>下载配置</h2><p>调整 NDJSON 图片下载；保存后用于下一次运行。</p></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={20} /></button></div>
+    <div className="modal-content"><div className="config-groups"><section className="config-group"><h3>并发与自动重试</h3><div className="form-grid">
+      <label className="form-field"><span>下载并发数</span><input type="number" min={1} max={128} step={1} value={draft.workers} onChange={event => setDraft({ ...draft, workers: Number(event.target.value) })} /><small>默认 4；网络不稳定时可调为 1–2。</small></label>
+      <label className="form-field"><span>单次超时（秒）</span><input type="number" min={1} max={3600} step={1} value={draft.timeout} onChange={event => setDraft({ ...draft, timeout: Number(event.target.value) })} /></label>
+      <div className="form-field switch-field"><InputField field={{ key: 'auto_retry', label: '自动重试', kind: 'bool' }} value={draft.auto_retry} onChange={value => setDraft({ ...draft, auto_retry: Boolean(value) })} /></div>
+      <label className="form-field"><span>失败后重试次数</span><input type="number" min={0} max={20} step={1} disabled={!draft.auto_retry} value={draft.retries} onChange={event => setDraft({ ...draft, retries: Number(event.target.value) })} /><small>默认重试 4 次，加首次共尝试 5 次；等待时间逐次增加。关闭后只尝试一次。</small></label>
+    </div><p className="muted small">重跑同一数据集和输出目录时，复用已下载图片，补下缺失项。</p></section></div>{error && <p className="inline-error" role="alert">{error}</p>}</div>
+    <div className="modal-footer"><button className="button secondary" onClick={onClose}>取消</button><button className="button primary" onClick={save} disabled={saving}>{saving ? '保存中…' : '保存配置'}</button></div>
+  </section></div>
+}
+
 function App() {
+  const [downloadConfigOpen, setDownloadConfigOpen] = useState(false)
   const [catalog, setCatalog] = useState<Catalog>({})
   const [settings, setSettings] = useState<Settings | null>(null)
   const [historyRows, setHistoryRows] = useState<History[]>([])
@@ -303,8 +327,9 @@ function App() {
 
   useEffect(() => {
     if (!tool) return
+    setDownloadConfigOpen(false)
     const firstVariant = Object.keys(tool.variants || {})[0] || ''
-    setValues({ ...Object.fromEntries((tool.fields || []).filter(field => field.default !== undefined).map(field => [field.key, field.default])), ...(firstVariant ? tool.variants?.[firstVariant].defaults || {} : {}) })
+    setValues({ ...Object.fromEntries((tool.fields || []).filter(field => field.default !== undefined).map(field => [field.key, field.default])), ...(firstVariant ? (page === 'transform' && firstVariant === 'ndjson' ? settings?.ndjson_download : tool.variants?.[firstVariant].defaults) || {} : {}) })
     setModuleEdits({})
     setConfigData({})
     setVariant(firstVariant)
@@ -492,6 +517,7 @@ function App() {
   const processingMode = compatibleModes.some(([key]) => key === requestedMode) ? requestedMode : ''
   const currentMode = tool?.modes?.[processingMode]
   const displayedFields = (isUtility ? selectedVariant?.fields || [] : tool?.fields || []).filter(field => {
+    if (page === 'transform' && variant === 'ndjson' && ['workers', 'auto_retry', 'retries', 'timeout'].includes(field.key)) return false
     if (!tool?.modes) return true
     if (field.key === 'task') return false
     if (field.key === 'resource') return Boolean(currentMode?.public_weights)
@@ -524,10 +550,11 @@ function App() {
 
         {isToolPage && <>
           <div className="page-heading"><div className="eyebrow">{tool.group === 'model' ? 'MODEL WORKFLOW' : tool.group === 'utility' ? 'DATA WORKFLOW' : 'SYSTEM CHECK'}</div><h1>{tool.title}</h1><p>{tool.description}</p></div>
-          {isUtility && <div className="card form-card"><div className="card-heading"><span className="step-number">01</span><div><h2>选择操作</h2><p>选择你要运行的具体工具。</p></div></div><div className="variant-grid">{Object.entries(tool.variants || {}).map(([key, item]) => <button className={`variant-card ${variant === key ? 'chosen' : ''}`} key={key} onClick={() => { setVariant(key); setValues({ ...(item.defaults || {}) }) }}><FileCode2 size={20} /><strong>{item.title}</strong></button>)}</div></div>}
+          {isUtility && <div className="card form-card"><div className="card-heading"><span className="step-number">01</span><div><h2>选择操作</h2><p>选择你要运行的具体工具。</p></div></div><div className="variant-grid">{Object.entries(tool.variants || {}).map(([key, item]) => <button className={`variant-card ${variant === key ? 'chosen' : ''}`} key={key} onClick={() => { setVariant(key); setDownloadConfigOpen(false); setValues({ ...((page === 'transform' && key === 'ndjson' ? settings?.ndjson_download : item.defaults) || {}) }) }}><FileCode2 size={20} /><strong>{item.title}</strong></button>)}</div></div>}
           {modelTool && <div className="card form-card"><div className="card-heading"><span className="step-number">01</span><div><h2>配置文件</h2><p>YAML 是完整参数来源，本页只覆盖本次运行所需的输入。</p></div></div><div className="form-grid"><label className="form-field wide"><span>配置文件 <em>必填</em></span><PathField value={configPath} onChange={setConfigPath} kind="file" /></label></div><button className="link-button config-link" onClick={() => setConfigEditor(true)}><Settings2 size={17} /> 图形化编辑配置 <ArrowRight size={16} /></button></div>}
           {modelTool && tool.modes && <div className="card form-card"><div className="card-heading"><span className="step-number">02</span><div><h2>处理模式</h2><p>一次运行选择一种模式；相应评估与保存步骤会自动执行。</p></div></div><div className="form-grid"><label className="form-field"><span>模型任务</span><select value={String(values.task || 'detect')} onChange={event => setValues({ ...values, task: event.target.value, processing_mode: undefined })}><option value="detect">目标检测</option><option value="classify">图像分类</option></select></label></div><div className="variant-grid processing-mode-grid">{compatibleModes.map(([key, mode]) => <button type="button" className={`variant-card ${processingMode === key ? 'chosen' : ''}`} key={key} aria-pressed={processingMode === key} onClick={() => setValues({ ...values, processing_mode: key })}><Layers3 size={20} /><strong>{mode.label}</strong></button>)}</div><p className="processing-mode-description">{currentMode?.description || '配置中启用了多种处理方式，请选择本次要执行的模式。'}</p></div>}
           <div className="card form-card"><div className="card-heading"><span className="step-number">{isUtility ? '02' : modelTool ? (tool.modes ? '03' : '02') : '01'}</span><div><h2>输入与参数</h2><p>路径支持直接输入；桌面窗口可以点击文件夹图标选择。</p></div></div><div className="form-grid">{displayedFields.filter(field => !field.when || Object.entries(field.when).every(([key, expected]) => fieldValues[key] === expected)).map(field => field.kind === 'bool' ? <div className="form-field switch-field" key={field.key}><InputField field={field} value={fieldValues[field.key]} onChange={value => setValues({ ...values, [field.key]: value })} /></div> : <label className={`form-field ${['file', 'dir', 'file_or_dir', 'save_file'].includes(field.kind) ? 'wide' : ''}`} key={field.key}><span>{field.label} {field.required && <em>必填</em>}</span><InputField field={field} value={fieldValues[field.key]} onChange={value => setValues({ ...values, [field.key]: value })} />{field.hint && <small>{field.hint}</small>}</label>)}</div></div>
+          {page === 'transform' && variant === 'ndjson' && <div className="card form-card"><button className="link-button config-link" onClick={() => setDownloadConfigOpen(true)}><Settings2 size={17} /> 下载配置 <ArrowRight size={16} /></button><p className="muted small">并发 {String(fieldValues.workers)} · {fieldValues.auto_retry ? `失败后重试 ${fieldValues.retries} 次` : '自动重试已关闭'} · 超时 {String(fieldValues.timeout)} 秒</p></div>}
           {modelTool && !tool.modes && <div className="card form-card"><div className="card-heading"><span className="step-number">03</span><div><h2>运行模块</h2><p>{page === 'benchmark' && values.backend === 'checkpoint' ? 'Checkpoint 检查按配置文件运行，不支持本次运行临时切换模块。' : '仅修改这里点击过的模块；配置中未展示的模块保持原样。'}</p></div></div><div className="module-grid">{(tool.modules || []).map(([id, label]) => { const incompatible = (page === 'benchmark' && values.backend === 'checkpoint') || (page === 'compression' && ((values.task === 'detect' && ['compression.quantize.dynamic_int8', 'distillation.classification'].includes(id)) || (values.task === 'classify' && ['compression.prune.structured', 'distillation.detection'].includes(id)))); return <label className={`module-option ${incompatible ? 'disabled' : ''}`} key={id} title={incompatible ? '当前任务不支持临时切换此模块' : id}><input type="checkbox" disabled={incompatible} checked={moduleEdits[id] ?? Boolean(moduleMap[id])} onChange={event => setModuleEdits({ ...moduleEdits, [id]: event.target.checked })} /><span className="checkmark" /><span><strong>{label}</strong><small>{id}</small></span></label> })}</div></div>}
           <div className="run-card"><div><span className="run-card-icon"><Play size={20} fill="currentColor" /></span><div><strong>准备就绪</strong><span>确认输入和参数后开始运行。过程和错误会显示在运行详情中。</span></div></div><button className="button primary" onClick={start} disabled={active(run)}>{active(run) ? '任务运行中' : '开始运行'} <ArrowRight size={17} /></button></div>
           {run?.tool_id === page && run.result_dir && !active(run) && <div className="result-callout"><CheckCircle2 size={20} /><span>本次结果：{run.result_dir}</span><button className="link-button" onClick={() => { setResultRoot(run.result_dir!); setPage('results') }}>查看结果 <ArrowRight size={16} /></button></div>}
@@ -543,6 +570,7 @@ function App() {
       <div className={`task-console ${logOpen ? 'expanded' : ''}`}><div className="console-bar"><div className="console-state"><span className={`state-indicator ${run?.status || 'idle'}`} /> <strong>{run ? statusText[run.status] || run.status : '就绪'}</strong><span>{run ? `${catalog[run.tool_id]?.title || run.tool_id} · ${run.started_at}` : '选择工具开始新的任务'}</span></div><div className="console-actions">{active(run) && <button className="button stop" onClick={stop}><Square size={13} fill="currentColor" /> 停止任务</button>}<button className="console-toggle" onClick={() => setLogOpen(!logOpen)}><TerminalSquare size={17} /> 运行详情 <ChevronDown size={15} /></button></div></div>{logOpen && <div className="console-body"><div className="console-body-head"><span className="console-log-path" title={savedLog?.path || run?.log_path || undefined}>{savedLog ? `日志文件：${savedLog.path}` : '运行日志'}</span><span className="console-log-actions">{run?.log_path && <button onClick={() => showSavedLog(run.id)}>查看本次日志</button>}{(savedLog || run?.log_path) && <><button onClick={() => openSavedLog(false)}>打开文件</button><button onClick={() => openSavedLog(true)}>打开目录</button></>}<button onClick={copyLog} title="复制当前面板中的日志" aria-label="复制日志"><Copy size={15} /> 复制日志</button></span></div><pre ref={logRef}>{log || (active(run) ? '等待任务输出…' : '运行日志会显示在这里。')}</pre></div>}</div>
     </div>
     {notice && <div className="toast" role="status"><AlertCircle size={17} /><span>{notice}</span><button onClick={() => setNotice('')}><X size={15} /></button></div>}
+    {downloadConfigOpen && page === 'transform' && variant === 'ndjson' && settings && <DownloadConfig initial={{ workers: Number(fieldValues.workers), auto_retry: Boolean(fieldValues.auto_retry), retries: Number(fieldValues.retries), timeout: Number(fieldValues.timeout) }} onClose={() => setDownloadConfigOpen(false)} onSaved={next => { setSettings(next); setSettingsDraft(next); setValues(previous => ({ ...previous, ...next.ndjson_download })); setDownloadConfigOpen(false); setNotice('下载配置已保存') }} />}
     {configEditor && tool && <ConfigEditor path={configPath} toolId={page} onClose={() => setConfigEditor(false)} onSaved={path => { setConfigPath(path); api<ConfigDocument>(`config?path=${q(path)}`).then(data => setConfigData(data.data)); setNotice('配置已保存') }} />}
   </div>
 }
