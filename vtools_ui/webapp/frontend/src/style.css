@@ -59,3 +59,4 @@ html{overflow:hidden}
 .update-platform-state.missing{background:#f4f4f5;color:#71717a}
 .update-platform-state.untrusted{background:#fee2e2;color:#991b1b}
 .update-platform .button{margin-left:auto}
+.update-note{color:#92400e;font-size:12px;line-height:1.6;margin:-4px 0 12px}
