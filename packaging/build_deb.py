@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import runpy
 import shutil
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -15,6 +17,21 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "dist" / "vtools"
 DESKTOP_FILE = ROOT / "packaging" / "vtools.desktop"
 ICON_FILE = ROOT / "packaging" / "vtools.svg"
+
+
+def _normalize_modes(stage: Path) -> None:
+    """Give staged files 0755/0644 modes regardless of the caller's umask."""
+    for current, directories, files in os.walk(stage):
+        for name in directories:
+            path = Path(current) / name
+            if not path.is_symlink():
+                path.chmod(0o755)
+        for name in files:
+            path = Path(current) / name
+            if path.is_symlink():
+                continue
+            mode = path.stat().st_mode
+            path.chmod(0o755 if mode & stat.S_IXUSR else 0o644)
 
 
 def main() -> int:
@@ -32,6 +49,12 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="vtools-deb-") as temporary:
         stage = Path(temporary)
+        # TemporaryDirectory honors the caller's umask for the stage root, and
+        # shutil.copytree keeps the bundle's copied modes. dpkg rejects a
+        # DEBIAN directory that is not exactly 0755, and a package built under
+        # a restrictive umask would ship unreadable files. Normalize the stage
+        # before building so the result does not depend on the caller's umask.
+        stage.chmod(0o755)
         app_dir = stage / "opt" / "vtools"
         shutil.copytree(BUNDLE, app_dir, symlinks=True)
 
@@ -42,9 +65,11 @@ def main() -> int:
         icons = stage / "usr" / "share" / "icons" / "hicolor" / "scalable" / "apps"
         icons.mkdir(parents=True)
         shutil.copy2(ICON_FILE, icons / ICON_FILE.name)
+        _normalize_modes(stage)
 
         metadata = stage / "DEBIAN"
         metadata.mkdir()
+        metadata.chmod(0o755)
         (metadata / "control").write_text(
             f"Package: vtools\n"
             f"Version: {version}\n"

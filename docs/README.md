@@ -37,7 +37,7 @@
 - [v0.4.9 发行说明](releases/v0.4.9.md)：完整修复安装包、标签解码提示、校验值和验证范围。
 - [v0.5.8 发行说明](releases/v0.5.8.md)：更新器跨平台化，Windows 安装包与 deb 分平台检测、Windows 半自动安装。
 - [v0.5.9 发行说明](releases/v0.5.9.md)：更新器限流规避，API 失败回退 atom + `.sha256` 旁证与本地缓存。
-- [v0.5.10 发行说明](releases/v0.5.10.md)：环境检查新增压缩环境检查（`torch-pruning`，警告级）与安装包信息。
+- [v0.5.10 发行说明](releases/v0.5.10.md)：环境检查新增压缩环境检查（`torch-pruning`，警告级），并补充 amd64 `.deb` 与 Windows 安装包信息。
 - [2026-11-01 项目审查](reviews/vtools-review-2026-11-01.md)：当前源码中的已确认缺陷、复现证据与回归范围。
 - [2026-11-01 冗余补充审查](reviews/vtools-redundancy-2026-11-01.md)：重复实现、不可达代码、失效配置与清理候选。
 - `images/`：项目首页使用的界面截图。
