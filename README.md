@@ -121,7 +121,7 @@ uv run --project /path/to/python-envs/vtools --no-sync \
   --source /path/to/ultralytics-ezcn
 ```
 
-检查器默认验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、依赖一致性和 CUDA，不固定包版本，也不要求本地 Fork。指定 `--yaml` 或 `--weights` 后才执行对应模型的构建或预测；未执行模型检查会明确提示。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要验证自己的权重时增加 `--weights /path/to/best.pt`。没有 uv 项目时，激活目标环境后直接运行 `python env_test/check_install.py ...`。
+检查器默认验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、依赖一致性和 CUDA，不固定包版本，也不要求本地 Fork。指定 `--yaml` 或 `--weights` 后才执行对应模型的构建或预测；未执行模型检查会明确提示。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要检查模型压缩依赖 `torch-pruning` 时增加 `--check-compression`（缺失只记警告）；需要验证自己的权重时增加 `--weights /path/to/best.pt`。没有 uv 项目时，激活目标环境后直接运行 `python env_test/check_install.py ...`。
 
 ## 接入独立 Ultralytics Fork
 

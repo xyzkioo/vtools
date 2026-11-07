@@ -38,6 +38,8 @@ DEFAULT_MODULE = "ultralytics"
 DEFAULT_DISTRIBUTION = "ultralytics"
 DEFAULT_INPUT_SIZE = 64
 PROBE_MARKER = "__VTOOLS_INSTALL_CHECK__"
+COMPRESSION_DISTRIBUTION = "torch-pruning"
+COMPRESSION_MIN_VERSION = "1.4.1"
 
 
 @dataclass
@@ -133,6 +135,11 @@ def parse_args() -> argparse.Namespace:
         "--check-export",
         action="store_true",
         help="额外检查 ONNX 和 TensorRT Python API；未安装时只给出警告。",
+    )
+    parser.add_argument(
+        "--check-compression",
+        action="store_true",
+        help="额外检查模型压缩的可选依赖 torch-pruning；未安装或版本过低时只给出警告。",
     )
     parser.add_argument(
         "--skip-model",
@@ -337,6 +344,53 @@ def run_export_probe() -> Tuple[Dict[str, Any], str]:
         """
     )
     _, stdout, stderr = run_isolated_probe(code, timeout=120)
+    return extract_probe_json(stdout) or {}, compact_error(stderr, stdout)
+
+
+def parse_version(value: str) -> Tuple[int, ...]:
+    """把 1.4.1、1.4.1rc2 之类的版本号解析成可比较的数字序列。"""
+    numbers: List[int] = []
+    for part in str(value).split("."):
+        digits = "".join(character for character in part if character.isdigit())
+        if not digits:
+            break
+        numbers.append(int(digits))
+    return tuple(numbers)
+
+
+def version_at_least(actual: str, minimum: str) -> bool:
+    actual_parts = parse_version(actual)
+    return bool(actual_parts) and actual_parts >= parse_version(minimum)
+
+
+def run_compression_probe() -> Tuple[Dict[str, Any], str]:
+    """检查模型压缩的可选依赖 torch-pruning 是否可用于依赖感知剪枝。"""
+    code = textwrap.dedent(
+        f"""
+        import importlib
+        import importlib.metadata as metadata
+        import json
+        import sys
+
+        result = {{"executable": sys.executable}}
+        try:
+            module = importlib.import_module("torch_pruning")
+            result["ok"] = True
+            result["file"] = getattr(module, "__file__", "")
+            result["version"] = getattr(module, "__version__", "")
+            try:
+                result["distribution_version"] = metadata.version("torch-pruning")
+            except Exception:
+                result["distribution_version"] = ""
+            if not result["version"]:
+                result["version"] = result["distribution_version"]
+        except Exception as exc:
+            result["ok"] = False
+            result["error"] = f"{{type(exc).__name__}}: {{exc}}"
+        print({PROBE_MARKER!r} + json.dumps(result, ensure_ascii=False))
+        """
+    )
+    _, stdout, stderr = run_isolated_probe(code, timeout=180)
     return extract_probe_json(stdout) or {}, compact_error(stderr, stdout)
 
 
@@ -678,6 +732,51 @@ def main() -> int:
                         reporter.warned(f"可选/{label}", message, detail)
     else:
         reporter.skipped("ONNX/TensorRT", "未指定 --check-export。")
+
+    if args.check_compression:
+        compression_info, compression_error = run_compression_probe()
+        if not compression_info:
+            reporter.warned("压缩环境", "无法读取压缩依赖检查结果。", compression_error)
+        elif not compression_info.get("ok"):
+            install_hint = f"需要依赖感知结构化剪枝时安装 {COMPRESSION_DISTRIBUTION}>={COMPRESSION_MIN_VERSION}。"
+            detail = compression_info.get("error", compression_error) or install_hint
+            if install_hint not in detail:
+                detail = f"{detail}\n{install_hint}"
+            if args.strict:
+                reporter.failed("压缩环境", "torch-pruning 无法导入（--strict 下视为失败）。", detail)
+            else:
+                reporter.warned(
+                    "压缩环境",
+                    "未安装 torch-pruning；依赖感知结构化剪枝不可用，scale 结构缩放、量化和蒸馏不受影响。",
+                    detail,
+                )
+        else:
+            version = str(compression_info.get("version") or "")
+            detail = "\n".join(
+                line
+                for line in (
+                    f"实际文件：{compression_info.get('file') or '未知'}",
+                    f"当前解释器：{compression_info.get('executable') or sys.executable}",
+                )
+                if line
+            )
+            if version_at_least(version, COMPRESSION_MIN_VERSION):
+                reporter.passed(
+                    "压缩环境",
+                    f"torch-pruning 可导入，版本 {version}，满足 >={COMPRESSION_MIN_VERSION}。",
+                    detail,
+                )
+            else:
+                message = (
+                    f"torch-pruning 版本 {version or '未知'} 低于要求的 >={COMPRESSION_MIN_VERSION}，"
+                    "依赖感知结构化剪枝可能失败。"
+                )
+                if args.strict:
+                    reporter.failed("压缩环境", f"{message}（--strict 下视为失败）", detail)
+                else:
+                    reporter.warned("压缩环境", message, detail)
+    else:
+        reporter.skipped("压缩环境", "未指定 --check-compression。")
 
     yaml_path = resolve_path(args.yaml, call_dir) if args.yaml else None
     if yaml_path is not None and not yaml_path.is_file():
