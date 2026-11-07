@@ -17,7 +17,7 @@ from typing import Any
 
 from .catalog import ROOT
 from .core import STATE_DIR, add_history, build_command
-from ..process_environment import build_tool_environment
+from ..process_environment import build_tool_environment, external_dll_search_path
 
 
 class TaskManager:
@@ -69,11 +69,13 @@ class TaskManager:
             log_file.write_text(f"$ {command_display}\n", encoding="utf-8")
             kwargs: dict[str, Any] = {"cwd": ROOT, "stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "bufsize": 0}
             if os.name == "nt":
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+                kwargs["stdin"] = subprocess.DEVNULL
             else:
                 kwargs["start_new_session"] = True
             environment = build_tool_environment(executable, ROOT)
-            process = subprocess.Popen([executable, *args], env=environment, **kwargs)
+            with external_dll_search_path(executable):
+                process = subprocess.Popen([executable, *args], env=environment, **kwargs)
             with self._lock:
                 self._process = process
                 if self._state and self._state["id"] == run_id:
@@ -374,7 +376,7 @@ class TaskManager:
         if os.name == "nt":
             if process.poll() is not None:
                 return
-            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
             try:
                 process.wait(timeout=2)
             except subprocess.TimeoutExpired:

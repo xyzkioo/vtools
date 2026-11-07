@@ -15,7 +15,9 @@ python env_test/check_install.py --source ../ultralytics-ezcn
 
 ## 输入与功能
 
-`--source` 指定独立 Fork；`--weights` 检查自己的权重；`--yaml` 指定模型结构 YAML，不能填写数据集 YAML。`--check-export` 增加 ONNX/TensorRT API 检查，`--skip-model` 跳过模型构建和推理，`--strict` 收紧检查判定。
+默认检查目标 Python 中已安装的包，报告实际版本，不要求本地 Fork、固定 Ultralytics 版本或 YOLO26。Python 3.10、3.12 等版本使用同一套检查规则，依赖能否导入和所选模型能否运行决定结果。
+
+`--source` 显式指定独立 Fork；`--weights` 检查自己的权重；`--yaml` 指定模型结构 YAML，不能填写数据集 YAML。模型只检查指定的输入；没有指定时仅验证基础环境，并提示未验证模型运行。`--check-export` 增加 ONNX/TensorRT API 检查，`--skip-model` 跳过模型构建和推理。`--expected-version VERSION` 可选比较指定版本，`--strict` 将该比较的不一致、依赖冲突和可选导出依赖缺失判为失败。
 
 CLI 相对路径按当前工作目录解析。Fork 属于同级独立仓库，Python 导入名仍为 `ultralytics`；实际加载路径比安装列表更能说明使用了哪份源码。
 

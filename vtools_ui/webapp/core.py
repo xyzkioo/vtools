@@ -18,14 +18,10 @@ import yaml
 
 from .catalog import ROOT, TOOLS
 from .config_fields import SIZE_FIELDS, SQUARE_SIZE_FIELDS, STRING_LIST_FIELDS, field_hint
+from vtools_ui.state import desktop_state_dir
+from vtools_ui.process_environment import build_tool_environment, external_dll_search_path
 
-STATE_DIR = (
-    Path(os.environ.get("VTOOLS_USER_DATA", "")).expanduser()
-    if getattr(sys, "frozen", False) and os.environ.get("VTOOLS_USER_DATA")
-    else Path.home() / ".vtools_ui"
-    if getattr(sys, "frozen", False)
-    else ROOT / ".vtools_ui"
-)
+STATE_DIR = desktop_state_dir() if getattr(sys, "frozen", False) else ROOT / ".vtools_ui"
 SETTINGS_PATH = STATE_DIR / "settings.json"
 HISTORY_PATH = STATE_DIR / "history.json"
 TEXT_SUFFIXES = {".json", ".csv", ".html", ".md", ".txt", ".yaml", ".yml"}
@@ -683,6 +679,10 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         raise ValueError(f"入口文件不存在：{args[0]}")
     if bundled_executable:
         args = ["--run-script", *args]
+        if sys.platform == "win32":
+            executable = Path(sys.executable).with_name("vtools-worker.exe")
+            if not executable.is_file():
+                raise ValueError("安装包缺少后台任务程序 vtools-worker.exe，请重新安装完整安装包")
     return str(executable), args, config
 
 
@@ -784,7 +784,13 @@ def environments() -> list[dict[str, str]]:
         pass
     for conda_exe in conda_executables:
         try:
-            completed = subprocess.run([str(conda_exe), "env", "list", "--json"], capture_output=True, text=True, timeout=8, check=False)
+            with external_dll_search_path(conda_exe):
+                completed = subprocess.run(
+                    [str(conda_exe), "env", "list", "--json"], capture_output=True,
+                    text=True, timeout=8, check=False,
+                    env=build_tool_environment(conda_exe, ROOT),
+                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
+                )
             for raw in json.loads(completed.stdout).get("envs", []):
                 prefixes.add(Path(raw).expanduser())
         except (OSError, ValueError, subprocess.TimeoutExpired):

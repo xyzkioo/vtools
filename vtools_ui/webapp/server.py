@@ -15,16 +15,16 @@ import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from vtools_ui import __version__
+from vtools_ui.process_environment import external_dll_search_path
 
 from .catalog import ROOT, public_catalog
 from .core import (
     IMAGE_SUFFIXES, TEXT_SUFFIXES, STATE_DIR, clear_history, environments, flatten_config, history, list_results,
     load_config, parse_yaml, patch_config, preview_text, project_path, read_settings,
-    python_executable_path, result_file, save_config, save_settings,
+    result_file, save_config, save_settings,
 )
 from .tasks import TaskManager
 from .updater import check_update, install_update
@@ -209,7 +209,8 @@ class ApiHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _open_local(path: Path) -> None:
         if os.name == "nt":
-            os.startfile(str(path))  # type: ignore[attr-defined]
+            with external_dll_search_path(path):
+                os.startfile(str(path))  # type: ignore[attr-defined]
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(path)])
         else:
@@ -230,83 +231,11 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-class DesktopBridge:
-    def __init__(self, clipboard_writer: Callable[[str], bool] | None = None) -> None:
-        self.window = None
-        self._clipboard_writer = clipboard_writer
-
-    def copy_text(self, text: str) -> bool:
-        if not isinstance(text, str):
-            raise ValueError("剪贴板内容必须是文本")
-        if self._clipboard_writer is None:
-            return False
-        return self._clipboard_writer(text)
-
-    def pick_path(self, kind: str) -> str:
-        if self.window is None:
-            return ""
-        import webview
-
-        if kind not in {"file", "dir", "save_file"}:
-            raise ValueError(f"不支持的文件选择类型：{kind}")
-        if hasattr(webview, "FileDialog"):
-            dialog = {
-                "file": webview.FileDialog.OPEN,
-                "dir": webview.FileDialog.FOLDER,
-                "save_file": webview.FileDialog.SAVE,
-            }[kind]
-        else:
-            dialog = {
-                "file": webview.OPEN_DIALOG,
-                "dir": webview.FOLDER_DIALOG,
-                "save_file": webview.SAVE_DIALOG,
-            }[kind]
-        selected = self.window.create_file_dialog(dialog)
-        if isinstance(selected, (list, tuple)):
-            return str(selected[0]) if selected else ""
-        return str(selected or "")
-
-
-def _find_webview_python() -> str | None:
-    """Find a local Python environment that already provides pywebview."""
-
-    current = python_executable_path(sys.executable)
-    for candidate in environments():
-        # uv environments commonly share a base Python through symlinks. Probe
-        # the venv path itself, or we test the base interpreter's dependencies.
-        path = python_executable_path(candidate["path"])
-        if path == current or not path.is_file():
-            continue
-        try:
-            check = subprocess.run(
-                [str(path), "-c", "import webview"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if check.returncode == 0:
-            return str(path)
-    return None
-
-
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="vtools 浅色桌面工作台")
     parser.add_argument("--browser", action="store_true", help="在浏览器中打开，供开发预览")
+    parser.add_argument("--install-check", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if not args.browser:
-        try:
-            import webview  # noqa: F401
-        except ImportError as exc:
-            if getattr(sys, "frozen", False):
-                raise RuntimeError("桌面包缺少 pywebview，请使用包含 PySide6 和 pywebview 的 Python 环境重新构建") from exc
-            fallback = _find_webview_python()
-            if fallback:
-                print(f"当前 Python 未安装桌面依赖，自动使用：{fallback}", flush=True)
-                return subprocess.call([fallback, "-m", "vtools_ui", *(argv or [])])
-            raise RuntimeError("缺少 pywebview，请安装 vtools_ui/requirements.txt；开发预览可使用 --browser") from exc
     manager = TaskManager()
     server = WorkbenchServer(manager)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -321,23 +250,8 @@ def run(argv: list[str] | None = None) -> int:
             except KeyboardInterrupt:
                 pass
         else:
-            import webview
-            clipboard_writer = None
-            if sys.platform.startswith("linux"):
-                from .clipboard import create_qt_clipboard_writer
-                clipboard_writer = create_qt_clipboard_writer()
-            bridge = DesktopBridge(clipboard_writer)
-            window = webview.create_window(
-                "vtools 工作台", url, js_api=bridge, width=1280, height=800,
-                min_size=(1080, 680), background_color="#f4f4f6",
-            )
-            bridge.window = window
-            window.events.shown += lambda: print("vtools 工作台窗口已显示。", flush=True)
-            window.events.closed += manager.close
-            webview.start(gui="qt" if sys.platform.startswith("linux") else None)
-            if not window.events.shown.is_set():
-                raise RuntimeError("桌面窗口未能显示，请检查 Qt/WebView 图形环境；也可使用 --browser 预览")
-            print("vtools 工作台窗口已关闭。", flush=True)
+            from .desktop import run_desktop
+            return run_desktop(url, STATE_DIR, manager.close, verify=args.install_check)
     finally:
         manager.close()
         server.shutdown()

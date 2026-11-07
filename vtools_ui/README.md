@@ -1,6 +1,6 @@
 # vtools 桌面工作台
 
-vtools 使用浅色 React 界面、pywebview 桌面窗口和仅监听本机的 Python 服务。模型任务继续通过项目原有命令或独立脚本在子进程中运行；关闭窗口会停止当前任务。Windows 与 Ubuntu 是首版目标平台，macOS 尚未实测。
+vtools 使用浅色 React 界面、PySide6 Qt WebEngine 桌面窗口和仅监听本机的 Python 服务。模型任务继续通过项目原有命令或独立脚本在子进程中运行；关闭窗口会停止当前任务。Windows 与 Ubuntu 是首版目标平台，macOS 尚未实测。
 
 ## 从仓库根目录启动
 
@@ -9,14 +9,7 @@ python -m pip install -r vtools_ui/requirements.txt
 python -m vtools_ui
 ```
 
-如果默认 Python 没有桌面依赖，启动器会自动寻找已安装 pywebview 的 Conda 或 uv 环境。uv 项目默认从 `~/python-envs/<项目>/.venv` 扫描；也可通过 `VTOOLS_UV_PROJECTS_ROOT` 指定一个或多个项目目录。Linux 安装版首次启动时优先把名为 `vtools` 的 uv 环境设为模型运行环境。工作台右上角的环境选择器和“设置 → 任务使用的 Python 解释器”会列出这些环境，也允许手动填写解释器路径。
-
-也可以明确使用 Conda 环境启动：
-
-```bash
-conda run -n yolo python -m vtools_ui
-# 或：conda activate yolo && python -m vtools_ui
-```
+桌面窗口由 PySide6 直接承载，不需要 pywebview、pythonnet 或系统 WebView2。模型任务仍可在界面中选择 Conda、uv 或手动指定的外部 Python；桌面构建环境与模型环境分开。
 
 不要直接双击 `frontend/index.html`；它是 Vite 开发源文件，没有本地 API。需要浏览器预览时使用 `python -m vtools_ui --browser`。
 
@@ -34,11 +27,11 @@ npm install
 npm run build
 ```
 
-需要生成可分发的桌面目录包或 Ubuntu `.deb` 安装包时，参见 [桌面包构建说明](../packaging/README.md)。安装 `.deb` 后可在应用菜单点击“vtools 工作台”启动。Windows 仍需在 Windows 机器上构建。打包版默认把模型运行结果放在 `~/.vtools_ui/runs/`，不会写入包内。
+需要生成可分发的桌面目录包或安装包时，参见 [桌面包构建说明](../packaging/README.md)。安装 `.deb` 后可在应用菜单点击“vtools 工作台”启动。Windows 须在 Windows 机器上构建，数据默认位于程序旁的 `user-data/`；Ubuntu 模型运行结果默认位于 `~/.vtools_ui/runs/`。
 
 Linux 安装版会在启动时检查 GitHub Releases 的新版本。“设置 → 软件更新”可重新检查并下载安装；需要系统管理员授权。尚未发布到 GitHub 的构建不会被自动更新器发现。
 
-Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。pywebview 的 PySide6 适配依赖由 `requirements.txt` 安装；Windows 使用系统 WebView2 运行时。首次安装后若窗口仍显示旧内容，请完全关闭再启动。
+Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。Qt WebEngine 依赖由 `requirements.txt` 安装，Windows 安装包内置这些运行库。首次安装后若窗口仍显示旧内容，请完全关闭再启动。
 
 ## 功能
 
@@ -68,3 +61,5 @@ Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。p
 无 GPU、TensorRT、nncase 或真实权重时，界面仍可启动并运行无硬件任务；这些硬件路径需要在对应环境中分别验收。
 
 NDJSON 下载：在“格式转换 → NDJSON → YOLO”点击“下载配置”，可保存并发数、自动重试开关、重试次数和超时。默认并发 4、失败后重试 4 次、超时 120 秒，支持复用已下载图片。需使用支持下载配置的 Ultralytics Fork，详见 [转换工具说明](../transform_tools/REQUIREMENT.md)。
+
+Windows 0.5.4 起默认使用安装目录旁的 `user-data/`；请安装到当前用户可写的目录，例如 `D:\Vtools`。设置 `VTOOLS_USER_DATA` 可明确指定其他位置。已有版本的数据不会自动迁移或删除。

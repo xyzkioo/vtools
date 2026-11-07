@@ -1,6 +1,8 @@
 # Ultralytics 外部源码安装与环境检验向导
 
-这个文件夹用于确认独立 Ultralytics Fork 是否可用，以及当前 Python 是否真的加载了指定的源码。
+这个文件夹用于确认当前 Python 的 Ultralytics 运行环境是否可用，也可检查指定的独立 Fork。
+
+默认报告实际 Python 和包版本，不固定 Ultralytics 版本、不要求克隆源码或支持 YOLO26。未指定 `--source` 时检查目标环境中已安装的包；仅在指定 `--weights` 或 `--yaml` 时验证对应模型。缺少核心依赖、导入失败或指定模型运行失败仍判为失败；未执行模型检查会明确提示。
 
 ## 入口
 
@@ -119,10 +121,10 @@ python env_test/check_install.py --source ../ultralytics-ezcn
 
 1. 当前使用的 Python 解释器；
 2. `ultralytics` 的真实导入文件和版本；
-3. 是否导入了 `../ultralytics-ezcn/ultralytics/`，避免误用 pip 版；
+3. 指定 `--source` 时，是否导入了该目录的源码；未指定时允许正常使用 pip 安装的包；
 4. PyTorch、torchvision、NumPy、PyYAML、OpenCV、Pillow；
 5. 当前解释器中的依赖冲突；
-6. `yolo26.yaml` 是否能构建模型并完成一次 Tensor 前向传播；
+6. 指定模型 YAML 时执行构建和一次 Tensor 前向传播，指定权重时执行加载和预测；不自动附加 YOLO26 检查；
 7. CUDA 是否可用。没有 GPU 时会改用 CPU，不会因此判定基础安装失败。
 
 看到下面这样的结果，表示源码来源正确：
@@ -144,7 +146,7 @@ python env_test/check_install.py --source ../ultralytics-ezcn
 
 ## 五、检查自己的权重
 
-安装检查默认不需要训练权重。要额外确认自定义 `.pt` 能否由这份源码加载并预测：
+基础环境检查不需要训练权重，也不自动选择某一代 YOLO 模型。要确认自定义 `.pt` 能否由这份源码加载并预测：
 
 ```bash
 python env_test/check_install.py \
@@ -169,16 +171,16 @@ python env_test/check_install.py \
 
 | 参数 | 作用 |
 | --- | --- |
-| `--source PATH` | 指定外部源码项目根目录；留空时自动查找同级 Fork |
+| `--source PATH` | 指定外部源码项目根目录；留空时检查环境中已安装的包 |
 | `--weights PATH` | 加载并预测指定 `.pt` |
 | `--yaml PATH` | 指定要构建的模型结构 YAML（需包含 `backbone` 和 `head`）；数据集 `data.yaml` 不要填在这里 |
 | `--device auto/cpu/cuda:0` | 选择运行设备；默认自动选择 |
 | `--input-size 64` | 合成测试输入尺寸，脚本会调整为 32 的倍数 |
 | `--check-export` | 检查 ONNX、TensorRT Python API |
 | `--skip-model` | 跳过模型构建和推理 |
-| `--no-local-check` | 允许使用 pip 版，不比较源码路径 |
-| `--expected-version none` | 跳过版本号比较 |
-| `--strict` | 将版本不一致、pip check 冲突和可选依赖缺失判为失败 |
+| `--no-local-check` | 指定源码时跳过导入路径比较；默认无需此参数即可使用 pip 版 |
+| `--expected-version VERSION` | 可选比较指定版本；默认仅报告实际版本，`none` 可显式跳过 |
+| `--strict` | 将显式指定版本的不一致、pip check 冲突和可选依赖缺失判为失败 |
 
 TensorRT 不是普通 PyTorch 训练的必需项。只有需要导出或 TensorRT 测速时才运行：
 
