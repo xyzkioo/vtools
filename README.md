@@ -121,7 +121,7 @@ uv run --project /path/to/python-envs/vtools --no-sync \
   --source /path/to/ultralytics-ezcn
 ```
 
-检查器会验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、依赖一致性、CUDA、模型构建和一次前向传播。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要验证自己的权重时增加 `--weights /path/to/best.pt`。没有 uv 项目时，激活目标环境后直接运行 `python env_test/check_install.py ...`。
+检查器默认验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、依赖一致性和 CUDA，不固定包版本，也不要求本地 Fork。指定 `--yaml` 或 `--weights` 后才执行对应模型的构建或预测；未执行模型检查会明确提示。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要验证自己的权重时增加 `--weights /path/to/best.pt`。没有 uv 项目时，激活目标环境后直接运行 `python env_test/check_install.py ...`。
 
 ## 接入独立 Ultralytics Fork
 
@@ -202,7 +202,7 @@ python model_compression/run_model_compression.py --help
 
 ```text
 vtools/
-├── vtools_ui/             # React + pywebview 桌面工作台
+├── vtools_ui/             # React + Qt WebEngine 桌面工作台
 ├── env_test/              # 环境和源码来源检查
 ├── model_diagnostics/     # 检测质量与错误原因分析
 ├── model_visualization/   # 特征、CAM 和检测阶段可视化
@@ -210,7 +210,7 @@ vtools/
 ├── model_compression/     # 量化、剪枝和蒸馏
 ├── transform_tools/       # 数据、ONNX 和 K230 转换
 ├── config/                # 统一入口配置
-└── packaging/             # 桌面包和 Ubuntu `.deb` 构建
+└── packaging/             # 桌面包、Windows 安装程序和 Ubuntu `.deb` 构建
 ```
 
 独立 Ultralytics Fork 位于 vtools 同级目录，不在上述源码树内。
@@ -227,7 +227,7 @@ vtools/
 | [性能测速](speed_test/README.md) | PyTorch、TensorRT 和一致性检查 |
 | [模型压缩](model_compression/README.md) | 剪枝、量化、蒸馏和 YOLO 检测压缩 |
 | [数据与 K230 转换](transform_tools/REQUIREMENT.md) | NDJSON、ONNX、nncase 和 `.kmodel` |
-| [桌面包构建](packaging/README.md) | PyInstaller、Ubuntu `.deb` 和 Release 发布 |
+| [桌面包构建](packaging/README.md) | PyInstaller、Windows 图形安装包、Ubuntu `.deb` 和 Release 发布 |
 
 ## 许可证
 
