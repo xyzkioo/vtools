@@ -541,6 +541,8 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
                 args += [flag, _field_path(values[key])]
         if values.get("export"):
             args.append("--check-export")
+        if values.get("compression"):
+            args.append("--check-compression")
         if values.get("skip_model"):
             args.append("--skip-model")
         title = tool["title"]

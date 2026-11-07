@@ -125,7 +125,8 @@ python env_test/check_install.py --source ../ultralytics-ezcn
 4. PyTorch、torchvision、NumPy、PyYAML、OpenCV、Pillow；
 5. 当前解释器中的依赖冲突；
 6. 指定模型 YAML 时执行构建和一次 Tensor 前向传播，指定权重时执行加载和预测；不自动附加 YOLO26 检查；
-7. CUDA 是否可用。没有 GPU 时会改用 CPU，不会因此判定基础安装失败。
+7. CUDA 是否可用。没有 GPU 时会改用 CPU，不会因此判定基础安装失败；
+8. 指定 `--check-compression` 时检查模型压缩的可选依赖 `torch-pruning`（要求 `>=1.4.1`）；缺失或版本过低只记为警告。
 
 看到下面这样的结果，表示源码来源正确：
 
@@ -177,6 +178,7 @@ python env_test/check_install.py \
 | `--device auto/cpu/cuda:0` | 选择运行设备；默认自动选择 |
 | `--input-size 64` | 合成测试输入尺寸，脚本会调整为 32 的倍数 |
 | `--check-export` | 检查 ONNX、TensorRT Python API |
+| `--check-compression` | 检查模型压缩依赖 `torch-pruning`（警告级，`--strict` 下判失败） |
 | `--skip-model` | 跳过模型构建和推理 |
 | `--no-local-check` | 指定源码时跳过导入路径比较；默认无需此参数即可使用 pip 版 |
 | `--expected-version VERSION` | 可选比较指定版本；默认仅报告实际版本，`none` 可显式跳过 |
@@ -189,6 +191,15 @@ python env_test/check_install.py \
     --source ../ultralytics-ezcn \
     --check-export
 ```
+
+模型压缩的依赖感知结构化剪枝需要 `torch-pruning>=1.4.1`，它是可选依赖；`compression.structured.method` 保持默认的 `scale` 时不加载它。需要这条路径时运行：
+
+```bash
+python env_test/check_install.py \
+    --check-compression
+```
+
+未安装或版本过低只给出警告，不影响 Python、核心依赖、CUDA 和模型检查的结论；只有加 `--strict` 才判为失败。
 
 ## 七、如果要改包名
 

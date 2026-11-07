@@ -108,6 +108,7 @@ TOOLS: dict[str, dict] = {
             {"key": "device", "label": "运行设备", "kind": "select", "options": ["auto", "cpu", "cuda:0"], "default": "auto"},
             {"key": "size", "label": "合成输入尺寸", "kind": "number", "default": "64"},
             {"key": "export", "label": "检查 ONNX / TensorRT 导入", "kind": "bool"},
+            {"key": "compression", "label": "检查压缩环境（torch-pruning）", "kind": "bool"},
             {"key": "skip_model", "label": "跳过模型构建和前向传播", "kind": "bool"},
         ],
     },

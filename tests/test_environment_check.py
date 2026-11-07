@@ -34,7 +34,7 @@ class DependencyCheckTests(unittest.TestCase):
 
 
 class CompatibilityCheckTests(unittest.TestCase):
-    def run_check(self, arguments=(), *, info=None, model=None, exports=None):
+    def run_check(self, arguments=(), *, info=None, model=None, exports=None, compression=None):
         info = info if info is not None else {
             "module_file": str(Path("installed/ultralytics/__init__.py").resolve()),
             "module_version": "8.2.0",
@@ -51,6 +51,7 @@ class CompatibilityCheckTests(unittest.TestCase):
                 patch.object(check_install, "run_dependency_check"), \
                 patch.object(check_install, "run_model_probe", return_value=(model, "")) as modeled, \
                 patch.object(check_install, "run_export_probe", return_value=(exports or {}, "")), \
+                patch.object(check_install, "run_compression_probe", return_value=(compression or {}, "")), \
                 contextlib.redirect_stdout(io.StringIO()):
             result = check_install.main()
         return result, reporter, imported, modeled
@@ -121,3 +122,40 @@ class CompatibilityCheckTests(unittest.TestCase):
             result, _, _, _ = self.run_check(["--check-export", *strict], exports={
                 "onnx": {"ok": False}, "tensorrt": {"ok": False}})
             self.assertEqual(result, expected)
+
+    def test_missing_compression_dependency_warns_unless_strict(self):
+        for strict, expected in (([], 0), (["--strict"], 1)):
+            with self.subTest(strict=bool(strict)):
+                result, reporter, _, _ = self.run_check(
+                    ["--check-compression", *strict],
+                    compression={"ok": False, "error": "ModuleNotFoundError: No module named 'torch_pruning'"},
+                )
+                self.assertEqual(result, expected)
+                event = next(e for e in reporter.events if e.name == "压缩环境")
+                self.assertEqual(event.status, "FAIL" if strict else "WARN")
+                self.assertIn("torch-pruning", event.detail)
+
+    def test_outdated_compression_dependency_warns(self):
+        result, reporter, _, _ = self.run_check(
+            ["--check-compression"],
+            compression={"ok": True, "version": "1.2.0", "file": "torch_pruning/__init__.py"},
+        )
+        self.assertEqual(result, 0)
+        event = next(e for e in reporter.events if e.name == "压缩环境")
+        self.assertEqual(event.status, "WARN")
+        self.assertIn("1.4.1", event.message)
+
+    def test_satisfied_compression_dependency_passes(self):
+        result, reporter, _, _ = self.run_check(
+            ["--check-compression"],
+            compression={"ok": True, "version": "1.6.0", "file": "torch_pruning/__init__.py"},
+        )
+        self.assertEqual(result, 0)
+        event = next(e for e in reporter.events if e.name == "压缩环境")
+        self.assertEqual(event.status, "PASS")
+
+    def test_compression_check_is_skipped_by_default(self):
+        result, reporter, _, _ = self.run_check()
+        self.assertEqual(result, 0)
+        event = next(e for e in reporter.events if e.name == "压缩环境")
+        self.assertEqual(event.status, "SKIP")
