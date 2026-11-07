@@ -72,7 +72,9 @@ python packaging/build_deb.py
 
 更新安装包时先修改 `vtools_ui/__init__.py` 的版本，再重新构建目录包和 `.deb`。安装更高版本的 `.deb` 会升级已安装的工作台，无需卸载旧版。
 
-从 0.3.1 起，工作台启动时会检查 [GitHub Releases](https://github.com/xyzkioo/vtools/releases) 的最新正式发布版，也可在“设置 → 软件更新”手动检查。发布时标签使用 `v<版本>`，上传同版本、同架构的 `vtools_<版本>_<架构>.deb`；GitHub 提供的 SHA-256 摘要用于下载校验。发现新版后，点击“下载并安装”，系统会弹出管理员授权窗口。安装完成后重新打开工作台。GitHub 尚未发布安装包时，界面会显示“GitHub 尚无发布版”。
+从 0.5.8 起，安装版（Windows 与 Linux）会在启动时检查 [GitHub Releases](https://github.com/xyzkioo/vtools/releases)，也可在“设置 → 软件更新”手动检查。“软件更新”分两行列出 Windows x64 安装包（`vtools-<版本>-windows-x64-setup.exe`）与 Linux `.deb`（`vtools_<版本>_<架构>.deb`）各自的最新可用版本，两个平台互不阻塞：某个 release 只带了其中一个平台的资产时，另一个平台沿用自己最新的那一版。发布时标签使用 `v<版本>`，GitHub 提供的 SHA-256 摘要用于下载校验，缺少摘要的资产不会被提供安装。
+
+Windows 的“下载并安装”是半自动流程：下载安装包 → 校验 SHA-256 与大小 → 调起 Inno Setup 安装向导，由用户在向导里确认并完成安装，随后重新打开工作台；安装前仍会执行 `--install-check`。Linux 的“下载并安装”下载并校验 `.deb` 后通过系统授权（pkexec + apt-get）安装。草稿版与预发布版不会被识别为最新版。
 
 已安装的 0.3.0 没有内置更新器，需手动安装 0.3.1 一次；此后才可在工作台里更新。当前构建脚本不会自动上传安装包。
 

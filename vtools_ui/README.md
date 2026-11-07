@@ -29,7 +29,7 @@ npm run build
 
 需要生成可分发的桌面目录包或安装包时，参见 [桌面包构建说明](../packaging/README.md)。安装 `.deb` 后可在应用菜单点击“vtools 工作台”启动。Windows 须在 Windows 机器上构建，数据默认位于程序旁的 `user-data/`；Ubuntu 模型运行结果默认位于 `~/.vtools_ui/runs/`。
 
-Linux 安装版会在启动时检查 GitHub Releases 的新版本。“设置 → 软件更新”可重新检查并下载安装；需要系统管理员授权。尚未发布到 GitHub 的构建不会被自动更新器发现。
+安装版（Windows 与 Linux）会在启动时检查 GitHub Releases 的新版本，“设置 → 软件更新”也会列出 Windows 安装包与 `.deb` 两个平台各自的最新可用版本。“检查更新”只读取标签和资产信息；Windows 点击“下载并安装”会下载安装包、校验 SHA-256 后调起安装向导，由用户在向导里确认，安装完成后重新打开工作台；Linux 走系统授权安装 `.deb`。尚未发布到 GitHub 的构建不会被自动更新器发现。
 
 Ubuntu 若缺少 Qt 平台插件所需系统库，可安装 `libxcb-cursor0`。Qt WebEngine 依赖由 `requirements.txt` 安装，Windows 安装包内置这些运行库。首次安装后若窗口仍显示旧内容，请完全关闭再启动。
 
