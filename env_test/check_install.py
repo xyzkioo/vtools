@@ -36,7 +36,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 DEFAULT_MODULE = "ultralytics"
 DEFAULT_DISTRIBUTION = "ultralytics"
-KNOWN_VERSION = "8.4.128"
 DEFAULT_INPUT_SIZE = 64
 PROBE_MARKER = "__VTOOLS_INSTALL_CHECK__"
 
@@ -84,7 +83,7 @@ class Reporter:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="检验 vtools 的本地 Ultralytics 源码是否真正安装并能够构建/运行模型。"
+        description="检验当前 Python 的 Ultralytics 运行环境；可选检查指定源码和模型。"
     )
     parser.add_argument(
         "--source",
@@ -102,7 +101,7 @@ def parse_args() -> argparse.Namespace:
         "--yaml",
         type=Path,
         default=None,
-        help="可选模型 YAML。默认自动寻找源码/已安装包中的 cfg/models/26/yolo26.yaml。",
+        help="可选模型结构 YAML；仅检查指定模型，不要求特定 YOLO 版本。",
     )
     parser.add_argument(
         "--device",
@@ -127,8 +126,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--expected-version",
-        default=KNOWN_VERSION,
-        help=f"期望版本号。默认 {KNOWN_VERSION}；只检查来源时可写 none。",
+        default=None,
+        help="可选期望版本号；默认只报告实际版本，不固定版本。",
     )
     parser.add_argument(
         "--check-export",
@@ -148,7 +147,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="把版本不一致、依赖一致性检查失败和可选依赖缺失也作为失败处理。",
+        help="把显式指定版本的不一致、依赖一致性检查失败和可选依赖缺失也作为失败处理。",
     )
     return parser.parse_args()
 
@@ -168,29 +167,6 @@ def normalise_source_root(path: Path) -> Path:
     if (path / "ultralytics" / "__init__.py").is_file():
         return path
     return path
-
-
-def infer_source_root(script_dir: Path, input_paths: Sequence[Path] = ()) -> Optional[Path]:
-    """在 vtools 克隆目录及其同级目录中自动寻找 Ultralytics Fork。"""
-    repo_root = script_dir.parent
-    candidates = []
-    configured = os.environ.get("VTOOLS_ULTRALYTICS_REPO")
-    if configured:
-        configured_path = Path(configured).expanduser()
-        candidates.append(configured_path if configured_path.is_absolute() else repo_root / configured_path)
-    for parent in (repo_root, repo_root.parent):
-        candidates.extend(parent / name for name in ("ultralytics-cn", "ultralytics-ezcn", "ultralytics"))
-    # A frozen desktop app runs from /opt/vtools, while the user's weights and
-    # dataset usually live under a workspace containing the sibling Fork.
-    for input_path in input_paths:
-        path = input_path.expanduser().resolve()
-        for parent in path.parents:
-            candidates.extend(parent / name for name in ("ultralytics-cn", "ultralytics-ezcn", "ultralytics"))
-    for candidate in candidates:
-        root = normalise_source_root(candidate)
-        if (root / "ultralytics" / "__init__.py").is_file():
-            return root
-    return None
 
 
 def source_package_file(source_root: Optional[Path], module_name: str) -> Optional[Path]:
@@ -550,7 +526,6 @@ def run_dependency_check(reporter: Reporter, strict: bool) -> None:
 def main() -> int:
     args = parse_args()
     reporter = Reporter()
-    script_dir = Path(__file__).resolve().parent
     call_dir = Path.cwd().resolve()
 
     if sys.version_info >= (3, 8):
@@ -570,21 +545,13 @@ def main() -> int:
     if args.source is not None:
         source_root = normalise_source_root(resolve_path(args.source, call_dir))
     else:
-        source_root = infer_source_root(
-            script_dir,
-            tuple(
-                resolve_path(path, call_dir)
-                for path in (args.weights, args.yaml)
-                if path is not None
-            ),
-        )
+        source_root = None
 
     expected_file = source_package_file(source_root, args.module)
     if source_root is None:
-        reporter.warned(
-            "本地源码目录",
-            "没有自动找到外部 Ultralytics 源码；将只检查当前 Python 中安装的包。",
-            "若要强制确认本地源码，请加 --source /path/to/ultralytics-ezcn。",
+        reporter.passed(
+            "包来源",
+            "检查当前解释器实际安装的包；不要求本地源码目录。",
         )
     elif expected_file is None:
         reporter.failed(
@@ -645,9 +612,11 @@ def main() -> int:
         else:
             reporter.warned("安装元数据", metadata_message, metadata_detail)
 
-    expected_version = str(args.expected_version).strip()
+    expected_version = str(args.expected_version or "").strip()
     actual_version = str(info.get("module_version") or info.get("distribution_version") or "")
-    if expected_version.lower() in {"", "none", "skip"}:
+    if args.expected_version is None:
+        reporter.passed("版本", f"实际版本：{actual_version or '未知'}；不限定版本号，继续检查依赖和所选模型。")
+    elif expected_version.lower() in {"", "none", "skip"}:
         reporter.skipped("版本", "按参数跳过版本号比较。", f"实际版本：{actual_version or '未知'}")
     elif actual_version == expected_version:
         reporter.passed("版本", f"版本符合预期：{actual_version}。")
@@ -656,7 +625,7 @@ def main() -> int:
         if args.strict:
             reporter.failed("版本", message)
         else:
-            reporter.warned("版本", message, "如果源码来自更新提交，可用 --expected-version none 跳过比较。")
+            reporter.warned("版本", message, "当前未启用 --strict，继续检查实际可用性。")
 
     if source_root is not None and expected_file is not None and not args.no_local_check:
         actual_file = Path(str(info.get("module_file"))).expanduser().resolve()
@@ -730,21 +699,6 @@ def main() -> int:
                 "请在此处选择包含 backbone 和 head 的模型 YAML；数据集文件仍可用于其他工具。",
             )
             yaml_path = None
-    if yaml_path is None and source_root is not None:
-        candidate = source_root / "ultralytics" / "cfg" / "models" / "26" / "yolo26.yaml"
-        if candidate.is_file():
-            yaml_path = candidate
-    if yaml_path is None and info.get("module_file"):
-        installed_candidate = (
-            Path(str(info["module_file"])).resolve().parent
-            / "cfg"
-            / "models"
-            / "26"
-            / "yolo26.yaml"
-        )
-        if installed_candidate.is_file():
-            yaml_path = installed_candidate
-
     weights_path = resolve_path(args.weights, call_dir) if args.weights else None
     if weights_path is not None and not weights_path.is_file():
         reporter.failed("权重文件", f"文件不存在：{weights_path}")
@@ -757,8 +711,8 @@ def main() -> int:
     elif yaml_path is None and weights_path is None:
         reporter.warned(
             "模型构建/前向",
-            "没有找到 YAML 或权重，未执行实际模型检查。",
-            "在 vtools 根目录运行，或使用 --source/--yaml/--weights 指定文件。",
+            "未指定模型 YAML 或权重，仅验证基础环境，未执行实际模型检查。",
+            "需要验证模型时，使用 --yaml 或 --weights 指定要运行的模型。",
         )
     else:
         model_info, model_error = run_model_probe(

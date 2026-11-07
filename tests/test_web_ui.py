@@ -11,15 +11,13 @@ import tempfile
 import threading
 import time
 import unittest
-from enum import IntEnum
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from vtools_ui.webapp import core, server
-from vtools_ui.webapp.server import DesktopBridge, WorkbenchServer
+from vtools_ui.webapp.server import WorkbenchServer
 from vtools_ui.webapp.tasks import TaskManager
 from vtools_ui.process_environment import build_tool_environment
 
@@ -54,6 +52,7 @@ class WebWorkbenchTests(unittest.TestCase):
             self.assertEqual(path.read_text(encoding="utf-8"), "[]")
             self.assertEqual(list(path.parent.iterdir()), [path])
 
+    @unittest.skipIf(os.name == "nt", "Linux 环境路径约定")
     def test_selected_python_receives_packaged_runtime_and_environment_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "_internal"
@@ -111,6 +110,7 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertNotIn("CONDA_DEFAULT_ENV", environment)
         self.assertEqual(environment["VIRTUAL_ENV"], str(prefix))
 
+    @unittest.skipIf(os.name == "nt", "Linux 环境路径约定")
     def test_frozen_environment_scan_finds_conda_without_path_and_hides_workbench(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
@@ -189,39 +189,6 @@ class WebWorkbenchTests(unittest.TestCase):
 
         self.assertEqual(selected, executable)
         self.assertEqual(environment["PATH"].split(os.pathsep)[0], str(executable.parent))
-
-    def test_webview_fallback_probes_uv_environment_not_shared_base_python(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            executable = Path(directory) / ".venv" / "bin" / "python"
-            executable.parent.mkdir(parents=True)
-            try:
-                executable.symlink_to(sys.executable)
-            except OSError as exc:
-                self.skipTest(f"无法创建解释器符号链接：{exc}")
-            with patch.object(server, "environments", return_value=[{"path": str(executable)}]), \
-                    patch.object(server.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as probe:
-                self.assertEqual(server._find_webview_python(), str(executable))
-            self.assertEqual(probe.call_args.args[0][0], str(executable))
-
-    def test_desktop_picker_uses_native_dialog_for_file_and_directory(self) -> None:
-        class FileDialog(IntEnum):
-            OPEN = 10
-            FOLDER = 20
-            SAVE = 30
-
-        bridge = DesktopBridge()
-        bridge.window = Mock()
-        bridge.window.create_file_dialog.side_effect = [("/tmp/model.pt",), ("/tmp/images",), None]
-        with patch.dict(sys.modules, {"webview": SimpleNamespace(FileDialog=FileDialog)}):
-            self.assertEqual(bridge.pick_path("file"), "/tmp/model.pt")
-            self.assertEqual(bridge.pick_path("dir"), "/tmp/images")
-            self.assertEqual(bridge.pick_path("save_file"), "")
-            with self.assertRaises(ValueError):
-                bridge.pick_path("file_or_dir")
-        self.assertEqual(
-            [call.args[0] for call in bridge.window.create_file_dialog.call_args_list],
-            [FileDialog.OPEN, FileDialog.FOLDER, FileDialog.SAVE],
-        )
 
     def test_config_views_preserve_unknown_and_dotted_modules(self) -> None:
         raw = "modules:\n  diagnostics.missed: true\n  predict.generate: false\ncustom:\n  keep: [a, b]\n"
@@ -404,6 +371,7 @@ class WebWorkbenchTests(unittest.TestCase):
             self.assertIn("--config", args)
             self.assertEqual(Path(args[args.index("--config") + 1]), user_dir / "configs" / "model_diagnostics" / "config" / "config.yaml")
 
+    @patch.object(core.sys, "platform", "linux")
     def test_frozen_dataset_quality_default_output_is_writable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "bundle"
@@ -418,6 +386,7 @@ class WebWorkbenchTests(unittest.TestCase):
             self.assertEqual(output, results / "dataset_quality")
             self.assertNotIn(root, output.parents)
 
+    @patch.object(core.sys, "platform", "linux")
     def test_frozen_lightweight_data_tools_use_bundled_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -444,6 +413,7 @@ class WebWorkbenchTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Python 解释器不存在"):
                     core.build_command({"tool_id": "diagnostics", "values": {}})
 
+    @patch.object(core.sys, "platform", "linux")
     def test_frozen_diagnostics_dispatch_follows_prediction_and_ground_truth_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -473,6 +443,7 @@ class WebWorkbenchTests(unittest.TestCase):
                     self.assertIn("--weights", args)
                     self.assertNotIn("--predictions", args)
 
+    @patch.object(core.sys, "platform", "linux")
     def test_frozen_predictions_diagnostics_does_not_require_external_python(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -568,6 +539,7 @@ class WebWorkbenchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "数据集 YAML"):
             core.build_command({"tool_id": "dataset_quality", "values": {}})
 
+    @patch.object(core.sys, "platform", "linux")
     def test_frozen_workbench_wraps_tool_scripts(self) -> None:
         expected = sys.executable
         with patch.object(core.sys, "frozen", True, create=True), \

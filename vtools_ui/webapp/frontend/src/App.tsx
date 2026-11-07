@@ -23,7 +23,7 @@ type UpdateInfo = { status: 'unsupported' | 'unpublished' | 'current' | 'availab
 type ResultFolder = { name: string; folders: ResultFolder[]; files: Result[]; count: number }
 
 declare global {
-  interface Window { pywebview?: { api: { pick_path: (kind: string) => Promise<string>; copy_text: (text: string) => Promise<boolean> } } }
+  interface Window { vtoolsDesktop?: { api: { pick_path: (kind: string) => Promise<string>; copy_text: (text: string) => Promise<boolean> } } }
 }
 
 const token = new URLSearchParams(location.search).get('token') || ''
@@ -70,15 +70,15 @@ function Icon({ name, size = 19 }: { name: string; size?: number }) {
 }
 
 function PathField({ value, onChange, kind, placeholder, hint }: { value: string; onChange: (value: string) => void; kind: string; placeholder?: string; hint?: string }) {
-  const [bridgeReady, setBridgeReady] = useState(Boolean(window.pywebview?.api))
+  const [bridgeReady, setBridgeReady] = useState(Boolean(window.vtoolsDesktop?.api))
   useEffect(() => {
-    const ready = () => setBridgeReady(Boolean(window.pywebview?.api))
-    window.addEventListener('pywebviewready', ready)
-    return () => window.removeEventListener('pywebviewready', ready)
+    const ready = () => setBridgeReady(Boolean(window.vtoolsDesktop?.api))
+    window.addEventListener('vtoolsdesktopready', ready)
+    return () => window.removeEventListener('vtoolsdesktopready', ready)
   }, [])
   async function pick(dialogKind: 'file' | 'dir' | 'save_file') {
-    if (!window.pywebview?.api) return
-    const selected = await window.pywebview.api.pick_path(dialogKind)
+    if (!window.vtoolsDesktop?.api) return
+    const selected = await window.vtoolsDesktop.api.pick_path(dialogKind)
     if (selected) onChange(selected)
   }
   const choices: { kind: 'file' | 'dir' | 'save_file'; label: string }[] = kind === 'file_or_dir'
@@ -414,8 +414,8 @@ function App() {
   async function copyLog() {
     if (!log) { setNotice('当前没有可复制的日志'); return }
     try {
-      const nativeCopy = window.pywebview?.api.copy_text
-      if (nativeCopy && await window.pywebview!.api.copy_text(log)) {
+      const nativeCopy = window.vtoolsDesktop?.api.copy_text
+      if (nativeCopy && await window.vtoolsDesktop!.api.copy_text(log)) {
         setNotice('日志已复制到系统剪贴板')
         return
       }

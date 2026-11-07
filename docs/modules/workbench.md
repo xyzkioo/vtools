@@ -2,7 +2,7 @@
 
 [返回模块导航](../README.md)
 
-用 React 与 pywebview 统一配置编辑、任务启动、日志、历史和结果预览，任务仍调用各模块原有后端。
+用 React 与 PySide6 Qt WebEngine 统一配置编辑、任务启动、日志、历史和结果预览，任务仍调用各模块原有后端。
 
 ## 入口
 
@@ -26,7 +26,7 @@ python -m vtools_ui --browser
 
 ## 输出
 
-可浏览运行目录、JSON/CSV/文本、图片和 HTML，并跳转到模型产物目录。安装版模型任务默认输出 `~/.vtools_ui/runs/`，转换工具仍按显式输出路径保存。
+可浏览运行目录、JSON/CSV/文本、图片和 HTML，并跳转到模型产物目录。Windows 安装版模型任务默认输出程序旁的 `user-data/runs/`，Ubuntu 安装版默认输出 `~/.vtools_ui/runs/`，转换工具仍按显式输出路径保存。
 
 每次任务的命令及输出写入 `.vtools_ui/logs/<任务 ID>.log`，可从“任务记录”重新打开；运行详情可复制日志。历史日志界面只显示末尾 2 MB，并给出完整文件路径。
 
@@ -37,3 +37,5 @@ python -m vtools_ui --browser
 一次只运行一个任务，关闭窗口会停止当前任务。桌面窗口与浏览器模式的原生文件选择能力不同；前端源 HTML 不能直接双击使用。模型环境依赖按实际输入路径决定。
 
 详细说明：[原模块文档](../../vtools_ui/README.md)。
+
+安装版的工具脚本从 `_internal/tool-sources/` 运行，独立于桌面 Python 的二进制模块。所选外部 Python 可以与桌面内置 Python 使用不同的次版本；其 PyTorch、Ultralytics 等依赖由所选环境自行提供。

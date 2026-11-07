@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 from model_compression.core.module_selection import COMPRESSION_MODES
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(sys._MEIPASS) / "tool-sources" if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
 
 TOOLS: dict[str, dict] = {
     "diagnostics": {
@@ -97,10 +98,10 @@ TOOLS: dict[str, dict] = {
         ],
     },
     "environment": {
-        "title": "环境检查", "group": "system", "description": "检查 Python、PyTorch、CUDA 和本地源码。",
+        "title": "环境检查", "group": "system", "description": "检查所选 Python 的依赖和运行能力，不固定版本或要求本地源码。",
         "script": "env_test/check_install.py",
         "fields": [
-            {"key": "source", "label": "源码目录（可选）", "kind": "dir", "default": "", "hint": "留空时自动查找 vtools 同级的 Ultralytics Fork。"},
+            {"key": "source", "label": "源码目录（可选）", "kind": "dir", "default": "", "hint": "留空时检查所选环境中已安装的包，无需克隆源码。"},
             {"key": "weights", "label": "模型权重", "kind": "file"},
             {"key": "yaml", "label": "模型结构 YAML（可选）", "kind": "file",
              "hint": "可选：已有 .pt 权重时留空；只有从模型结构创建网络时才选择包含 backbone 和 head 的 YAML。数据集 data.yaml 请不要填在这里。"},
