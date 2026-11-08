@@ -1,6 +1,17 @@
 # vtools 项目交接
 
-最后修改：2026-11-05
+最后修改：2026-11-08
+
+## 本轮更新（2026-11-08）：0.5.11 移除 NDJSON 下载配置面板
+
+- 用户确认面板无效后整体删除：「格式转换 → NDJSON → YOLO」下的「下载配置」卡片、弹窗、`settings.json` 的 `ndjson_download` 字段，以及 `catalog.py` 中该变体的 4 个下载字段和 `core.py` 的默认值/校验/传参/`auto_retry` 开关分支。
+- 原因：`download_workers`/`download_retries`/`download_timeout`/`retry_delay` 只存在于打过补丁的 Ultralytics Fork；官方 `convert_ndjson_to_yolo(ndjson_path, output_path=None)` 没有这些参数，旧的入口检查会直接抛「请使用已更新的 ultralytics-cn Fork」。
+- `transform_tools/ndjson_to_yolo.py` 改为直接调用官方接口；下载失败时在 stdout 提示重启即可续传（异常文本在部分终端按本地编码写出会乱码，故提示走 print）。旧的 4 个命令行参数保留为 `argparse.SUPPRESS` 的无效参数，避免旧命令报未识别参数。
+- 端到端实测：用 lychee.ndjson 的 3 图子集跑通转换；坏 URL 场景报 `Downloaded 2/3` 并打印续传提示；同一输入重跑只补缺失图片（已下载文件 mtime 未变）。
+- 删除 `tests/test_ndjson_download.py`；同步 `transform_tools/REQUIREMENT.md`。版本按补丁规则升到 0.5.11。
+- 未修改 Ultralytics Fork 源码；运行转换需要该环境能导入 `aiohttp`。
+
+---
 
 ## 本轮更新（2026-11-05）：0.5.0 本地打包完成
 
