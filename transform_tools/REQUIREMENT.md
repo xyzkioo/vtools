@@ -51,21 +51,15 @@ python transform_tools/PY2KM_validate.py --help
 
 #### 1. `ndjson_to_yolo.py`
 
-使用支持下载配置的 Ultralytics Fork 及其依赖，外部 Python 环境需要能导入该 Fork。
-工作台“格式转换 → NDJSON → YOLO → 下载配置”提供并发、自动重试、失败后重试次数和超时设置，保存后持久生效。
-默认并发 4，自动重试开启，失败后重试 4 次（含首次共 5 次），单次超时 120 秒。
-重试等待从 2 秒开始逐次翻倍，最多 60 秒；HTTP 404 等永久错误不重试。
+使用 Ultralytics 自带的 NDJSON 转换接口及其依赖（下载图片需要 `aiohttp`），外部 Python 环境需要能导入 Ultralytics。
+下载并发、重试次数和超时由 Ultralytics 内部固定（高并发、单张重试 3 次、单张超时 30 秒），本工具不再提供调参入口。
 
 ```bash
-python transform_tools/ndjson_to_yolo.py --input data.ndjson --output dataset --workers 4 --retries 4 --timeout 120
-# 关闭自动重试
-python transform_tools/ndjson_to_yolo.py --input data.ndjson --output dataset --workers 2 --no-auto-retry
+python transform_tools/ndjson_to_yolo.py --input data.ndjson --output dataset
 ```
 
-并发范围 1–128，失败后重试次数 0–20，超时 1–3600 秒。
-同一输入和输出目录重跑会复用已下载图片；下载未完成时不写成功标记，失败保持非零退出。
-下载使用临时文件完成后再替换，避免中断产生半张图片。旧版 Ultralytics 不支持这些参数时会明确提示更新 Fork。
-需要网络访问和目标目录写权限；设置只影响下次启动的任务。
+同一输入和输出目录重跑会复用已下载图片：部分图片下载失败后直接重新运行即可续传，只补齐缺失的那几张。
+需要网络访问和目标目录写权限。
 
 #### 2. `py2kmodel.py`
 

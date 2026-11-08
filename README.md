@@ -233,4 +233,4 @@ vtools/
 
 vtools 使用 [MIT License](LICENSE)。独立的 [ultralytics-ezcn](https://github.com/xyzkioo/ultralytics-ezcn) 仓库遵循其自身的许可证和源码授权声明。
 
-NDJSON 下载：在“格式转换 → NDJSON → YOLO”点击“下载配置”，可保存并发数、自动重试开关、重试次数和超时。默认并发 4、失败后重试 4 次、超时 120 秒，支持复用已下载图片。需使用支持下载配置的 Ultralytics Fork，详见 [转换工具说明](transform_tools/REQUIREMENT.md)。
+NDJSON 下载：在“格式转换 → NDJSON → YOLO”选择 NDJSON 文件和输出目录即可转换，下载策略由 Ultralytics 内部决定（高并发、单张失败重试 3 次、单张超时 30 秒），官方版与 Fork 都能用。部分图片下载失败时重新点击运行即可续传，已下载的图片自动跳过。运行环境需要能导入 Ultralytics 和 `aiohttp`，详见 [转换工具说明](transform_tools/REQUIREMENT.md)。
