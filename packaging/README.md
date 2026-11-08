@@ -68,7 +68,7 @@ python packaging/build_deb.py
 
 生成的 `dist/vtools_<版本>_<架构>.deb` 可以通过文件管理器双击安装。安装后在应用菜单搜索“vtools 工作台”，点击图标即可启动。安装包会把完整目录包放到 `/opt/vtools/`，并安装应用菜单入口和图标。卸载可通过系统软件管理器完成。
 
-也可在仓库根目录执行 `sudo apt install ./dist/vtools_<版本>_<架构>.deb`。v0.5.10 的包信息、校验值和验证范围见[发行说明](../docs/releases/v0.5.10.md)。升级后完全退出旧工作台再重新打开。
+也可在仓库根目录执行 `sudo apt install ./dist/vtools_<版本>_<架构>.deb`。v0.5.11 的包信息、校验值和验证范围见[发行说明](../docs/releases/v0.5.11.md)。升级后完全退出旧工作台再重新打开。
 
 更新安装包时先修改 `vtools_ui/__init__.py` 的版本，再重新构建目录包和 `.deb`。安装更高版本的 `.deb` 会升级已安装的工作台，无需卸载旧版。
 
