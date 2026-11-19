@@ -2,7 +2,7 @@
 
 [返回模块导航](../README.md)
 
-把检测诊断、可视化、测速、一致性检查和压缩分发到已有后端，适合脚本调用和重复实验。
+把检测诊断、可视化、测速和一致性检查分发到已有后端，适合脚本调用和重复实验。
 
 ## 入口
 
@@ -15,7 +15,7 @@ python run_tools.py --tool diagnostics --config model_diagnostics/config/config.
 
 ## 输入与功能
 
-`--tool` 支持 `diagnostics`、`pytorch`、`tensorrt`、`consistency`、`visualization`、`compression`。一键测速、数据集检查和转换工具使用各自入口。
+`--tool` 支持 `diagnostics`、`pytorch`、`tensorrt`、`consistency`、`visualization`。一键测速、数据集检查和转换工具使用各自入口。
 
 默认配置映射见 [config/tools.yaml](../../config/tools.yaml)。传入这份配置时，子配置路径相对仓库根目录解析；直接传入子项目 YAML 时，由对应工具解释。
 

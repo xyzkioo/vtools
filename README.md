@@ -49,7 +49,6 @@
 | 检测诊断 | 加载模型或已有预测，分析漏检、错分类、背景误检、重复框、定位偏差、阈值和重叠 |
 | 模型可视化 | 指定层特征图、Grad-CAM / LayerCAM、检测头阶段追踪 |
 | 性能测速 | PyTorch / TensorRT 固定输入计时、checkpoint 检查、显存统计和跨后端一致性 |
-| 模型压缩 | 动态 INT8、非结构化剪枝、结构化通道缩放、知识蒸馏和压缩前后评估 |
 | 数据与转换 | NDJSON 转 YOLO、模型转 ONNX / K230 `.kmodel`、ONNX 与 `.kmodel` 校验 |
 | 桌面工作台 | 统一配置、运行、日志、历史记录和结果预览；支持 Ubuntu 与 Windows |
 
@@ -61,13 +60,7 @@
 - `vtools` 专注于错误原因分析、候选框和层级追踪、固定边界测速、自定义模型、跨后端对比和 K230 等额外工作；
 - 同名指标必须结合输入尺寸、batch、精度和计时范围一起比较。
 
-从 v0.4.6 起，模型压缩页面支持检测知识蒸馏的教师/学生权重选择及训练流程。该功能调用支持蒸馏的外部 Ultralytics Fork，训练后验证独立学生模型并保存前后精度；配置和使用边界见[模型压缩说明](model_compression/README.md)。
-
-从 v0.4.7 起，压缩页面按 detect/classify 选择单一处理模式，仅提交对应输入；检测蒸馏只需教师、学生和数据集，不需要公共模型权重。通用预训练学生会按数据集自动适配检测头，教师类别名称和顺序须与数据集一致。CLI/YAML 仍支持显式模块组合。
-
-结构化微调与检测蒸馏共用 AMP 检查权重缓存，默认位置为 `~/.cache/ultralytics/weights/`；设置 `XDG_CACHE_HOME` 时使用其下的 `ultralytics/weights/`。训练数据镜像和学生产物仍保存在各次运行目录。安装包信息和本次验证边界见 [v0.4.7 说明](docs/releases/v0.4.7.md)。
-
-检测压缩运行时会把标准 YOLO 图片与标签复制到本次运行目录，供验证、结构化微调和检测蒸馏使用；分类 ImageFolder 的训练/验证类别目录不一致会直接报错。测速的真实 adapter pipeline 需要明确提供输入，checkpoint 检查失败会保留在结果中。
+模型压缩自 v0.5.12 起由独立的 v_compression 工具提供，见[模型压缩迁移说明](docs/modules/compression.md)。
 
 ## 快速开始
 
@@ -79,7 +72,7 @@
 sudo apt install ./vtools_<版本>_<架构>.deb
 ```
 
-`.deb` 内置工作台以及图片缩放、视频抽帧、文件名转换、数据集质量检查和已有预测文件诊断所需的轻量运行依赖，这些功能无需另配 Python 环境。诊断生成预测、模型可视化、测速和压缩仍需 PyTorch/Ultralytics 等模型运行库；Linux 安装版首次启动时会优先使用 `~/python-envs/vtools/.venv`，如果没有该环境，可在“设置”中选择已有环境。NDJSON 数据集转换仍调用 Ultralytics，使用外部环境。模型权重、数据集和 GPU 驱动不包含在安装包中。
+`.deb` 内置工作台以及图片缩放、视频抽帧、文件名转换、数据集质量检查和已有预测文件诊断所需的轻量运行依赖，这些功能无需另配 Python 环境。诊断生成预测、模型可视化和测速仍需 PyTorch/Ultralytics 等模型运行库；Linux 安装版首次启动时会优先使用 `~/python-envs/vtools/.venv`，如果没有该环境，可在“设置”中选择已有环境。NDJSON 数据集转换仍调用 Ultralytics，使用外部环境。模型权重、数据集和 GPU 驱动不包含在安装包中。
 
 ### 方式二：使用已有的 uv 环境
 
@@ -121,7 +114,7 @@ uv run --project /path/to/python-envs/vtools --no-sync \
   --source /path/to/ultralytics-ezcn
 ```
 
-检查器默认验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、依赖一致性和 CUDA，不固定包版本，也不要求本地 Fork。指定 `--yaml` 或 `--weights` 后才执行对应模型的构建或预测；未执行模型检查会明确提示。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要检查模型压缩依赖 `torch-pruning` 时增加 `--check-compression`（缺失只记警告）；需要验证自己的权重时增加 `--weights /path/to/best.pt`。没有 uv 项目时，激活目标环境后直接运行 `python env_test/check_install.py ...`。
+检查器默认验证当前 Python、PyTorch、Ultralytics 实际导入路径、核心依赖、依赖一致性和 CUDA，不固定包版本，也不要求本地 Fork。指定 `--yaml` 或 `--weights` 后才执行对应模型的构建或预测；未执行模型检查会明确提示。需要检查 ONNX / TensorRT 时增加 `--check-export`；需要验证自己的权重时增加 `--weights /path/to/best.pt`。没有 uv 项目时，激活目标环境后直接运行 `python env_test/check_install.py ...`。
 
 ## 接入独立 Ultralytics Fork
 
@@ -167,12 +160,9 @@ python run_tools.py --tool visualization --config model_visualization/config/con
 
 # PyTorch / TensorRT 测速
 python run_tools.py --tool pytorch --config speed_test/benchmark_config.yaml
-
-# 模型压缩
-python run_tools.py --tool compression --config model_compression/config/config.yaml
 ```
 
-配置文件是模型工具的完整参数来源；命令行和桌面界面只覆盖本次运行需要修改的字段。桌面图形化配置把全部字段按功能分组（剪枝、量化、蒸馏等），可切换到 YAML 原文；字段旁显示简短中文说明，不写入 YAML。分辨率输入 `640,640` 会保存为整数列表 `[640,640]`（高、宽）；压缩的训练尺寸和剪枝依赖图尺寸使用方形输入，保存为单个整数 `640`。
+配置文件是模型工具的完整参数来源；命令行和桌面界面只覆盖本次运行需要修改的字段。桌面图形化配置把全部字段按功能分组，可切换到 YAML 原文；字段旁显示简短中文说明，不写入 YAML。分辨率输入 `640,640` 会保存为整数列表 `[640,640]`（高、宽）。
 
 使用具体入口前，可先查看帮助：
 
@@ -180,7 +170,6 @@ python run_tools.py --tool compression --config model_compression/config/config.
 python model_diagnostics/run_model_diagnostics.py --help
 python model_visualization/run_visualization.py --help
 python speed_test/run_all.py --help
-python model_compression/run_model_compression.py --help
 ```
 
 ## 结果与复现
@@ -194,7 +183,7 @@ python model_compression/run_model_compression.py --help
 
 运行结果、缓存、权重和数据集不属于源码提交内容。工具默认只读取用户输入，生成物写入对应的 `runs/`、`outputs/` 或用户指定目录。
 
-模型压缩的 `effective_config.json` 会保存 CLI 覆盖后的模块开关。工作台任务可在“任务记录”中重新打开已保存的运行日志；结构化剪枝会在日志中标出各评估、测速、剪枝和微调阶段及显存风险。
+工作台任务可在“任务记录”中重新打开已保存的运行日志。
 
 日志面板可打开完整日志文件或所在目录；Linux 桌面使用系统剪贴板复制日志。
 
@@ -207,7 +196,6 @@ vtools/
 ├── model_diagnostics/     # 检测质量与错误原因分析
 ├── model_visualization/   # 特征、CAM 和检测阶段可视化
 ├── speed_test/            # PyTorch / TensorRT 测速与一致性
-├── model_compression/     # 量化、剪枝和蒸馏
 ├── transform_tools/       # 数据、ONNX 和 K230 转换
 ├── config/                # 统一入口配置
 └── packaging/             # 桌面包、Windows 安装程序和 Ubuntu `.deb` 构建
@@ -225,7 +213,6 @@ vtools/
 | [检测诊断](model_diagnostics/README.md) | 数据集检查、错误类型和诊断报告 |
 | [模型可视化](model_visualization/README.md) | 特征图、CAM 和阶段追踪 |
 | [性能测速](speed_test/README.md) | PyTorch、TensorRT 和一致性检查 |
-| [模型压缩](model_compression/README.md) | 剪枝、量化、蒸馏和 YOLO 检测压缩 |
 | [数据与 K230 转换](transform_tools/REQUIREMENT.md) | NDJSON、ONNX、nncase 和 `.kmodel` |
 | [桌面包构建](packaging/README.md) | PyInstaller、Windows 图形安装包、Ubuntu `.deb` 和 Release 发布 |
 

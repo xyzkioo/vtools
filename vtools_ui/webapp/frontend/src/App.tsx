@@ -9,8 +9,7 @@ import {
 
 type Field = { key: string; label: string; kind: string; required?: boolean; default?: unknown; options?: string[]; hint?: string; when?: Record<string, string> }
 type Variant = { title: string; fields: Field[]; defaults: Record<string, unknown> }
-type CompressionMode = { label: string; tasks: string[]; description: string; primary_module: string | null; modules: string[]; public_weights: boolean }
-type Tool = { modes?: Record<string, CompressionMode>; title: string; description: string; group: string; config?: string; fields?: Field[]; modules?: [string, string][]; variants?: Record<string, Variant> }
+type Tool = { title: string; description: string; group: string; config?: string; fields?: Field[]; modules?: [string, string][]; variants?: Record<string, Variant> }
 type Catalog = Record<string, Tool>
 type RunState = { id: string; tool_id: string; status: string; started_at: string; exit_code: number | null; result_dir: string | null; config: string | null; log_path?: string | null }
 type History = { id?: string; time: string; task: string; status: string; config: string; result_dir?: string; exit_code?: number; log_path?: string | null }
@@ -58,7 +57,6 @@ function Icon({ name, size = 19 }: { name: string; size?: number }) {
     case 'diagnostics': return <Activity {...props} />
     case 'visualization': return <Layers3 {...props} />
     case 'benchmark': return <BarChart3 {...props} />
-    case 'compression': return <Boxes {...props} />
     case 'transform': return <WandSparkles {...props} />
     case 'data': return <Database {...props} />
     case 'dataset_quality': return <Search {...props} />
@@ -129,7 +127,6 @@ function ResultFolderTree({ node, depth = 0, selectedFile, onSelect }: { node: R
 type ConfigSection = { id: string; title: string; fields: ConfigField[] }
 
 const sectionOrder: Record<string, [string, string][]> = {
-  compression: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['baseline', '基线评估'], ['unstructured', '非结构化剪枝'], ['structured', '结构化剪枝'], ['quantization', '模型量化'], ['distillation', '知识蒸馏'], ['export', '报告与导出']],
   diagnostics: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['prediction', '预测来源'], ['inference', '推理设置'], ['diagnostics', '检测诊断'], ['overlap', '重叠与遮挡'], ['export', '报告与导出']],
   visualization: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['features', '特征图与选层'], ['cam', 'CAM 热图'], ['inference', '检测参数'], ['stage', '检测阶段追踪']],
   benchmark: [['general', '基础设置'], ['model', '模型配置'], ['data', '数据与输入'], ['checkpoint', '权重检查'], ['pytorch', 'PyTorch 测速'], ['tensorrt', 'TensorRT 与 ONNX'], ['consistency', '输出一致性'], ['export', '结果汇总']],
@@ -140,14 +137,7 @@ function configSectionId(toolId: string, path: string): string {
   if (path === 'schema_version' || path === 'mode' || has('project.', 'run.')) return 'general'
   if (/^(model|models\.\d+|ultralytics_model|custom_adapter)\./.test(path)) return 'model'
   if (has('dataset.', 'input.')) return 'data'
-  if (toolId === 'compression') {
-    if (has('compression.structured.', 'modules.compression.prune.structured')) return 'structured'
-    if (has('compression.sparsity', 'compression.exclude', 'modules.compression.prune.unstructured')) return 'unstructured'
-    if (has('distillation.', 'modules.distillation.')) return 'distillation'
-    if (has('modules.compression.quantize.')) return 'quantization'
-    if (has('evaluation.', 'modules.baseline.', 'modules.model.')) return 'baseline'
-    if (has('export.', 'modules.comparison.', 'modules.artifact.')) return 'export'
-  } else if (toolId === 'diagnostics') {
+  if (toolId === 'diagnostics') {
     if (has('predictions_file.', 'modules.predict.', 'modules.validation.')) return 'prediction'
     if (has('diagnostics.overlap.', 'modules.diagnostics.overlap')) return 'overlap'
     if (has('diagnostics.', 'modules.diagnostics.')) return 'diagnostics'
@@ -316,7 +306,7 @@ function App() {
     if (!modelTool || !configPath) return
     let cancelled = false
     api<ConfigDocument>(`config?path=${q(configPath)}`).then(data => {
-      if (!cancelled) { setConfigData(data.data); setModuleEdits({}); if (page === 'compression') { const model = data.data.model as Record<string, unknown> | undefined; if (model?.task === 'classify' || model?.task === 'detect') setValues(previous => ({ ...previous, task: model.task, processing_mode: undefined })) } }
+      if (!cancelled) { setConfigData(data.data); setModuleEdits({}) }
     }).catch(err => { if (!cancelled) setNotice(String(err)) })
     return () => { cancelled = true }
   }, [configPath, modelTool])
@@ -356,12 +346,11 @@ function App() {
 
   async function start() {
     if (!tool || active(run)) return
-    if (tool.modes && !processingMode) { setNotice("请选择本次运行的处理模式"); return }
     if (page === 'data' && variant === 'filename' && values.apply && !window.confirm('将直接修改文件名。确认继续吗？')) return
     try {
       const payload = await api<{ state: RunState }>('runs', {
         tool_id: page, variant: isUtility ? variant : undefined, config_path: modelTool ? configPath : undefined,
-        python_executable: settings?.python_executable, values: { ...values, ...(tool.modes ? { processing_mode: processingMode } : {}) }, module_edits: tool.modes ? {} : moduleEdits,
+        python_executable: settings?.python_executable, values, module_edits: moduleEdits,
       })
       setRun(payload.state); setLog(''); setSavedLog(null); setLogOpen(true); setNotice('任务已启动')
     } catch (err) { setNotice(String(err)) }
@@ -480,25 +469,13 @@ function App() {
 
   const navGroups = [
     { label: '工作台', items: [['home', '总览']] },
-    { label: '模型工具', items: [['diagnostics', '检测诊断'], ['visualization', '模型可视化'], ['benchmark', '性能测速'], ['compression', '模型压缩']] },
+    { label: '模型工具', items: [['diagnostics', '检测诊断'], ['visualization', '模型可视化'], ['benchmark', '性能测速']] },
     { label: '数据与转换', items: [['dataset_quality', '数据集质量检查'], ['transform', '格式转换'], ['data', '数据工具']] },
     { label: '记录与设置', items: [['results', '结果查看'], ['history', '任务记录'], ['environment', '环境检查'], ['settings', '设置']] },
   ]
   const pageTitle = page === 'home' ? '工作台' : page === 'results' ? '结果查看' : page === 'history' ? '任务记录' : page === 'settings' ? '设置' : tool?.title || '工作台'
   const moduleMap = (configData.modules || {}) as Record<string, boolean>
-  const compatibleModes = Object.entries(tool?.modes || {}).filter(([, mode]) => mode.tasks.includes(String(values.task || 'detect')))
-  const configuredModes = compatibleModes.filter(([, mode]) => mode.primary_module && moduleMap[mode.primary_module])
-  const inferredMode = configuredModes.length === 1 ? configuredModes[0][0] : configuredModes.length === 0 ? 'baseline' : ''
-  const requestedMode = String(values.processing_mode ?? inferredMode)
-  const processingMode = compatibleModes.some(([key]) => key === requestedMode) ? requestedMode : ''
-  const currentMode = tool?.modes?.[processingMode]
-  const displayedFields = (isUtility ? selectedVariant?.fields || [] : tool?.fields || []).filter(field => {
-    if (!tool?.modes) return true
-    if (field.key === 'task') return false
-    if (field.key === 'resource') return Boolean(currentMode?.public_weights)
-    if (['teacher_weights', 'student_weights'].includes(field.key)) return processingMode === 'detection_distillation'
-    return true
-  })
+  const displayedFields = isUtility ? selectedVariant?.fields || [] : tool?.fields || []
   const fieldValues = isUtility ? { ...(selectedVariant?.defaults || {}), ...values } : values
 
   return <div className="app-shell">
@@ -518,7 +495,7 @@ function App() {
         {page === 'home' && <>
           <div className="welcome-banner"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>今天想分析什么？</h1><p>从模型诊断到结果对比，让每一步都清晰可见。</p><button className="button light" onClick={() => setPage('diagnostics')}>开始检测诊断 <ArrowRight size={17} /></button></div><div className="banner-art"><div className="orb orb-one" /><div className="orb orb-two" /><Layers3 size={105} strokeWidth={1} /></div></div>
           <div className="section-heading"><div><div className="eyebrow">QUICK START</div><h2>常用工具</h2></div></div>
-          <div className="quick-grid">{['diagnostics', 'dataset_quality', 'visualization', 'benchmark', 'compression'].map((key, index) => <button className="quick-card" key={key} onClick={() => setPage(key)}><span className={`quick-icon tone-${index % 4}`}><Icon name={key} size={24} /></span><strong>{catalog[key]?.title || key}</strong><span>{catalog[key]?.description}</span><ArrowRight className="quick-arrow" size={18} /></button>)}</div>
+          <div className="quick-grid">{['diagnostics', 'dataset_quality', 'visualization', 'benchmark'].map((key, index) => <button className="quick-card" key={key} onClick={() => setPage(key)}><span className={`quick-icon tone-${index % 4}`}><Icon name={key} size={24} /></span><strong>{catalog[key]?.title || key}</strong><span>{catalog[key]?.description}</span><ArrowRight className="quick-arrow" size={18} /></button>)}</div>
           <div className="section-heading recent-heading"><div><div className="eyebrow">RECENT ACTIVITY</div><h2>最近任务</h2></div><button className="link-button" onClick={() => setPage('history')}>查看全部 <ArrowRight size={16} /></button></div>
           <div className="card recent-list">{historyRows.length ? historyRows.slice(0, 5).map((row, index) => <div className="recent-row" key={row.id || index}><span className={`status-icon ${isGoodHistoryStatus(row.status) ? 'good' : isWarningHistoryStatus(row.status) ? 'warning' : row.status === '失败' ? 'bad' : ''}`}>{isGoodHistoryStatus(row.status) ? <CheckCircle2 size={18} /> : isWarningHistoryStatus(row.status) ? <AlertCircle size={18} /> : <Clock3 size={18} />}</span><div><strong>{catalog[row.task]?.title || row.task}</strong><small>{row.config}</small></div><span className="recent-time">{row.time}</span><span className={`pill ${isGoodHistoryStatus(row.status) ? 'good' : isWarningHistoryStatus(row.status) ? 'warning' : row.status === '失败' ? 'bad' : ''}`}>{row.status}</span></div>) : <div className="empty-state">还没有任务记录。运行第一个工具后会显示在这里。</div>}</div>
         </>}
@@ -527,9 +504,8 @@ function App() {
           <div className="page-heading"><div className="eyebrow">{tool.group === 'model' ? 'MODEL WORKFLOW' : tool.group === 'utility' ? 'DATA WORKFLOW' : 'SYSTEM CHECK'}</div><h1>{tool.title}</h1><p>{tool.description}</p></div>
           {isUtility && <div className="card form-card"><div className="card-heading"><span className="step-number">01</span><div><h2>选择操作</h2><p>选择你要运行的具体工具。</p></div></div><div className="variant-grid">{Object.entries(tool.variants || {}).map(([key, item]) => <button className={`variant-card ${variant === key ? 'chosen' : ''}`} key={key} onClick={() => { setVariant(key); setValues({ ...(item.defaults || {}) }) }}><FileCode2 size={20} /><strong>{item.title}</strong></button>)}</div></div>}
           {modelTool && <div className="card form-card"><div className="card-heading"><span className="step-number">01</span><div><h2>配置文件</h2><p>YAML 是完整参数来源，本页只覆盖本次运行所需的输入。</p></div></div><div className="form-grid"><label className="form-field wide"><span>配置文件 <em>必填</em></span><PathField value={configPath} onChange={setConfigPath} kind="file" /></label></div><button className="link-button config-link" onClick={() => setConfigEditor(true)}><Settings2 size={17} /> 图形化编辑配置 <ArrowRight size={16} /></button></div>}
-          {modelTool && tool.modes && <div className="card form-card"><div className="card-heading"><span className="step-number">02</span><div><h2>处理模式</h2><p>一次运行选择一种模式；相应评估与保存步骤会自动执行。</p></div></div><div className="form-grid"><label className="form-field"><span>模型任务</span><select value={String(values.task || 'detect')} onChange={event => setValues({ ...values, task: event.target.value, processing_mode: undefined })}><option value="detect">目标检测</option><option value="classify">图像分类</option></select></label></div><div className="variant-grid processing-mode-grid">{compatibleModes.map(([key, mode]) => <button type="button" className={`variant-card ${processingMode === key ? 'chosen' : ''}`} key={key} aria-pressed={processingMode === key} onClick={() => setValues({ ...values, processing_mode: key })}><Layers3 size={20} /><strong>{mode.label}</strong></button>)}</div><p className="processing-mode-description">{currentMode?.description || '配置中启用了多种处理方式，请选择本次要执行的模式。'}</p></div>}
-          <div className="card form-card"><div className="card-heading"><span className="step-number">{isUtility ? '02' : modelTool ? (tool.modes ? '03' : '02') : '01'}</span><div><h2>输入与参数</h2><p>路径支持直接输入；桌面窗口可以点击文件夹图标选择。</p></div></div><div className="form-grid">{displayedFields.filter(field => !field.when || Object.entries(field.when).every(([key, expected]) => fieldValues[key] === expected)).map(field => field.kind === 'bool' ? <div className="form-field switch-field" key={field.key}><InputField field={field} value={fieldValues[field.key]} onChange={value => setValues({ ...values, [field.key]: value })} /></div> : <label className={`form-field ${['file', 'dir', 'file_or_dir', 'save_file'].includes(field.kind) ? 'wide' : ''}`} key={field.key}><span>{field.label} {field.required && <em>必填</em>}</span><InputField field={field} value={fieldValues[field.key]} onChange={value => setValues({ ...values, [field.key]: value })} />{field.hint && <small>{field.hint}</small>}</label>)}</div></div>
-          {modelTool && !tool.modes && <div className="card form-card"><div className="card-heading"><span className="step-number">03</span><div><h2>运行模块</h2><p>{page === 'benchmark' && values.backend === 'checkpoint' ? 'Checkpoint 检查按配置文件运行，不支持本次运行临时切换模块。' : '仅修改这里点击过的模块；配置中未展示的模块保持原样。'}</p></div></div><div className="module-grid">{(tool.modules || []).map(([id, label]) => { const incompatible = (page === 'benchmark' && values.backend === 'checkpoint') || (page === 'compression' && ((values.task === 'detect' && ['compression.quantize.dynamic_int8', 'distillation.classification'].includes(id)) || (values.task === 'classify' && ['compression.prune.structured', 'distillation.detection'].includes(id)))); return <label className={`module-option ${incompatible ? 'disabled' : ''}`} key={id} title={incompatible ? '当前任务不支持临时切换此模块' : id}><input type="checkbox" disabled={incompatible} checked={moduleEdits[id] ?? Boolean(moduleMap[id])} onChange={event => setModuleEdits({ ...moduleEdits, [id]: event.target.checked })} /><span className="checkmark" /><span><strong>{label}</strong><small>{id}</small></span></label> })}</div></div>}
+          <div className="card form-card"><div className="card-heading"><span className="step-number">{isUtility ? '02' : modelTool ? '02' : '01'}</span><div><h2>输入与参数</h2><p>路径支持直接输入；桌面窗口可以点击文件夹图标选择。</p></div></div><div className="form-grid">{displayedFields.filter(field => !field.when || Object.entries(field.when).every(([key, expected]) => fieldValues[key] === expected)).map(field => field.kind === 'bool' ? <div className="form-field switch-field" key={field.key}><InputField field={field} value={fieldValues[field.key]} onChange={value => setValues({ ...values, [field.key]: value })} /></div> : <label className={`form-field ${['file', 'dir', 'file_or_dir', 'save_file'].includes(field.kind) ? 'wide' : ''}`} key={field.key}><span>{field.label} {field.required && <em>必填</em>}</span><InputField field={field} value={fieldValues[field.key]} onChange={value => setValues({ ...values, [field.key]: value })} />{field.hint && <small>{field.hint}</small>}</label>)}</div></div>
+          {modelTool && <div className="card form-card"><div className="card-heading"><span className="step-number">03</span><div><h2>运行模块</h2><p>{page === 'benchmark' && values.backend === 'checkpoint' ? 'Checkpoint 检查按配置文件运行，不支持本次运行临时切换模块。' : '仅修改这里点击过的模块；配置中未展示的模块保持原样。'}</p></div></div><div className="module-grid">{(tool.modules || []).map(([id, label]) => { const incompatible = page === 'benchmark' && values.backend === 'checkpoint'; return <label className={`module-option ${incompatible ? 'disabled' : ''}`} key={id} title={incompatible ? '当前任务不支持临时切换此模块' : id}><input type="checkbox" disabled={incompatible} checked={moduleEdits[id] ?? Boolean(moduleMap[id])} onChange={event => setModuleEdits({ ...moduleEdits, [id]: event.target.checked })} /><span className="checkmark" /><span><strong>{label}</strong><small>{id}</small></span></label> })}</div></div>}
           <div className="run-card"><div><span className="run-card-icon"><Play size={20} fill="currentColor" /></span><div><strong>准备就绪</strong><span>确认输入和参数后开始运行。过程和错误会显示在运行详情中。</span>{page === 'transform' && variant === 'ndjson' && <span className="run-card-hint">支持续传：同一份 NDJSON 反复运行会跳过已下载的图片，只补齐缺失的那几张。</span>}</div></div><button className="button primary" onClick={start} disabled={active(run)}>{active(run) ? '任务运行中' : '开始运行'} <ArrowRight size={17} /></button></div>
           {run?.tool_id === page && run.result_dir && !active(run) && <div className="result-callout"><CheckCircle2 size={20} /><span>本次结果：{run.result_dir}</span><button className="link-button" onClick={() => { setResultRoot(run.result_dir!); setPage('results') }}>查看结果 <ArrowRight size={16} /></button></div>}
         </>}

@@ -33,6 +33,12 @@ class UnifiedEntry(unittest.TestCase):
             with patch.object(sys, "argv", ["run_tools", "--config", str(config)]):
                 self.assertEqual(run_tools.main(), 2)
 
+    def test_removed_compression_tool_is_rejected(self):
+        with patch.object(sys, "argv", ["run_tools", "--tool", "compression"]), \
+                self.assertRaises(SystemExit) as error:
+            run_tools.main()
+        self.assertEqual(error.exception.code, 2)
+
     def test_repository_tools_config_resolves_child_path_from_root(self):
         captured = []
 
@@ -57,7 +63,7 @@ class UnifiedEntry(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run1"
-            with patch.object(sys, "argv", ["run_tools", "--tool", "compression", "--run-dir", str(run_dir)]), \
+            with patch.object(sys, "argv", ["run_tools", "--tool", "diagnostics", "--run-dir", str(run_dir)]), \
                     patch.object(run_tools.importlib, "import_module", return_value=SimpleNamespace(main=child_main)):
                 self.assertEqual(run_tools.main(), 0)
             self.assertEqual(Path(captured[captured.index("--run-dir") + 1]), run_dir)

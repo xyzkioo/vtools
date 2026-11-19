@@ -222,18 +222,11 @@ class WebWorkbenchTests(unittest.TestCase):
                         self.assertEqual(size_field["kind"], "size")
                         self.assertIn("高、宽", size_field["hint"])
 
-    def test_form_rejects_invalid_sizes_and_scalar_training_dimensions(self) -> None:
-        raw = "dataset:\n  input_size: [832, 832]\ncompression:\n  structured:\n    train_input_size: 1024\n    pruning_input_size: 640\n"
+    def test_form_rejects_invalid_sizes(self) -> None:
+        raw = "dataset:\n  input_size: [832, 832]"
         for entered in ("", "640,abc", "640,0", "-1,640", "640.5,640", "[640]", "640,640,3", "true,640"):
             with self.subTest(entered=entered), self.assertRaises(ValueError):
                 core.patch_config(raw, "dataset.input_size", entered, from_form=True)
-        for name in ("train_input_size", "pruning_input_size"):
-            path = f"compression.structured.{name}"
-            for entered in ("320", "320,320", "[320,320]"):
-                self.assertEqual(core.config_get(core.patch_config(raw, path, entered, from_form=True)["data"], path), 320)
-            for entered in ("640,320", "0", "", "1.5"):
-                with self.subTest(path=path, entered=entered), self.assertRaises(ValueError):
-                    core.patch_config(raw, path, entered, from_form=True)
 
     def test_form_lists_keep_numbers_and_literal_strings(self) -> None:
         raw = "thresholds: [0.1, 0.5]\npaths: [old]\nindices: []\nenabled: true\ncount: 2\nrate: 0.1\nproject:\n  python_paths: []\n"
@@ -257,13 +250,13 @@ class WebWorkbenchTests(unittest.TestCase):
                 core.patch_config(raw, path, entered, from_form=True)
 
     def test_config_help_is_ui_metadata_and_covers_each_model_in_benchmark(self) -> None:
-        raw = "models:\n  - weights: first.pt\n  - weights: second.pt\nmodules:\n  compression.prune.structured: true\n"
+        raw = "models:\n  - weights: first.pt\n  - weights: second.pt\nmodules:\n  export.onnx: true\n"
         fields = {field["path"]: field for field in core.flatten_config(core.parse_yaml(raw))}
         self.assertEqual(fields["models.0.weights"]["hint"], fields["models.1.weights"]["hint"])
         self.assertIn("权重", fields["models.1.weights"]["hint"])
-        self.assertIn("结构化", fields["modules.compression.prune.structured"]["hint"])
-        changed = core.patch_config(raw, "modules.compression.prune.structured", False, from_form=True)
-        self.assertNotIn("结构化", changed["text"])
+        self.assertIn("ONNX", fields["modules.export.onnx"]["hint"])
+        changed = core.patch_config(raw, "modules.export.onnx", False, from_form=True)
+        self.assertNotIn(fields["modules.export.onnx"]["hint"], changed["text"])
         self.assertNotIn("hint", changed["data"])
 
     def test_config_patch_api_parses_raw_form_input_and_returns_error_for_invalid_size(self) -> None:
@@ -293,13 +286,13 @@ class WebWorkbenchTests(unittest.TestCase):
     def test_frozen_config_is_copied_to_user_directory_before_editing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "bundle"
-            source = root / "model_compression" / "config" / "config.yaml"
+            source = root / "model_visualization" / "config" / "config.yaml"
             source.parent.mkdir(parents=True)
             source.write_text("model:\n  task: detect\n", encoding="utf-8")
             user_dir = Path(directory) / "user"
             with patch.object(core, "ROOT", root), patch.object(core, "STATE_DIR", user_dir), patch.object(core.sys, "frozen", True, create=True):
-                loaded = core.load_config("model_compression/config/config.yaml")
-            copied = user_dir / "configs" / "model_compression" / "config" / "config.yaml"
+                loaded = core.load_config("model_visualization/config/config.yaml")
+            copied = user_dir / "configs" / "model_visualization" / "config" / "config.yaml"
             self.assertEqual(Path(loaded["path"]), copied)
             self.assertEqual(copied.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
 
@@ -413,12 +406,16 @@ class WebWorkbenchTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Python 解释器不存在"):
                     core.build_command({"tool_id": "diagnostics", "values": {}})
 
-    @patch.object(core.sys, "platform", "linux")
     def test_frozen_diagnostics_dispatch_follows_prediction_and_ground_truth_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            bundled_python = root / "vtools"
+            bundle = root / "bundle"
+            bundle.mkdir()
+            (bundle / "run_tools.py").touch()
+            bundled_python = bundle / ("vtools.exe" if sys.platform == "win32" else "vtools")
             bundled_python.touch()
+            worker = bundle / "vtools-worker.exe" if sys.platform == "win32" else bundled_python
+            worker.touch()
             external_python = sys.executable
             config = root / "diagnostics.yaml"
             for mode, resource, ground_truth, bundled in (
@@ -432,12 +429,13 @@ class WebWorkbenchTests(unittest.TestCase):
                 config.write_text(f"mode: {mode}\ndataset:\n  data: {ground_truth}\nmodules: {{}}\n", encoding="utf-8")
                 with self.subTest(mode=mode, resource=resource, ground_truth=ground_truth), \
                         patch.object(core.sys, "frozen", True, create=True), \
+                        patch.object(core, "ROOT", bundle), \
                         patch.object(core.sys, "executable", str(bundled_python)), \
                         patch.object(core, "read_settings", return_value={"python_executable": external_python, "results_root": str(root / "reports")}):
                     executable, args, _config = core.build_command({
                         "tool_id": "diagnostics", "config_path": str(config), "values": {"resource": resource},
                     })
-                self.assertEqual(executable, str(bundled_python) if bundled else external_python)
+                self.assertEqual(executable, str(worker) if bundled else external_python)
                 self.assertEqual(args[0] == "--run-script", bundled)
                 if resource.endswith(".engine"):
                     self.assertIn("--weights", args)
@@ -565,7 +563,16 @@ class WebWorkbenchTests(unittest.TestCase):
 
     def test_frozen_model_run_uses_writable_results_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": directory}), patch.object(core.sys, "frozen", True, create=True), patch.object(core.sys, "executable", "/opt/vtools/vtools"):
+            root = Path(directory)
+            bundle = root / "bundle"
+            config = bundle / "model_diagnostics" / "config" / "config.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text("mode: ultralytics_model\n", encoding="utf-8")
+            (bundle / "run_tools.py").touch()
+            with patch.object(core, "ROOT", bundle), patch.object(core, "STATE_DIR", root / "user-data"), \
+                    patch.object(core, "read_settings", return_value={"python_executable": sys.executable, "results_root": directory}), \
+                    patch.object(core.sys, "frozen", True, create=True), \
+                    patch.object(core.sys, "executable", str(bundle / "vtools")):
                 _executable, args, _config = core.build_command({"tool_id": "diagnostics", "values": {}})
             run_dir = Path(args[args.index("--run-dir") + 1])
             self.assertEqual(run_dir.parent, Path(directory) / "diagnostics")
@@ -745,52 +752,6 @@ class WebWorkbenchTests(unittest.TestCase):
         self.assertEqual(manager.state()["status"], "succeeded")
         self.assertEqual(manager.state()["exit_code"], 0)
         self.assertIn("finished", "".join(output))
-
-    @unittest.skipUnless(os.name == "posix", "子进程信号退出只在 POSIX 上验证")
-    def test_compression_signal_exit_writes_failure_summary(self) -> None:
-        from vtools_ui.webapp import tasks
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            state_dir = root / "state"
-            run_dir = root / "runs" / "run-signal"
-            run_dir.mkdir(parents=True)
-            (run_dir / "effective_config.json").write_text(json.dumps({
-                "model": {"name": "detector", "task": "detect", "weights": "model.pt"},
-                "modules": {"baseline.evaluate": True, "compression.prune.structured": True},
-            }), encoding="utf-8")
-            child = (
-                "import os, signal; "
-                "print('[baseline.evaluate] 开始', flush=True); "
-                "print('[baseline.evaluate] 完成', flush=True); "
-                "print('[compression.prune.structured] 开始', flush=True); "
-                "print('[结构化剪枝] 开始：依赖图追踪与通道剪枝', flush=True); "
-                "os.kill(os.getpid(), signal.SIGKILL)"
-            )
-            command = ["-c", child, "--run-dir", str(run_dir)]
-            with patch.object(tasks, "STATE_DIR", state_dir), \
-                    patch("vtools_ui.webapp.tasks.build_command", return_value=(sys.executable, command, None)), \
-                    patch("vtools_ui.webapp.tasks.add_history"):
-                manager = TaskManager()
-                manager.start({"tool_id": "compression"})
-                cursor = 0
-                for _ in range(10):
-                    events, done = manager.events_after(cursor, timeout=2)
-                    cursor += len(events)
-                    if done:
-                        break
-
-            self.assertEqual(manager.state()["status"], "failed")
-            self.assertEqual(manager.state()["result_dir"], str(run_dir.resolve()))
-            report_path = run_dir / "summary.json"
-            self.assertTrue(report_path.is_file())
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-            self.assertEqual(report["status"], "failed")
-            self.assertEqual(report["failure_details"]["signal"], "SIGKILL")
-            self.assertEqual(report["failure_details"]["last_module"], "compression.prune.structured")
-            self.assertEqual(report["failure_details"]["last_stage"], "依赖图追踪与通道剪枝")
-            self.assertEqual(report["module_status"]["baseline.evaluate"], "succeeded")
-            self.assertEqual(report["module_status"]["compression.prune.structured"], "failed")
 
     def test_saved_log_contains_command_and_is_readable_by_run_id(self) -> None:
         from vtools_ui.webapp import tasks

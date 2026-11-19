@@ -4,7 +4,7 @@
 
 ## 项目范围
 
-vtools 是一个以 Python 和 YAML 为核心的视觉模型工具集，包含检测诊断、模型可视化、PyTorch/TensorRT 测速、模型压缩、K230 转换、数据文件处理和 React/pywebview 桌面工作台。
+vtools 是一个以 Python 和 YAML 为核心的视觉模型工具集，包含检测诊断、模型可视化、PyTorch/TensorRT 测速、K230 转换、数据文件处理和 React/pywebview 桌面工作台。
 
 Ultralytics Fork 是 vtools 同级的独立仓库，不属于 vtools 的源码提交范围。修改 Fork 时遵循其仓库内的约定；不要把 vtools 的工具逻辑复制进上游包内部。vtools 通过 `project.ultralytics_repo`、`VTOOLS_ULTRALYTICS_REPO` 或同级目录发现它。
 
@@ -33,12 +33,11 @@ Ultralytics Fork 是 vtools 同级的独立仓库，不属于 vtools 的源码�
 | PyTorch/TensorRT 单项测速 | `speed_test/benchmark_pytorch.py`、`speed_test/benchmark_tensorrt.py` | 同上 |
 | 一致性检查 | `python speed_test/check_consistency.py` | 同上 |
 | checkpoint 检查 | `python speed_test/inspect_checkpoint.py` | 同上 |
-| 模型压缩 | `python model_compression/run_model_compression.py` | `model_compression/config/config.yaml` |
 | 环境检验 | `python env_test/check_install.py` | `env_test/README.md` |
 | 图片/视频/文件名工具 | `others/image_resize/image_resize.py`、`others/video_frame_extractor/video_frame_extractor.py`、`others/filename_transform/image_filename_converter.py` | 各自 README |
 | 数据和 K230 转换 | `transform_tools/ndjson_to_yolo.py`、`py2kmodel.py`、`PY2KM_validate.py` | `transform_tools/REQUIREMENT.md` |
 
-使用入口前先运行 `python <入口> --help`（桌面 UI 除外）。不要假设 `run_tools.py` 的工具名；当前有效值以其 parser 为准：`diagnostics`、`pytorch`、`tensorrt`、`consistency`、`visualization`、`compression`。
+使用入口前先运行 `python <入口> --help`（桌面 UI 除外）。不要假设 `run_tools.py` 的工具名；当前有效值以其 parser 为准：`diagnostics`、`pytorch`、`tensorrt`、`consistency`、`visualization`。
 
 ## 配置与路径
 
@@ -70,7 +69,6 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH=.:speed_test:model_diagnostics \
   python -m unittest discover -s tests -q
 
 # 子项目回归
-PYTHONPATH=. python -m unittest discover -s model_compression/tests -q
 PYTHONPATH=.:speed_test python -m unittest discover -s speed_test/tests -q
 PYTHONPATH=.:model_diagnostics python -m unittest discover -s model_diagnostics/tests -q
 ```

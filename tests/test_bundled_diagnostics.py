@@ -27,7 +27,10 @@ class SavedPredictionDiagnosticsTests(unittest.TestCase):
             data = root / "data.yaml"
             data.write_text(yaml.safe_dump({"path": str(root), "val": "images/val", "names": ["object"]}), encoding="utf-8")
             predictions = root / "predictions.json"
-            predictions.write_text(json.dumps({"images": [{"image_id": "images/val/sample.png", "predictions": []}]}), encoding="utf-8")
+            predictions.write_text(json.dumps({"records": [{
+                "image_id": "images/val/sample.png",
+                "predictions": [{"bbox": [5, 5, 15, 15], "class_id": 0, "score": 0.1}],
+            }]}), encoding="utf-8")
             config = root / "diagnostics.yaml"
             config.write_text(yaml.safe_dump({
                 "project": {"root": str(root)}, "mode": "predictions_file",
@@ -48,5 +51,9 @@ class SavedPredictionDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(run_tools.main(), 0)
             summary = json.loads((output / "saved" / "summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["error_counts"], {"missed": 1})
+            self.assertEqual(summary["findings"], [{
+                "type": "missed", "class_id": 0, "class_name": "object", "gt_count": 1,
+                "missed_count": 1, "low_confidence_candidate_count": 1,
+            }])
             self.assertEqual(len(list((output / "saved" / "images").rglob("*.jpg"))), 1)
             self.assertTrue((output / "saved" / "index.html").is_file())

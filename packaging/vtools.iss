@@ -73,6 +73,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#IconFile}"; DestDir: "{app}"; DestName: "vtools.ico"; Flags: ignoreversion
 
+[InstallDelete]
+; Only remove legacy tool sources from the application bundle on upgrade.
+Type: filesandordirs; Name: "{app}\_internal\tool-sources\model_compression"
+
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\vtools.ico"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\vtools.ico"; Tasks: desktopicon
