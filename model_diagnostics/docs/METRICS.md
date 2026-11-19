@@ -26,6 +26,11 @@ AP 文件。阈值扫描也只有显式开启 `diagnostics.threshold_sweep` 才�
 
 错误统计使用 `raw_data/error_events.csv` 的去重事件流：一个错类别或定位预测与其对应的漏检 GT 只算一个事件，剩余 GT 算 `missed`，低于工作阈值的预测只作为漏检原因。`summary.json` 的错误数量和 `bad_cases.csv` 都来自这份事件流；一张图片只要有一个事件就计为错误图片，多种事件类型的图片只渲染一次并归入 `mixed/`。
 
+在 `summary.json` 的 `findings` 中，按受影响 GT 数量各列出最多 3 项漏检和错分类发现，随对应诊断模块启用：
+
+- `missed` 按真实类别汇总，启用 `diagnostics.groups` 时再按每图 GT 数量分组。`missed_count / gt_count` 是该组未匹配 GT 的比例，`low_confidence_candidate_count` 是其中满足 IoU 但低于工作阈值的同类候选所覆盖的 GT 数。降阈值后实际恢复多少仍需重新匹配。明细见 `raw_data/per_gt.csv`。
+- `classification` 按真实类别 → 预测类别汇总。`confused_gt_count / gt_count` 是关联到该错分类的不同 GT 数占真实类别标注总数的比例。一个目标被多个同类错误预测框命中时，该类对只计一次。两种发现可能涉及同一目标。明细见 `raw_data/error_events.csv`。
+
 1. 先看 `summary.json` 的 `aggregate` 中 Recall@IoU、候选覆盖率和低置信度可找回比例。
 2. 看 `raw_data/per_gt.csv`：`miss_no_candidate` 表示低阈值下也没有有效候选；`miss_low_confidence` 表示候选存在但工作阈值过滤掉；`miss_localization` 表示候选位置不够准；类别错误会记录为 `miss_classification`。
 3. 看 `raw_data/group_metrics.csv`：只在 GT 数量足够时比较分组，报告分组样本数；小目标组较差才支持小目标短板假设。

@@ -1127,6 +1127,61 @@ def group_metrics(per_gt: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     return output
 
 
+def _summary_findings(
+    summary: Mapping[str, Any], class_names: Mapping[int, str], modules: Mapping[str, bool],
+) -> List[Dict[str, Any]]:
+    """Summarize the most frequent misses and class confusions using existing matches."""
+    findings: List[Dict[str, Any]] = []
+    per_gt = summary["per_gt"]
+    if modules.get("diagnostics.missed"):
+        by_group: Dict[Tuple[int, str], List[Mapping[str, Any]]] = defaultdict(list)
+        for row in per_gt:
+            density = row["density_group"] if modules.get("diagnostics.groups") else ""
+            by_group[(row["class_id"], density)].append(row)
+        misses = []
+        for (class_id, density), rows in by_group.items():
+            missed = [row for row in rows if not row["matched"]]
+            if not missed:
+                continue
+            finding = {
+                "type": "missed", "class_id": class_id, "class_name": class_names.get(class_id),
+                "gt_count": len(rows), "missed_count": len(missed),
+                "low_confidence_candidate_count": sum(row["miss_reason"] == "miss_low_confidence" for row in missed),
+            }
+            if density:
+                finding["density_group"] = density
+            misses.append(finding)
+        findings.extend(sorted(misses, key=lambda row: (
+            -row["missed_count"], row["class_id"], row.get("density_group", ""),
+        ))[:3])
+
+    if modules.get("diagnostics.classification"):
+        gt_classes = {(row["image_id"], row["gt_id"]): row["class_id"] for row in per_gt}
+        pred_classes = {
+            (row["image_id"], row["prediction_id"]): row["class_id"]
+            for row in summary["per_prediction"] if row["operating_included"]
+        }
+        gt_counts: Dict[int, int] = defaultdict(int)
+        for class_id in gt_classes.values():
+            gt_counts[class_id] += 1
+        confusions: Dict[Tuple[int, int], set[Tuple[str, str]]] = defaultdict(set)
+        for event in summary["error_events"]:
+            if event["error_type"] != "classification":
+                continue
+            gt_key = (event["image_id"], event["gt_id"])
+            pred_key = (event["image_id"], event["prediction_id"])
+            confusions[(gt_classes[gt_key], pred_classes[pred_key])].add(gt_key)
+        for (class_id, predicted_id), targets in sorted(
+            confusions.items(), key=lambda item: (-len(item[1]), item[0]),
+        )[:3]:
+            findings.append({
+                "type": "classification", "class_id": class_id, "class_name": class_names.get(class_id),
+                "predicted_class_id": predicted_id, "predicted_class_name": class_names.get(predicted_id),
+                "gt_count": gt_counts[class_id], "confused_gt_count": len(targets),
+            })
+    return findings
+
+
 def threshold_sweep(ds: Dataset, config: Mapping[str, Any]) -> List[Dict[str, Any]]:
     rows = []
     for threshold in config.get("score_sweep", DEFAULT_CONFIG["score_sweep"]):
@@ -1382,6 +1437,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "error_event_count": aggregate.get("error_event_count", 0),
         "error_image_count": aggregate.get("error_image_count", 0),
         "warning_count": len(warning_messages),
+        "findings": _summary_findings(summary, ds.class_names, modules),
     })
     artifact_paths = {}
     for path in sorted(args.output.rglob("*")):

@@ -37,7 +37,7 @@ python model_diagnostics/run_model_diagnostics.py --config model_diagnostics/con
 
 ## 输出
 
-默认输出 `model_diagnostics/runs/runN/<mode_name>/`。`run_info.json` 保存配置和运行信息，`summary.json` 保存汇总，`raw_data/` 保存详细 CSV 与预测，差图按错误类别保存。
+默认输出 `model_diagnostics/runs/runN/<mode_name>/`。`run_info.json` 保存配置和运行信息，`summary.json` 保存汇总及 `findings` 中的漏检分组和错分类类对，`raw_data/` 保存详细 CSV 与预测，差图按错误类别保存。
 
 ## 使用边界
 

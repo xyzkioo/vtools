@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 
 from .catalog import ROOT, TOOLS
-from .config_fields import SIZE_FIELDS, SQUARE_SIZE_FIELDS, STRING_LIST_FIELDS, field_hint
+from .config_fields import SIZE_FIELDS, STRING_LIST_FIELDS, field_hint
 from vtools_ui.state import desktop_state_dir
 from vtools_ui.process_environment import build_tool_environment, external_dll_search_path
 
@@ -311,24 +311,18 @@ def flatten_config(value: Any, prefix: str = "") -> list[dict[str, Any]]:
 def _config_field(path: str, value: Any, kind: str) -> dict[str, Any]:
     if path in SIZE_FIELDS:
         kind = "size"
-    elif path in SQUARE_SIZE_FIELDS:
-        kind = "number"
     return {"path": path, "value": value, "kind": kind, "hint": field_hint(path, kind)}
 
 
 def _form_value(path: str, raw: Any, original: Any) -> Any:
     """Parse graphical input before patching, preserving scalar/list types."""
 
-    if path in SIZE_FIELDS or path in SQUARE_SIZE_FIELDS:
+    if path in SIZE_FIELDS:
         values = _form_list(str(raw))
         if len(values) == 1 and not str(raw).strip().startswith("["):
             values *= 2
         if len(values) != 2 or any(type(item) is not int or item <= 0 for item in values):
             raise ValueError(f"{path} 需要正整数尺寸，填写 高,宽（如 640,640）或单个尺寸（如 640）")
-        if path in SQUARE_SIZE_FIELDS:
-            if values[0] != values[1]:
-                raise ValueError(f"{path} 使用方形输入，高、宽需相同，如 640 或 640,640")
-            return values[0]
         return values
     if isinstance(original, bool):
         if not isinstance(raw, bool):
@@ -515,8 +509,6 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
                 args += [flag, _field_path(values[key])]
         if values.get("export"):
             args.append("--check-export")
-        if values.get("compression"):
-            args.append("--check-compression")
         if values.get("skip_model"):
             args.append("--skip-model")
         title = tool["title"]
@@ -570,53 +562,26 @@ def build_command(request: dict[str, Any]) -> tuple[str, list[str], str | None]:
         else:
             args += ["--tool", backend or tool["entry"], "--config", config]
         title = tool["title"] if not backend else {"pytorch": "PyTorch 测速", "tensorrt": "TensorRT 测速", "consistency": "输出一致性检查", "all": "一键测速", "checkpoint": "Checkpoint 检查"}[backend]
-        compression_mode = values.get("processing_mode") if tool_id == "compression" else None
-        mode_modules = None
-        compression_task = None
-        if tool_id == "compression":
-            compression_task = _option(values.get("task"), ["detect", "classify"], "模型任务")
-        if compression_mode is not None:
-            from model_compression.core.module_selection import COMPRESSION_MODES, compression_mode_modules
-            mode_modules = compression_mode_modules(str(compression_mode), compression_task)
         resource = values.get("resource")
-        if compression_mode is not None and not COMPRESSION_MODES[str(compression_mode)]["public_weights"]:
-            resource = None
         if resource:
             resource = _field_path(resource)
             if tool_id == "diagnostics":
                 args += ["--weights" if Path(resource).suffix.lower() in MODEL_SUFFIXES else "--predictions", resource]
             elif tool_id == "visualization":
                 args += ["--weights", resource]
-            elif tool_id == "compression":
-                args += ["--weights", resource]
             elif backend in {"pytorch", "tensorrt", "consistency"}:
                 args += ["--weights", resource]
             else:
                 args += ["--model", resource]
-        for key, flag in (("data", "--data"), ("source", "--source"), ("train", "--train"), ("val", "--val")):
-            if compression_mode is not None and ((compression_task == "detect" and key in {"train", "val"})
-                                                  or (compression_task == "classify" and key == "data")):
-                continue
-            if values.get(key) and ((key == "data" and tool_id in {"diagnostics", "compression"}) or (key == "source" and (tool_id == "visualization" or tool_id == "benchmark" and backend != "checkpoint")) or (key in {"train", "val"} and tool_id == "compression")):
-                args += [flag, _field_path(values[key])]
-        if tool_id == "compression":
-            args += ["--task", compression_task]
-            for key, flag in (("teacher_weights", "--teacher-weights"),
-                              ("student_weights", "--student-weights")):
-                if compression_mode is not None and compression_mode != "detection_distillation":
-                    continue
-                if values.get(key):
-                    args += [flag, _field_path(values[key])]
+        if tool_id == "diagnostics" and values.get("data"):
+            args += ["--data", _field_path(values["data"])]
+        if values.get("source") and (tool_id == "visualization" or tool_id == "benchmark" and backend != "checkpoint"):
+            args += ["--source", _field_path(values["source"])]
         if values.get("device") and values["device"] != "auto" and backend != "checkpoint":
             args += ["--device", _option(values["device"], ["auto", "cpu", "cuda:0"], "设备")]
         edits = request.get("module_edits") or {}
         if not isinstance(edits, dict):
             raise ValueError("模块修改必须是对象")
-        if mode_modules is not None:
-            if edits:
-                raise ValueError("选择处理模式时不能同时指定模块开关。")
-            for module_id in mode_modules:
-                args += ["--only", module_id]
         available = {item[0] for item in tool.get("modules", [])}
         loaded = load_config(config)
         config = loaded["path"]

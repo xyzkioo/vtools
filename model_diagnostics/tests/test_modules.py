@@ -6,10 +6,10 @@ from pathlib import Path
 from PIL import Image
 
 try:
-    from diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, load_ground_truth, validate_config
+    from diagnostics.engine import Dataset, ImageInfo, Instance, _summary_findings, evaluate_operating, load_ground_truth, validate_config
     from diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
 except ModuleNotFoundError:
-    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, evaluate_operating, load_ground_truth, validate_config
+    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, _summary_findings, evaluate_operating, load_ground_truth, validate_config
     from model_diagnostics.diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
 
 
@@ -99,6 +99,33 @@ class OverlapTests(unittest.TestCase):
 
 
 class ErrorEventTests(unittest.TestCase):
+    def test_findings_count_low_score_candidates_and_unique_confused_targets(self):
+        box = (0, 0, 10, 10)
+        dataset = Dataset(
+            images={key: ImageInfo(key) for key in ("a", "b")},
+            gt={key: [Instance(key, box, 0, instance_id="g0")] for key in ("a", "b")},
+            predictions={
+                "a": [Instance("a", box, 1, 0.9, "p0"), Instance("a", box, 1, 0.8, "p1")],
+                "b": [Instance("b", box, 0, 0.1, "p0")],
+            },
+            class_names={0: "A", 1: "B"},
+        )
+        result = evaluate_operating(dataset, {"score_threshold": 0.25})
+        findings = _summary_findings(result, dataset.class_names, resolve_modules({}))
+        self.assertEqual(result["aggregate"]["error_counts"]["classification"], 2)
+        self.assertEqual(findings, [
+            {
+                "type": "missed", "class_id": 0, "class_name": "A", "density_group": "gt_per_image_1_4",
+                "gt_count": 2, "missed_count": 2, "low_confidence_candidate_count": 1,
+            },
+            {
+                "type": "classification", "class_id": 0, "class_name": "A",
+                "predicted_class_id": 1, "predicted_class_name": "B",
+                "gt_count": 2, "confused_gt_count": 1,
+            },
+        ])
+        self.assertEqual(_summary_findings(result, dataset.class_names, {}), [])
+
     def test_wrong_class_prediction_and_missed_gt_are_one_event(self):
         dataset = Dataset(
             images={"long/path/image.jpg": ImageInfo("long/path/image.jpg")},

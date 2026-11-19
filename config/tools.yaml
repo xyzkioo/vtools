@@ -4,4 +4,3 @@ tool: diagnostics
 diagnostics_config: model_diagnostics/config/config.yaml
 speed_config: speed_test/benchmark_config.yaml
 visualization_config: model_visualization/config/config.yaml
-compression_config: model_compression/config/config.yaml

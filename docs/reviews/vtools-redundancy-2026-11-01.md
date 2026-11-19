@@ -36,7 +36,7 @@
 
 ### S04 · [P3] 共用模块选择的基础规则
 
-位置：[speed_test/core/module_selection.py](../../speed_test/core/module_selection.py) 第 31 行；[model_compression/core/module_selection.py](../../model_compression/core/module_selection.py) 第 69 行；[诊断模块解析](../../model_diagnostics/diagnostics/modules.py) 第 77 行；[可视化覆盖解析](../../model_visualization/run_visualization.py) 第 48 行。
+位置：[speed_test/core/module_selection.py](../../speed_test/core/module_selection.py) 第 31 行；[model_compression/core/module_selection.py](https://github.com/xyzkioo/vtools/blob/v0.5.11/model_compression/core/module_selection.py) 第 69 行；[诊断模块解析](../../model_diagnostics/diagnostics/modules.py) 第 77 行；[可视化覆盖解析](../../model_visualization/run_visualization.py) 第 48 行。
 
 `--only/--enable/--disable` 的拆分、未知 ID、互斥、显式空集合及 allow-list 规则维护了四份。AST 对比确认，测速与压缩的解析函数体在忽略说明文档、错误文本和默认表名称后完全相同；诊断和可视化再分别实现同一基础政策。修改共同规则需要多处同步，已有多个子项目回归分别维护这些约定。
 
@@ -60,7 +60,7 @@
 
 | 位置 | 符号 | 复核结果 |
 | --- | --- | --- |
-| [model_compression/modules/evaluation.py](../../model_compression/modules/evaluation.py) 第 10、15 行 | `evaluate`、`model_metrics` | 文件无执行端导入，只有 2 个转发封装；实际入口直接调用 model_runtime |
+| [model_compression/modules/evaluation.py](https://github.com/xyzkioo/vtools/blob/v0.5.11/model_compression/modules/evaluation.py) 第 10、15 行 | `evaluate`、`model_metrics` | 文件无执行端导入，只有 2 个转发封装；实际入口直接调用 model_runtime |
 | [speed_test/core/vision_benchmark_common.py](../../speed_test/core/vision_benchmark_common.py) 第 752 行 | `parse_model_specs` | 当前入口统一使用 `get_model_entries`，未找到调用 |
 | [speed_test/core/vision_benchmark_config.py](../../speed_test/core/vision_benchmark_config.py) 第 265 行 | `config_path_value` | 未找到调用、测试或文档引用 |
 | [env_test/check_install.py](../../env_test/check_install.py) 第 258 行 | `format_versions` | 未找到调用、测试或文档引用 |

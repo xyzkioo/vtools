@@ -10,7 +10,7 @@
 
 ### R01 · [P1] 用独立文件隔离可能被上游重写的输入图片
 
-位置：[model_compression/core/detection.py](../../model_compression/core/detection.py)，第 111–116 行，尤其 `os.link(source, target)`。
+位置：[model_compression/core/detection.py](https://github.com/xyzkioo/vtools/blob/v0.5.11/model_compression/core/detection.py)，第 111–116 行，尤其 `os.link(source, target)`。
 
 验证和检测蒸馏的镜像目录通过硬链接引用原图。外部 Ultralytics Fork 的 `ultralytics/data/utils.py::check_image()` 会对末尾不是 JPEG EOI 标记的可解码 JPEG 重新编码保存；写镜像文件即写同一个 inode，因此普通验证也可能修改原始数据，违反仓库的输入只读约定。
 
@@ -34,7 +34,7 @@
 
 ### R03 · [P2] 为结构化微调也隔离训练和验证数据
 
-位置：[model_compression/core/detection.py](../../model_compression/core/detection.py)，第 593–594 行；[model_compression/modules/structured.py](../../model_compression/modules/structured.py)，第 200–201 行。
+位置：[model_compression/core/detection.py](https://github.com/xyzkioo/vtools/blob/v0.5.11/model_compression/core/detection.py)，第 593–594 行；[model_compression/modules/structured.py](https://github.com/xyzkioo/vtools/blob/v0.5.11/model_compression/modules/structured.py)，第 200–201 行。
 
 结构化微调把 `detection_data(config)` 返回的原始 YAML 直接传给原生训练器，未走运行目录中的数据隔离。原生数据扫描会在原标签目录旁生成或刷新 `.cache`，JPEG 修复也会写入原图片路径。因此，即便修复 R01 的镜像实现，这条微调路径仍会写入用户数据目录。
 
@@ -54,7 +54,7 @@
 
 ### R05 · [P2] 让分类训练集和验证集共用类别编号
 
-位置：[model_compression/core/model_runtime.py](../../model_compression/core/model_runtime.py)，第 234–236 行。
+位置：[model_compression/core/model_runtime.py](https://github.com/xyzkioo/vtools/blob/v0.5.11/model_compression/core/model_runtime.py)，第 234–236 行。
 
 两个划分分别构造 `ImageFolder`，各自按现有目录重新编号，未检查或共享 `class_to_idx`。验证集缺少某个类别目录时，后续类别的标签会移动，产生错误的验证精度；这些精度还会用于分类蒸馏的最佳 checkpoint 选择。
 

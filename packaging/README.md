@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 图片缩放、视频抽帧、文件名转换、数据集质量检查 | 内置 | Pillow、OpenCV、PyYAML |
 | 检测诊断读取已有预测文件，输出匹配结果、差图和报告 | 内置 | 不加载模型；GT 为本地 YAML/JSON/YOLO 标签 |
-| 检测诊断生成预测、模型可视化、测速、压缩、checkpoint 检查 | 所选外部 Python | PyTorch、Ultralytics 或对应后端 |
+| 检测诊断生成预测、模型可视化、测速、checkpoint 检查 | 所选外部 Python | PyTorch、Ultralytics 或对应后端 |
 | NDJSON 数据集转换（包括诊断读取 NDJSON GT） | 所选外部 Python | 复用 Ultralytics 公共转换 API |
 | K230 转换及 ONNX/kmodel 推理校验 | 所选外部 Python | 对应的模型、推理和 nncase/.NET 运行库 |
 
