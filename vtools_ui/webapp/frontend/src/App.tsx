@@ -19,6 +19,8 @@ type ConfigDocument = { path: string; text: string; data: Record<string, unknown
 type Settings = { results_root: string; history_limit: number; python_executable: string }
 type UpdatePlatformRow = { key: 'windows' | 'linux'; label: string; latest_version: string; status: 'current' | 'available' | 'missing' | 'untrusted'; message: string; can_install: boolean; is_current_platform: boolean; asset_name?: string }
 type UpdateInfo = { status: 'unsupported' | 'unpublished' | 'current' | 'available' | 'missing_asset' | 'untrusted'; current_version: string; latest_version?: string; message: string; platform?: 'windows' | 'linux'; platforms?: Partial<Record<'windows' | 'linux', UpdatePlatformRow>>; note?: string; digest_source?: 'api' | 'sha256-sidecar' | 'cache' }
+type UpdateProgress = { phase: 'checking' | 'verifying' | 'installing' }
+  | { phase: 'downloading'; downloaded: number; total: number; attempt: number; max_attempts: number }
 type ResultFolder = { name: string; folders: ResultFolder[]; files: Result[]; count: number }
 
 declare global {
@@ -49,6 +51,18 @@ const completionNotice = (state: RunState) => {
 const prettyBackend: Record<string, string> = { pytorch: 'PyTorch 测速', tensorrt: 'TensorRT 测速', consistency: '输出一致性', all: '一键测速', checkpoint: 'Checkpoint 检查' }
 const isGoodHistoryStatus = (status: string) => status === '成功'
 const isWarningHistoryStatus = (status: string) => ['检查完成（有问题）', '完成（有差异）'].includes(status)
+
+function updateProgressText(progress: UpdateProgress) {
+  if (progress.phase === 'downloading') {
+    const toMiB = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1)
+    const percent = Math.floor(progress.downloaded * 100 / progress.total)
+    const attempt = progress.attempt > 1 ? ` · 第 ${progress.attempt}/${progress.max_attempts} 次尝试` : ''
+    return `安装包下载 ${toMiB(progress.downloaded)} / ${toMiB(progress.total)} MiB（${percent}%）${attempt}`
+  }
+  if (progress.phase === 'verifying') return '正在校验安装包…'
+  if (progress.phase === 'installing') return '正在启动安装…'
+  return '正在检查更新…'
+}
 
 function Icon({ name, size = 19 }: { name: string; size?: number }) {
   const props = { size, strokeWidth: 1.9 }
@@ -262,8 +276,10 @@ function App() {
   const [version, setVersion] = useState('')
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateInstalling, setUpdateInstalling] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress>({ phase: 'checking' })
   const [updateError, setUpdateError] = useState('')
-  const [updateInstalled, setUpdateInstalled] = useState(false)
+  const [updateInstalled, setUpdateInstalled] = useState('')
   const logRef = useRef<HTMLPreElement>(null)
 
   const tool = catalog[page]
@@ -291,6 +307,24 @@ function App() {
     api<{ environments: { label: string; path: string }[] }>('environments').then(data => setEnvironments(data.environments)).catch(() => {})
     api<UpdateInfo>('update/check').then(setUpdateInfo).catch(err => setUpdateError(String(err)))
   }, [])
+
+  useEffect(() => {
+    if (!updateInstalling) return
+    let stopped = false
+    let timer = 0
+    async function poll() {
+      try {
+        const { progress } = await api<{ progress: UpdateProgress | null }>('update/progress')
+        if (!stopped && progress) setUpdateProgress(progress)
+      } catch {
+        // The install request itself reports any terminal error.
+      } finally {
+        if (!stopped) timer = window.setTimeout(poll, 500)
+      }
+    }
+    void poll()
+    return () => { stopped = true; window.clearTimeout(timer) }
+  }, [updateInstalling])
 
   useEffect(() => {
     if (!tool) return
@@ -417,11 +451,12 @@ function App() {
   }
   async function installUpdate() {
     setUpdateBusy(true); setUpdateError('')
+    setUpdateProgress({ phase: 'checking' }); setUpdateInstalling(true)
     try {
       const result = await api<{ message: string }>('update/install', {})
-      setUpdateInstalled(true); setNotice(result.message)
+      setUpdateInstalled(result.message); setNotice(result.message)
     } catch (err) { setUpdateError(String(err)) }
-    finally { setUpdateBusy(false) }
+    finally { setUpdateBusy(false); setUpdateInstalling(false) }
   }
   async function selectFile(file: Result) {
     setSelectedFile(file); setPreview(''); setImageScale(1); setImageFit(true)
@@ -514,7 +549,9 @@ function App() {
 
         {page === 'history' && <><div className="page-heading"><div className="eyebrow">ACTIVITY LOG</div><h1>任务记录</h1><p>查看每次运行的状态、配置、日志和输出位置。</p></div><div className="card history-card"><div className="history-head"><strong>全部任务 <span>{historyRows.length}</span></strong><button className="link-button" onClick={refreshHistory}><RefreshCw size={16} /> 刷新</button></div><div className="table-wrap"><table><thead><tr><th>时间</th><th>任务</th><th>状态</th><th>配置</th><th>结果</th><th>日志</th></tr></thead><tbody>{historyRows.map((row, index) => <tr key={row.id || index}><td>{row.time}</td><td><strong>{catalog[row.task]?.title || row.task}</strong></td><td><span className={`pill ${isGoodHistoryStatus(row.status) ? 'good' : isWarningHistoryStatus(row.status) ? 'warning' : row.status === '失败' ? 'bad' : ''}`}>{row.status}</span></td><td title={row.config} className="truncate">{row.config}</td><td>{row.result_dir ? <button className="link-button" onClick={() => { setResultRoot(row.result_dir!); setPage('results') }}>查看结果 <ArrowRight size={15} /></button> : '—'}</td><td>{row.id && row.log_path ? <button className="link-button" onClick={() => showSavedLog(row.id!)}>查看日志</button> : '—'}</td></tr>)}</tbody></table>{!historyRows.length && <div className="empty-state">暂无任务记录。</div>}</div></div></>}
 
-        {page === 'settings' && settingsDraft && <><div className="page-heading"><div className="eyebrow">PREFERENCES</div><h1>设置</h1><p>管理结果目录、任务记录和 Python 环境。</p></div><div className="card form-card settings-card"><div className="card-heading"><span className="step-number"><Settings2 size={19} /></span><div><h2>工作台设置</h2><p>修改后保存，下一次扫描或运行会使用新值。</p></div></div><div className="form-grid"><label className="form-field wide"><span>默认结果目录</span><PathField value={settingsDraft.results_root} onChange={value => setSettingsDraft({ ...settingsDraft, results_root: value })} kind="dir" /></label><label className="form-field"><span>保留任务记录数</span><input type="number" min={1} max={200} value={settingsDraft.history_limit} onChange={event => setSettingsDraft({ ...settingsDraft, history_limit: Number(event.target.value) })} /></label><label className="form-field wide"><span>模型任务使用的 Python 解释器</span><PathField value={settingsDraft.python_executable} onChange={value => setSettingsDraft({ ...settingsDraft, python_executable: value })} kind="file" /></label></div><div className="settings-actions"><button className="button secondary danger" onClick={async () => { if (!window.confirm('确定清空任务记录吗？')) return; try { await api('history/clear', {}); setHistoryRows([]); setNotice('任务记录已清空') } catch (err) { setNotice(String(err)) } }}>清空任务记录</button><button className="button primary" onClick={saveSettings}>保存设置</button></div></div><div className="card form-card settings-card"><div className="card-heading"><span className="step-number"><RefreshCw size={19} /></span><div><h2>软件更新</h2><p>当前版本 {version || '—'}。分别检查 GitHub Releases 中 Windows 安装包与 .deb 的最新版本。</p></div></div><p>{updateBusy ? '正在检查或安装更新…' : updateInstalled ? '安装程序已启动，请按向导完成安装后重新打开工作台。' : updateError ? '更新失败，请稍后重试。' : updateInfo?.message || '正在检查更新…'}</p>{updateInfo?.platforms && <div className="update-platforms">{(['windows', 'linux'] as const).map(key => { const row = updateInfo.platforms?.[key]; if (!row) return null; return <div className="update-platform" key={key}><span className="update-platform-name">{row.label}</span><span className="update-platform-version">最新 {row.latest_version || '—'}</span><span className={`update-platform-state ${row.status}`}>{row.status === 'current' ? '已是最新' : row.status === 'missing' ? '尚无安装包' : row.status === 'untrusted' ? '校验信息缺失' : row.is_current_platform ? '可更新' : '其他平台'}</span>{row.is_current_platform && row.status === 'available' && row.can_install && !updateInstalled && <button className="button primary" onClick={installUpdate} disabled={updateBusy || active(run)}>下载并安装 {row.latest_version}</button>}</div> })}</div>}{updateInfo?.status === 'untrusted' && <p className="inline-error">{updateInfo.message}</p>}{updateInfo?.note && <p className="update-note">{updateInfo.note}</p>}{updateError && <p className="inline-error">{updateError}</p>}<div className="settings-actions"><button className="button secondary" onClick={checkForUpdates} disabled={updateBusy}>检查更新</button></div></div></>}
+        {page === 'settings' && settingsDraft && <><div className="page-heading"><div className="eyebrow">PREFERENCES</div><h1>设置</h1><p>管理结果目录、任务记录和 Python 环境。</p></div><div className="card form-card settings-card"><div className="card-heading"><span className="step-number"><Settings2 size={19} /></span><div><h2>工作台设置</h2><p>修改后保存，下一次扫描或运行会使用新值。</p></div></div><div className="form-grid"><label className="form-field wide"><span>默认结果目录</span><PathField value={settingsDraft.results_root} onChange={value => setSettingsDraft({ ...settingsDraft, results_root: value })} kind="dir" /></label><label className="form-field"><span>保留任务记录数</span><input type="number" min={1} max={200} value={settingsDraft.history_limit} onChange={event => setSettingsDraft({ ...settingsDraft, history_limit: Number(event.target.value) })} /></label><label className="form-field wide"><span>模型任务使用的 Python 解释器</span><PathField value={settingsDraft.python_executable} onChange={value => setSettingsDraft({ ...settingsDraft, python_executable: value })} kind="file" /></label></div><div className="settings-actions"><button className="button secondary danger" onClick={async () => { if (!window.confirm('确定清空任务记录吗？')) return; try { await api('history/clear', {}); setHistoryRows([]); setNotice('任务记录已清空') } catch (err) { setNotice(String(err)) } }}>清空任务记录</button><button className="button primary" onClick={saveSettings}>保存设置</button></div></div><div className="card form-card settings-card"><div className="card-heading"><span className="step-number"><RefreshCw size={19} /></span><div><h2>软件更新</h2><p>当前版本 {version || '—'}。分别检查 GitHub Releases 中 Windows 安装包与 .deb 的最新版本。</p></div></div><p role="status">{updateInstalling ? updateProgressText(updateProgress) : updateBusy ? '正在检查更新…' : updateInstalled || (updateError ? '更新失败，请重试。' : updateInfo?.message || '正在检查更新…')}</p>
+          {updateInstalling && updateProgress.phase === 'downloading' && <progress className="update-download-progress" aria-label="安装包下载进度" value={updateProgress.downloaded} max={updateProgress.total} />}
+          {updateInfo?.platforms && <div className="update-platforms">{(['windows', 'linux'] as const).map(key => { const row = updateInfo.platforms?.[key]; if (!row) return null; return <div className="update-platform" key={key}><span className="update-platform-name">{row.label}</span><span className="update-platform-version">最新 {row.latest_version || '—'}</span><span className={`update-platform-state ${row.status}`}>{row.status === 'current' ? '已是最新' : row.status === 'missing' ? '尚无安装包' : row.status === 'untrusted' ? '校验信息缺失' : row.is_current_platform ? '可更新' : '其他平台'}</span>{row.is_current_platform && row.status === 'available' && row.can_install && !updateInstalled && <button className="button primary" onClick={installUpdate} disabled={updateBusy || active(run)}>下载并安装 {row.latest_version}</button>}</div> })}</div>}{updateInfo?.status === 'untrusted' && <p className="inline-error">{updateInfo.message}</p>}{updateInfo?.note && <p className="update-note">{updateInfo.note}</p>}{updateError && <p className="inline-error">{updateError}</p>}<div className="settings-actions"><button className="button secondary" onClick={checkForUpdates} disabled={updateBusy}>检查更新</button></div></div></>}
       </main>
 
       <div className={`task-console ${logOpen ? 'expanded' : ''}`}><div className="console-bar"><div className="console-state"><span className={`state-indicator ${run?.status || 'idle'}`} /> <strong>{run ? statusText[run.status] || run.status : '就绪'}</strong><span>{run ? `${catalog[run.tool_id]?.title || run.tool_id} · ${run.started_at}` : '选择工具开始新的任务'}</span></div><div className="console-actions">{active(run) && <button className="button stop" onClick={stop}><Square size={13} fill="currentColor" /> 停止任务</button>}<button className="console-toggle" onClick={() => setLogOpen(!logOpen)}><TerminalSquare size={17} /> 运行详情 <ChevronDown size={15} /></button></div></div>{logOpen && <div className="console-body"><div className="console-body-head"><span className="console-log-path" title={savedLog?.path || run?.log_path || undefined}>{savedLog ? `日志文件：${savedLog.path}` : '运行日志'}</span><span className="console-log-actions">{run?.log_path && <button onClick={() => showSavedLog(run.id)}>查看本次日志</button>}{(savedLog || run?.log_path) && <><button onClick={() => openSavedLog(false)}>打开文件</button><button onClick={() => openSavedLog(true)}>打开目录</button></>}<button onClick={copyLog} title="复制当前面板中的日志" aria-label="复制日志"><Copy size={15} /> 复制日志</button></span></div><pre ref={logRef}>{log || (active(run) ? '等待任务输出…' : '运行日志会显示在这里。')}</pre></div>}</div>
