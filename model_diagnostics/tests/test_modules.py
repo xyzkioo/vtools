@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from collections import defaultdict
@@ -5,12 +6,11 @@ from pathlib import Path
 
 from PIL import Image
 
-try:
-    from diagnostics.engine import Dataset, ImageInfo, Instance, _summary_findings, evaluate_operating, load_ground_truth, validate_config
-    from diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
-except ModuleNotFoundError:
-    from model_diagnostics.diagnostics.engine import Dataset, ImageInfo, Instance, _summary_findings, evaluate_operating, load_ground_truth, validate_config
-    from model_diagnostics.diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
+from model_diagnostics.diagnostics.engine import (
+    Dataset, ImageInfo, Instance, _summary_findings, evaluate_operating, load_ground_truth,
+    load_predictions, validate_config,
+)
+from model_diagnostics.diagnostics.modules import bad_case_rows, overlap_analysis, resolve_modules
 
 
 class ModuleSelectionTests(unittest.TestCase):
@@ -67,6 +67,20 @@ class ModuleSelectionTests(unittest.TestCase):
 
 
 class GroundTruthInputTests(unittest.TestCase):
+    def test_explicit_canonical_gt_keeps_xyxy_in_image_and_annotation_mapping(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gt.json"
+            path.write_text(json.dumps({
+                "images": [{"id": "sample"}],
+                "annotations": [{"image_id": "sample", "class_id": 0, "bbox": [10, 10, 20, 20]}],
+            }), encoding="utf-8")
+
+            dataset = load_ground_truth(path, "canonical")
+            dataset.predictions["sample"] = [Instance("sample", (10, 10, 20, 20), 0, 0.9)]
+            metrics = evaluate_operating(dataset, {})["aggregate"]
+            self.assertEqual((metrics["tp"], metrics["fp"], metrics["fn"]), (1, 0, 0))
+            self.assertEqual(load_ground_truth(path, "auto").gt["sample"][0].bbox, (10, 10, 30, 30))
+
     def test_binary_yolo_label_reports_its_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -86,6 +100,20 @@ class GroundTruthInputTests(unittest.TestCase):
 
 
 class OverlapTests(unittest.TestCase):
+    def test_duplicate_predictions_are_matched_within_their_image(self):
+        box = (0, 0, 10, 10)
+        dataset = Dataset(
+            gt={"a": [Instance("a", box, 0, instance_id="g0")],
+                "b": [Instance("b", box, 0, instance_id="g0"), Instance("b", box, 0, instance_id="g1")]},
+            predictions={key: [Instance(key, box, 0, 0.9, "p0"), Instance(key, box, 0, 0.8, "p1")]
+                         for key in ("a", "b")},
+        )
+        operating = evaluate_operating(dataset, {})
+        dataset.diagnostic_per_gt = operating["per_gt"]
+        dataset.diagnostic_per_prediction = operating["per_prediction"]
+        pairs = overlap_analysis(dataset, {})["prediction_pairs"]
+        self.assertEqual({pair["image_id"]: pair["suspected_duplicate"] for pair in pairs}, {"a": True, "b": False})
+
     def test_target_count_is_deduplicated_and_distinct_targets_are_not_duplicates(self):
         dataset = Dataset(
             images={"a": ImageInfo("a")},
@@ -99,6 +127,49 @@ class OverlapTests(unittest.TestCase):
 
 
 class ErrorEventTests(unittest.TestCase):
+    def test_flat_canonical_predictions_keep_xyxy_coordinates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "predictions.json"
+            box = (10, 10, 20, 20)
+            path.write_text(json.dumps([{"image_id": "sample", "bbox": box, "score": 0.9, "class_id": 0}]), encoding="utf-8")
+            dataset = Dataset(gt={"sample": [Instance("sample", box, 0)]})
+            for fmt in ("canonical", "auto"):
+                with self.subTest(fmt=fmt):
+                    dataset.predictions, _ = load_predictions(path, dataset.images, fmt)
+                    self.assertEqual(evaluate_operating(dataset, {})["aggregate"]["tp"], 1)
+            coco, _ = load_predictions(path, dataset.images, "coco")
+            self.assertEqual(coco["sample"][0].bbox, (10, 10, 30, 30))
+
+    def test_coco_crowd_ignores_contained_same_class_predictions_after_matching(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gt.json"
+            path.write_text(json.dumps({
+                "images": [{"id": "sample"}],
+                "annotations": [
+                    {"image_id": "sample", "bbox": [0, 0, 100, 100], "category_id": 0, "iscrowd": 1},
+                    {"image_id": "sample", "bbox": [10, 10, 10, 10], "category_id": 0},
+                ],
+            }), encoding="utf-8")
+            dataset = load_ground_truth(path, "coco")
+            dataset.predictions["sample"] = [
+                Instance("sample", (10, 10, 20, 20), 0, 0.9, "tp"),
+                Instance("sample", (30, 30, 40, 40), 0, 0.8, "ignored"),
+                Instance("sample", (30, 30, 40, 40), 1, 0.8, "fp"),
+            ]
+            result = evaluate_operating(dataset, {})
+            aggregate = result["aggregate"]
+            self.assertEqual((aggregate["tp"], aggregate["fp"], aggregate["fn"]), (1, 1, 0))
+            self.assertEqual(aggregate["prediction_count_at_threshold"], 2)
+            self.assertEqual(aggregate["below_threshold_prediction_count"], 0)
+            self.assertEqual([event["prediction_id"] for event in result["error_events"]], ["fp"])
+
+    def test_zero_iou_threshold_with_empty_gt_keeps_background_prediction(self):
+        dataset = Dataset(predictions={"sample": [Instance("sample", (0, 0, 10, 10), 0, 0.9, "p")]})
+        result = evaluate_operating(dataset, {"match_iou": 0})
+        self.assertEqual(result["aggregate"]["fp"], 1)
+        self.assertEqual(result["aggregate"]["tp"], 0)
+        self.assertEqual(result["error_events"][0]["error_type"], "background")
+
     def test_findings_count_low_score_candidates_and_unique_confused_targets(self):
         box = (0, 0, 10, 10)
         dataset = Dataset(

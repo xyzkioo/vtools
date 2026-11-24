@@ -57,6 +57,8 @@ python -m pip install -r ./model_diagnostics/requirements.txt
 
 数据集优先使用 Ultralytics `data.yaml`（`path`、`train`、`val`、`test`、`names`），程序会自动定位对应的 `labels/*.txt` 和图片；YOLO 标签须为 UTF-8 文本，无法解码时会报出具体路径，需从原始标注重新导出。Ultralytics Platform 的 `.ndjson` 也可通过官方兼容转换读取。同时兼容 canonical JSON/JSONL、COCO GT/预测结果和旧式 YOLO 标签目录。统一检测格式为原图像素坐标 `[x1, y1, x2, y2]`、`score`、`class_id`。
 
+显式指定 `pred_format: canonical` 时，扁平预测列表的 `bbox` 默认使用 `xyxy`。自动识别会将带 `class_id` 且无 `category_id` 的扁平预测视为 canonical。COCO 的 crowd 标注会在普通框匹配后吸收与其重叠的同类预测。预测明细将这些框标记为 `ignored`，误报计数和坏例汇总会跳过它们。
+
 完整指标、数据格式、适配器钩子和确认方法见 [docs/README.md](docs/README.md)。
 
 ## 训练前检查数据集

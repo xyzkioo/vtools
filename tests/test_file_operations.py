@@ -1,15 +1,63 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from others.filename_transform.image_filename_converter import (
     RenameItem, CocoUpdate, apply_plan, load_coco_json, rollback_plan, validate_plan,
-    write_coco_with_backup,
+    main as rename_main, write_coco_with_backup,
 )
 
 
 class FileOperations(unittest.TestCase):
+    def test_yolo_rename_cannot_assign_leftover_label_to_background_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            images = root / "images"
+            labels = root / "labels"
+            images.mkdir()
+            labels.mkdir()
+            image = images / "a.jpg"
+            image.write_bytes(b"image")
+            label = labels / "08-01.txt"
+            label.write_text("0 0.5 0.5 0.3 0.3\n", encoding="utf-8")
+            args = ["rename", "--dir", str(root), "--dataset-format", "yolo", "--apply", "--yes"]
+            with patch.object(sys, "argv", args):
+                self.assertEqual(rename_main(), 1)
+            self.assertEqual(image.read_bytes(), b"image")
+            self.assertFalse((images / "08-01.jpg").exists())
+            self.assertEqual(label.read_text(encoding="utf-8"), "0 0.5 0.5 0.3 0.3\n")
+
+            # If the same label belongs to an image being moved out of the way,
+            # the background image can safely reuse that stem.
+            image.rename(images / "00.jpg")
+            label.rename(labels / "01.txt")
+            (images / "01.jpg").write_bytes(b"labeled")
+            args += ["--template", "{index:02d}"]
+            with patch.object(sys, "argv", args):
+                self.assertEqual(rename_main(), 0)
+            self.assertEqual((images / "01.jpg").read_bytes(), b"image")
+            self.assertEqual((images / "02.jpg").read_bytes(), b"labeled")
+            self.assertFalse((labels / "01.txt").exists())
+            self.assertTrue((labels / "02.txt").is_file())
+
+    def test_rename_dry_run_only_writes_a_new_non_conflicting_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image = root / "a.jpg"
+            image.write_bytes(b"original")
+            future_name = root / "08-01.jpg"
+            csv = root / "plan.csv"
+            for output, expected in ((image, 1), (future_name, 1), (csv, 0), (csv, 1)):
+                with self.subTest(output=output, expected=expected), patch.object(sys, "argv", [
+                    "rename", "--dir", str(root), "--dry-run", "--plan", str(output),
+                ]):
+                    self.assertEqual(rename_main(), expected)
+            self.assertEqual(image.read_bytes(), b"original")
+            self.assertFalse(future_name.exists())
+            self.assertIn("08-01.jpg", csv.read_text(encoding="utf-8-sig"))
+
     def test_coco_json_with_utf8_bom_is_accepted(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "annotations.json"

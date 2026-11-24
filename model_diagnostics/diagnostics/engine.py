@@ -165,7 +165,7 @@ def _instance_from_object(
         score=_as_float(score, 0.0) if is_prediction else None,
         instance_id=str(obj.get("instance_id", obj.get("id", f"{image_id}:{index}"))),
         ignore=bool(obj.get("ignore", obj.get("iscrowd", False))),
-        extra={k: v for k, v in obj.items() if k not in {"bbox", "box", "bbox_format", "class_id", "category_id", "class", "label", "score", "confidence", "conf", "instance_id", "id", "ignore", "iscrowd"}},
+        extra={k: v for k, v in obj.items() if k not in {"bbox", "box", "bbox_format", "class_id", "category_id", "class", "label", "score", "confidence", "conf", "instance_id", "id", "ignore"}},
     )
 
 
@@ -569,7 +569,9 @@ def load_ground_truth(
         _load_yolo_ground_truth(path, images_dir, ds)
         return ds
     data = _read_jsonish(path)
-    if normalized_fmt == "coco" or (isinstance(data, Mapping) and "images" in data and "annotations" in data):
+    if normalized_fmt == "coco" or (
+        normalized_fmt == "auto" and isinstance(data, Mapping) and "images" in data and "annotations" in data
+    ):
         _load_coco_ground_truth(data, ds)
     else:
         _load_canonical_ground_truth(data, ds)
@@ -581,9 +583,16 @@ def load_predictions(path: Path, images: Dict[str, ImageInfo], fmt: str = "auto"
     if path.is_dir():
         raise ValueError("预测目录不是通用格式；请导出 canonical JSON/JSONL、COCO results，或通过 --predictor 生成")
     data = _read_jsonish(path)
-    if fmt == "coco" or (isinstance(data, Mapping) and "annotations" in data and "images" not in data):
-        return _load_coco_predictions(data, images, warnings), warnings
-    if isinstance(data, list) and data and all(isinstance(x, Mapping) and "bbox" in x and "image_id" in x for x in data):
+    if fmt == "auto":
+        if isinstance(data, Mapping) and "annotations" in data and "images" not in data:
+            fmt = "coco"
+        elif isinstance(data, list) and data and all(
+            isinstance(row, Mapping) and {"bbox", "image_id"} <= row.keys()
+            and ("category_id" in row or "class_id" not in row)
+            for row in data
+        ):
+            fmt = "coco"
+    if fmt == "coco":
         return _load_coco_predictions(data, images, warnings), warnings
     return _load_canonical_predictions(data, images, warnings), warnings
 
@@ -650,10 +659,14 @@ def box_area(box: BBox) -> float:
     return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
 
 
-def box_iou(a: BBox, b: BBox) -> float:
+def _intersection_area(a: BBox, b: BBox) -> float:
     ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
     ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
-    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    return max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+
+
+def box_iou(a: BBox, b: BBox) -> float:
+    inter = _intersection_area(a, b)
     union = box_area(a) + box_area(b) - inter
     return inter / union if union > 0 else 0.0
 
@@ -740,13 +753,29 @@ def greedy_match(
             best_iou, best_gt = max(candidates, key=lambda x: x[0])
         else:
             best_iou, best_gt = 0.0, -1
-        if best_iou >= iou_threshold:
+        if best_gt >= 0 and best_iou >= iou_threshold:
             used.add(best_gt)
             matches.append((pred_index, best_gt, best_iou))
         else:
             unmatched_pred.append(pred_index)
     unmatched_gt = [idx for idx in range(len(active)) if idx not in used]
     return matches, unmatched_pred, unmatched_gt
+
+
+def _ignored_match(pred: Instance, ignored: Sequence[Instance], threshold: float) -> Tuple[float, Optional[Instance]]:
+    best = (0.0, None)
+    for gt in ignored:
+        if pred.class_id != gt.class_id:
+            continue
+        if gt.extra.get("iscrowd"):
+            # COCO crowd overlap uses the prediction area as its denominator.
+            area = box_area(pred.bbox)
+            overlap = _intersection_area(pred.bbox, gt.bbox) / area if area else 0.0
+        else:
+            overlap = box_iou(pred.bbox, gt.bbox)
+        if overlap > best[0] and overlap >= threshold:
+            best = (overlap, gt)
+    return best
 
 
 def _max_iou(predictions: Sequence[Instance], gt: Instance, score_threshold: float, same_class: bool) -> Tuple[float, Optional[Instance]]:
@@ -763,24 +792,24 @@ def candidate_coverage(
     score_threshold: float,
     iou_thresholds: Sequence[float],
 ) -> Dict[str, Any]:
-    best_same: List[float] = []
-    best_any: List[float] = []
+    best_same: List[Optional[float]] = []
+    best_any: List[Optional[float]] = []
     for image_id, image_gts in gts.items():
         image_predictions = predictions.get(image_id, [])
         for gt in _active_gt(image_gts):
-            same, _ = _max_iou(image_predictions, gt, score_threshold, True)
-            any_iou, _ = _max_iou(image_predictions, gt, score_threshold, False)
-            best_same.append(same)
-            best_any.append(any_iou)
+            same, same_pred = _max_iou(image_predictions, gt, score_threshold, True)
+            any_iou, any_pred = _max_iou(image_predictions, gt, score_threshold, False)
+            best_same.append(same if same_pred is not None else None)
+            best_any.append(any_iou if any_pred is not None else None)
     result: Dict[str, Any] = {
         "gt_count": len(best_same),
-        "mean_best_same_class_iou": _mean(best_same),
-        "median_best_same_class_iou": _median(best_same),
-        "mean_best_any_class_iou": _mean(best_any),
+        "mean_best_same_class_iou": _mean(x or 0.0 for x in best_same),
+        "median_best_same_class_iou": _median(x or 0.0 for x in best_same),
+        "mean_best_any_class_iou": _mean(x or 0.0 for x in best_any),
     }
     for threshold in iou_thresholds:
-        result[f"candidate_recall_iou_{threshold:g}"] = _safe_div(sum(x >= threshold for x in best_same), len(best_same))
-        result[f"any_class_candidate_recall_iou_{threshold:g}"] = _safe_div(sum(x >= threshold for x in best_any), len(best_any))
+        result[f"candidate_recall_iou_{threshold:g}"] = _safe_div(sum(x is not None and x >= threshold for x in best_same), len(best_same))
+        result[f"any_class_candidate_recall_iou_{threshold:g}"] = _safe_div(sum(x is not None and x >= threshold for x in best_any), len(best_any))
     return result
 
 
@@ -833,11 +862,20 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
 
     for image_id in sorted(set(ds.images) | set(ds.gt) | set(ds.predictions)):
         image_info = ds.images.get(image_id, ImageInfo(image_id=image_id))
-        gts = _active_gt(ds.gt.get(image_id, []))
+        image_gts = ds.gt.get(image_id, [])
+        gts = _active_gt(image_gts)
+        ignored_gts = [gt for gt in image_gts if gt.ignore]
         predictions = list(ds.predictions.get(image_id, []))
         matches, unmatched_pred, unmatched_gt = greedy_match(predictions, gts, score_threshold, match_iou)
         matched_pred = {p for p, _, _ in matches}
         matched_gt = {g for _, g, _ in matches}
+        ignored_predictions = {}
+        if ignored_gts:
+            for pred_idx in unmatched_pred:
+                overlap, gt = _ignored_match(predictions[pred_idx], ignored_gts, match_iou)
+                if gt is not None:
+                    ignored_predictions[pred_idx] = (overlap, gt)
+            unmatched_pred = [idx for idx in unmatched_pred if idx not in ignored_predictions]
         tp += len(matches)
         fp += len(unmatched_pred)
         fn += len(unmatched_gt)
@@ -846,14 +884,18 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
             gt = gts[gt_idx]
             per_prediction.append({"image_id": image_id, "prediction_id": pred.instance_id, "class_id": pred.class_id, "score": _pred_score(pred), "bbox": list(pred.bbox), "error_type": "TP", "matched_gt_id": gt.instance_id, "iou": match_iou_value, "operating_included": True})
         for pred_idx, pred in enumerate(predictions):
+            if pred_idx in ignored_predictions:
+                overlap, gt = ignored_predictions[pred_idx]
+                per_prediction.append({"image_id": image_id, "prediction_id": pred.instance_id, "class_id": pred.class_id, "score": _pred_score(pred), "bbox": list(pred.bbox), "error_type": "ignored", "matched_gt_id": gt.instance_id, "iou": overlap, "operating_included": False})
+                continue
             if pred_idx in matched_pred or _pred_score(pred) < score_threshold:
                 if pred_idx not in matched_pred and _pred_score(pred) < score_threshold:
                     # A below-threshold prediction is retained in the table so
                     # that low-confidence correct detections can be audited.
                     nearest = max(enumerate(gts), key=lambda x: box_iou(pred.bbox, x[1].bbox), default=(-1, None))
                     nearest_iou = box_iou(pred.bbox, nearest[1].bbox) if nearest[1] else 0.0
-                    same_nearest = max((box_iou(pred.bbox, gt.bbox) for gt in gts if gt.class_id == pred.class_id), default=0.0)
-                    any_nearest = nearest_iou
+                    same_nearest = max((box_iou(pred.bbox, gt.bbox) for gt in gts if gt.class_id == pred.class_id), default=-1.0)
+                    any_nearest = nearest_iou if nearest[1] else -1.0
                     if same_nearest >= match_iou:
                         low_type = "below_threshold_correct"
                     elif any_nearest >= match_iou:
@@ -866,8 +908,8 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
                 continue
             same_ious = [box_iou(pred.bbox, gt.bbox) for gt in gts if gt.class_id == pred.class_id]
             any_ious = [box_iou(pred.bbox, gt.bbox) for gt in gts]
-            best_same = max(same_ious) if same_ious else 0.0
-            best_any = max(any_ious) if any_ious else 0.0
+            best_same = max(same_ious, default=-1.0)
+            best_any = max(any_ious, default=-1.0)
             if best_same >= match_iou:
                 error_type = "duplicate"
             elif best_any >= match_iou:
@@ -893,15 +935,15 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
                 score = _pred_score(matched_pred_instance)
             else:
                 score = _pred_score(candidate_same_pred) if candidate_same_pred else 0.0
-                if candidate_same >= match_iou and work_same < match_iou:
+                if candidate_same_pred is not None and candidate_same >= match_iou and (work_same_pred is None or work_same < match_iou):
                     reason = "miss_low_confidence"
-                elif work_same >= match_iou:
+                elif work_same_pred is not None and work_same >= match_iou:
                     reason = "miss_duplicate_competition"
-                elif candidate_same >= localization_floor:
+                elif candidate_same_pred is not None and candidate_same >= localization_floor:
                     reason = "miss_localization"
-                elif candidate_any >= match_iou:
+                elif candidate_any_pred is not None and candidate_any >= match_iou:
                     reason = "miss_classification"
-                elif candidate_any >= localization_floor:
+                elif candidate_any_pred is not None and candidate_any >= localization_floor:
                     reason = "miss_classification_localization"
                 else:
                     reason = "miss_no_candidate"
@@ -910,7 +952,9 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
             per_gt.append(row)
         image_metrics = _prf(len(matches), len(unmatched_pred), len(unmatched_gt))
         candidates = candidate_coverage({image_id: predictions}, {image_id: gts}, candidate_threshold, candidate_iou_thresholds)
-        image_metrics.update({"image_id": image_id, "gt_count": len(gts), "prediction_count_at_threshold": sum(_pred_score(p) >= score_threshold for p in predictions), "tp": len(matches), "fp": len(unmatched_pred), "fn": len(unmatched_gt), "count_error": sum(_pred_score(p) >= score_threshold for p in predictions) - len(gts), "count_absolute_error": abs(sum(_pred_score(p) >= score_threshold for p in predictions) - len(gts)), "count_exact": sum(_pred_score(p) >= score_threshold for p in predictions) == len(gts)})
+        prediction_count = len(matches) + len(unmatched_pred)
+        count_error = prediction_count - len(gts)
+        image_metrics.update({"image_id": image_id, "gt_count": len(gts), "prediction_count_at_threshold": prediction_count, "tp": len(matches), "fp": len(unmatched_pred), "fn": len(unmatched_gt), "count_error": count_error, "count_absolute_error": abs(count_error), "count_exact": count_error == 0})
         for threshold in candidate_iou_thresholds:
             candidate_matches, _, _ = greedy_match(predictions, gts, candidate_threshold, threshold)
             image_metrics[f"recall_at_iou_{threshold:g}"] = _safe_div(len(candidate_matches), len(gts))
@@ -931,10 +975,9 @@ def evaluate_operating(ds: Dataset, config: Mapping[str, Any]) -> Dict[str, Any]
         candidate_matches = sum(len(greedy_match(ds.predictions.get(image_id, []), _active_gt(ds.gt.get(image_id, [])), candidate_threshold, threshold)[0]) for image_id in set(ds.images) | set(ds.gt) | set(ds.predictions))
         aggregate[f"recall_at_iou_{threshold:g}"] = _safe_div(candidate_matches, aggregate["gt_count"])
         aggregate[f"candidate_coverage_iou_{threshold:g}"] = global_coverage.get(f"candidate_recall_iou_{threshold:g}")
-    aggregate["below_threshold_prediction_count"] = sum(1 for row in per_prediction if not row.get("operating_included", True))
+    aggregate["below_threshold_prediction_count"] = sum(1 for row in per_prediction if row["score"] < score_threshold)
     aggregate["low_confidence_recoverable_gt_count"] = sum(row.get("miss_reason") == "miss_low_confidence" for row in per_gt)
     aggregate["low_confidence_recoverable_gt_rate"] = _safe_div(aggregate["low_confidence_recoverable_gt_count"], aggregate["gt_count"])
-    operating_rows = [row for row in per_prediction if row.get("operating_included", True)]
     error_events, error_images = _build_error_events(
         ds,
         per_gt,
@@ -1029,6 +1072,7 @@ def _build_error_events(
         predictions = [
             pred for pred in ds.predictions.get(image_id, [])
             if _pred_score(pred) >= score_threshold
+            and pred_rows.get((image_id, pred.instance_id), {}).get("operating_included", True)
         ]
         matched_gt_ids = {
             str(row.get("gt_id"))
@@ -1085,8 +1129,8 @@ def _build_error_events(
                 continue
             same = [(box_iou(pred.bbox, gt.bbox), gt) for gt in gts if gt.class_id == pred.class_id]
             any_class = [(box_iou(pred.bbox, gt.bbox), gt) for gt in gts]
-            best_same, same_gt = max(same, key=lambda item: item[0]) if same else (0.0, None)
-            best_any, any_gt = max(any_class, key=lambda item: item[0]) if any_class else (0.0, None)
+            best_same, same_gt = max(same, key=lambda item: item[0], default=(-1.0, None))
+            best_any, any_gt = max(any_class, key=lambda item: item[0], default=(-1.0, None))
             if best_same >= match_iou:
                 error_type, linked_gt = "duplicate", same_gt
             elif best_any >= match_iou:

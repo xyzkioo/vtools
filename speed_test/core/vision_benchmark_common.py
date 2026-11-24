@@ -24,7 +24,7 @@ import importlib.util
 import inspect
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Iterator, Optional
@@ -32,6 +32,8 @@ from typing import Any, Callable, Iterator, Optional
 import numpy as np
 import torch
 from torch import nn
+
+from vtools_runtime.input_bundle import InputBundle
 
 try:
     import cv2
@@ -45,52 +47,6 @@ class ModelSpec:
 
     name: str
     weights: Path
-
-
-@dataclass
-class InputBundle:
-    """统一表示 ``model(*args, **kwargs)`` 的输入。
-
-    不同 PyTorch 视觉模型的输入签名差异很大：分类模型通常接收一个
-    ``Tensor``，torchvision 检测模型可能接收 ``list[Tensor]``，多模态模型
-    还可能需要多个张量。用这个对象可以避免测速核心猜测输入结构。
-    """
-
-    args: tuple[Any, ...]
-    kwargs: dict[str, Any] = field(default_factory=dict)
-    batch_size: int = 1
-    description: str = "custom"
-
-    @classmethod
-    def from_value(
-        cls,
-        value: Any,
-        batch_size: int = 1,
-        description: str = "custom",
-    ) -> "InputBundle":
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, dict) and "args" in value:
-            raw_args = value.get("args", ())
-            if isinstance(raw_args, tuple):
-                args = raw_args
-            elif isinstance(raw_args, list):
-                args = (raw_args,)
-            else:
-                args = (raw_args,)
-            raw_kwargs = value.get("kwargs", {})
-            return cls(
-                args=args,
-                kwargs=dict(raw_kwargs),
-                batch_size=int(value.get("batch_size", batch_size)),
-                description=str(value.get("description", description)),
-            )
-        if isinstance(value, torch.Tensor):
-            return cls((value,), {}, batch_size, description)
-        # tuple 通常表示多个位置参数；list 通常是检测模型的一整个 images 参数。
-        if isinstance(value, tuple):
-            return cls(value, {}, batch_size, description)
-        return cls((value,), {}, batch_size, description)
 
 
 @dataclass
