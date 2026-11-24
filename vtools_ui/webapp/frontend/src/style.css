@@ -49,6 +49,7 @@ html{overflow:hidden}
 
 
 .update-platforms{display:grid;gap:8px;margin:0 0 14px}
+.update-download-progress{display:block;width:100%;height:10px;margin:0 0 14px;accent-color:#2563eb}
 .update-platform{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fafafb}
 .update-platform-name{font-weight:700;font-size:13px;min-width:104px}
 .update-platform-version{color:#555;font-size:13px}

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tempfile
 import time
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from vtools_ui.webapp import updater
+from vtools_ui.webapp import update_download, updater
 
 
 def _asset(name: str, version: str, digest: str = "a" * 64, size: int = 123) -> dict:
@@ -158,10 +161,69 @@ class CheckUpdateTests(unittest.TestCase):
 
 
 class DownloadTests(unittest.TestCase):
+    def test_download_reports_progress_and_resumes_after_disconnection(self) -> None:
+        payload = b"complete installer"
+        cut = 7
+        requests = []
+
+        class BrokenConnection(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                requested = self.headers.get("Range")
+                requests.append(requested)
+                if requested is None:
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload[:cut])
+                else:
+                    self.send_response(206)
+                    self.send_header("Content-Length", str(len(payload) - cut))
+                    self.send_header("Content-Range", f"bytes {cut}-{len(payload) - 1}/{len(payload)}")
+                    self.end_headers()
+                    self.wfile.write(payload[cut:])
+
+        progress = []
+        with tempfile.TemporaryDirectory() as directory, ThreadingHTTPServer(("127.0.0.1", 0), BrokenConnection) as server, \
+                patch.object(updater, "STATE_DIR", Path(directory)):
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                target = updater._download_package({
+                    "asset_name": "setup.exe",
+                    "asset_url": f"http://127.0.0.1:{server.server_port}/setup.exe",
+                    "asset_digest": hashlib.sha256(payload).hexdigest(),
+                    "asset_size": len(payload),
+                }, progress.append)
+            finally:
+                server.shutdown()
+                thread.join()
+            self.assertEqual(target.read_bytes(), payload)
+            self.assertEqual(list(target.parent.iterdir()), [target])
+        self.assertEqual(requests, [None, f"bytes={cut}-"])
+        self.assertTrue(any(event.get("attempt") == 2 and event.get("downloaded") == cut for event in progress))
+        self.assertTrue(any(event.get("downloaded") == len(payload) for event in progress))
+        self.assertEqual(progress[-1], {"phase": "verifying"})
+
+    def test_download_timeout_retries_are_bounded_and_partial_file_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.object(updater, "STATE_DIR", Path(directory)), \
+                patch.object(update_download, "urlopen", side_effect=TimeoutError("timed out")) as open_url:
+            with self.assertRaisesRegex(RuntimeError, "已尝试 3 次"):
+                updater._download_package({
+                    "asset_name": "setup.exe",
+                    "asset_url": "https://example.invalid/setup.exe",
+                    "asset_digest": "a" * 64,
+                    "asset_size": 5,
+                })
+            self.assertEqual(open_url.call_count, 3)
+            self.assertEqual(list((Path(directory) / "updates").iterdir()), [])
+
     def test_bad_download_is_rejected_and_temporary_file_removed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(updater, "STATE_DIR", Path(directory)), patch.object(
-                updater, "urlopen", return_value=io.BytesIO(b"wrong")
+                update_download, "urlopen", return_value=io.BytesIO(b"wrong")
             ):
                 with self.assertRaisesRegex(RuntimeError, "SHA-256"):
                     updater._download_package(

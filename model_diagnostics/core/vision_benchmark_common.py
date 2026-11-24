@@ -8,42 +8,10 @@ basic inference configuration; runtime benchmarking remains in vtools.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-
-@dataclass
-class InputBundle:
-    """Represents ``model(*args, **kwargs)`` inputs."""
-
-    args: tuple[Any, ...]
-    kwargs: dict[str, Any] = field(default_factory=dict)
-    batch_size: int = 1
-    description: str = "custom"
-
-    @classmethod
-    def from_value(cls, value: Any, batch_size: int = 1, description: str = "custom") -> "InputBundle":
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, dict) and "args" in value:
-            raw_args = value.get("args", ())
-            if isinstance(raw_args, tuple):
-                args = raw_args
-            elif isinstance(raw_args, list):
-                # A list in the dictionary form is a single model argument in
-                # vtools (useful for torchvision detection models).
-                args = (raw_args,)
-            else:
-                args = (raw_args,)
-            return cls(
-                tuple(args),
-                dict(value.get("kwargs", {})),
-                int(value.get("batch_size", batch_size)),
-                str(value.get("description", description)),
-            )
-        if isinstance(value, tuple):
-            return cls(value, {}, batch_size, description)
-        return cls((value,), {}, batch_size, description)
+from vtools_runtime.input_bundle import InputBundle
 
 
 @dataclass

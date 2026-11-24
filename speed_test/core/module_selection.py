@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Iterable, Mapping
-
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPOSITORY_ROOT))
 
 from vtools_runtime.module_selection import resolve_module_selection
 

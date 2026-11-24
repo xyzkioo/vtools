@@ -13,7 +13,6 @@ Linux 沿用 pkexec + apt-get 安装 `.deb`。
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import platform
@@ -24,19 +23,20 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from vtools_ui import __version__
 
 from .core import STATE_DIR
+from .update_download import MAX_PACKAGE_BYTES, download_package, ignore_progress
 
 
 RELEASE_LIST_API = "https://api.github.com/repos/xyzkioo/vtools/releases?per_page=30"
 ATOM_FEED = "https://github.com/xyzkioo/vtools/releases.atom"
 DOWNLOAD_PREFIX = "https://github.com/xyzkioo/vtools/releases/download/"
 MAX_RELEASE_BYTES = 4 * 1024 * 1024
-MAX_PACKAGE_BYTES = 2 * 1024 * 1024 * 1024
 ATOM_MAX_VERSIONS = 12
 CACHE_TTL_SECONDS = 24 * 3600
 
@@ -377,50 +377,17 @@ def check_update() -> dict:
     return info
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _download_package(info: dict, report: Callable[[dict], None] = ignore_progress) -> Path:
+    def make_request(downloaded: int) -> Request:
+        headers = _headers("application/octet-stream")
+        if downloaded:
+            headers["Range"] = f"bytes={downloaded}-"
+        return Request(str(info["asset_url"]), headers=headers)
 
-
-def _download_package(info: dict) -> Path:
-    updates = STATE_DIR / "updates"
-    updates.mkdir(parents=True, exist_ok=True)
-    target = updates / str(info["asset_name"])
-    expected_digest = str(info["asset_digest"])
-    expected_size = int(info["asset_size"])
-    if target.is_file() and target.stat().st_size == expected_size:
-        if _sha256_file(target) == expected_digest:
-            return target
-
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile("wb", dir=updates, prefix=f".{target.name}.", delete=False) as handle:
-            temporary = Path(handle.name)
-            digest = hashlib.sha256()
-            total = 0
-            request = Request(str(info["asset_url"]), headers=_headers("application/octet-stream"))
-            try:
-                with urlopen(request, timeout=60) as response:
-                    while chunk := response.read(1024 * 1024):
-                        total += len(chunk)
-                        if total > expected_size or total > MAX_PACKAGE_BYTES:
-                            raise RuntimeError("下载的安装包大小与发布信息不符")
-                        handle.write(chunk)
-                        digest.update(chunk)
-            except (URLError, TimeoutError, OSError) as exc:
-                raise RuntimeError(f"下载安装包失败：{exc}") from exc
-            if total != expected_size or digest.hexdigest() != expected_digest:
-                raise RuntimeError("安装包 SHA-256 校验失败")
-            handle.flush()
-            os.fsync(handle.fileno())
-        temporary.replace(target)
-        return target
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    return download_package(
+        STATE_DIR / "updates" / info["asset_name"], int(info["asset_size"]),
+        info["asset_digest"], make_request, report,
+    )
 
 
 def _launch_windows_installer(package: Path) -> None:
@@ -452,11 +419,13 @@ def _install_linux_package(info: dict, package: Path) -> dict[str, str]:
     return {"message": f"已安装 {info['latest_version']}，请关闭并重新打开工作台"}
 
 
-def install_update() -> dict[str, str]:
+def install_update(report: Callable[[dict], None] = ignore_progress) -> dict[str, str]:
+    report({"phase": "checking"})
     info = check_update()
     if info["status"] != "available":
         raise RuntimeError(str(info["message"]))
-    package = _download_package(info)
+    package = _download_package(info, report)
+    report({"phase": "installing"})
     if current_platform() == WINDOWS:
         _launch_windows_installer(package)
         return {

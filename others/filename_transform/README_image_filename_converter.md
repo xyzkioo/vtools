@@ -105,7 +105,7 @@ python3 image_filename_converter.py \
   --apply
 ```
 
-导出完整清单：
+使用 `--plan` 可以在预览时导出完整清单。请指定尚未创建的文件路径。
 
 ```bash
 python3 image_filename_converter.py \

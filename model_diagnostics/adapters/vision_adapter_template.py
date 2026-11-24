@@ -31,7 +31,7 @@ from typing import Any, Optional
 import torch
 from torch import nn
 
-from core.vision_benchmark_common import BenchmarkConfig, InputBundle, dtype_for_precision
+from model_diagnostics.core.vision_benchmark_common import BenchmarkConfig, InputBundle, dtype_for_precision
 
 
 def build_model(weights: Path, device: torch.device) -> nn.Module:
