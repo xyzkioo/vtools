@@ -230,7 +230,7 @@ def _generate_predictions(
     images_dir: Optional[Path],
     output_path: Path,
 ) -> Path:
-    from diagnostics.adapter_runtime import create_adapter, make_benchmark_config
+    from model_diagnostics.diagnostics.adapter_runtime import create_adapter, make_benchmark_config
 
     adapter_spec = _adapter_spec(model_entry.get("adapter"), project_root)
     if not adapter_spec:
@@ -282,10 +282,7 @@ def _run_one_model(
 ) -> Path:
     # Import after project_root is known so configured adapter paths work from
     # the repository root or an unrelated working directory.
-    try:
-        from diagnostics import engine
-    except ImportError:
-        from model_diagnostics.diagnostics import engine
+    from model_diagnostics.diagnostics import engine
 
     dataset = _mapping(settings.get("dataset"), "dataset")
     data_yaml_value = dataset.get("data") or dataset.get("yaml")
@@ -310,10 +307,7 @@ def _run_one_model(
         prediction_value = model_entry.get("predictions")
     prediction_path = _resolve(prediction_value, project_root)
     if prediction_path is None:
-        try:
-            from diagnostics.modules import resolve_modules
-        except ImportError:
-            from model_diagnostics.diagnostics.modules import resolve_modules
+        from model_diagnostics.diagnostics.modules import resolve_modules
         generation_enabled = bool(resolve_modules(settings, only=cli_args.only, enable=cli_args.enable, disable=cli_args.disable).get("predict.generate", False))
         if not generation_enabled:
             raise ValueError("没有现成 predictions 文件时，必须显式启用 modules.predict.generate")
@@ -392,10 +386,7 @@ def main() -> int:
     if cli_args.predictions and cli_args.predictions.suffix.lower() in {".pt", ".pth", ".onnx", ".engine", ".kmodel"}:
         raise ValueError("--predictions 需要 JSON/COCO 等预测文件；模型权重请使用 --weights")
     if cli_args.list_modules:
-        try:
-            from diagnostics.modules import available_modules
-        except ImportError:
-            from model_diagnostics.diagnostics.modules import available_modules
+        from model_diagnostics.diagnostics.modules import available_modules
         print("\n".join(
             module_id for module_id in available_modules()
             if module_id.startswith(("predict.", "validation.", "diagnostics.", "output."))
@@ -450,10 +441,7 @@ def main() -> int:
         benchmark["device"] = cli_args.device
         settings["benchmark"] = benchmark
 
-    try:
-        from diagnostics.modules import resolve_modules
-    except ImportError:
-        from model_diagnostics.diagnostics.modules import resolve_modules
+    from model_diagnostics.diagnostics.modules import resolve_modules
     selected_modules = resolve_modules(settings, only=cli_args.only, enable=cli_args.enable, disable=cli_args.disable)
     settings = dict(settings)
     settings["modules"] = selected_modules

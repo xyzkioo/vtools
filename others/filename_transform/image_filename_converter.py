@@ -151,18 +151,19 @@ def resolve_yolo_roots(directory: Path, labels_dir: str | Path | None) -> tuple[
 
 def build_yolo_label_plan(
     image_plan: list[RenameItem], image_root: Path, label_root: Path
-) -> tuple[list[RenameItem], list[Path]]:
+) -> tuple[list[RenameItem], list[RenameItem]]:
     label_plan: list[RenameItem] = []
-    missing: list[Path] = []
+    missing: list[RenameItem] = []
     for image_item in image_plan:
         relative_old = image_item.old.relative_to(image_root)
         relative_new = image_item.new.relative_to(image_root)
         old_label = (label_root / relative_old).with_suffix(".txt")
         new_label = (label_root / relative_new).with_suffix(".txt")
+        label = RenameItem(old_label, new_label, "yolo-label")
         if old_label.exists():
-            label_plan.append(RenameItem(old_label, new_label, "yolo-label"))
+            label_plan.append(label)
         else:
-            missing.append(old_label)
+            missing.append(label)
     return label_plan, missing
 
 
@@ -244,7 +245,7 @@ def validate_plan(plan: list[RenameItem]) -> None:
 
 def write_csv_plan(plan: list[RenameItem], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", newline="", encoding="utf-8-sig") as handle:
+    with output.open("x", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow(["类型", "原文件", "新文件"])
         writer.writerows([[item.kind, str(item.old), str(item.new)] for item in plan])
@@ -352,7 +353,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--digits", type=int, default=None, help="编号位数，例如 4 生成 0001")
     parser.add_argument("--lowercase-ext", dest="lowercase_ext", action="store_true", default=False, help="扩展名统一为小写")
     parser.add_argument("--allow-unreferenced", dest="allow_unreferenced", action="store_true", default=False, help="允许 COCO 中未引用的图片继续改名")
-    parser.add_argument("--plan", type=Path, default=None, help="导出 CSV 改名清单")
+    parser.add_argument("--plan", type=Path, default=None, help="导出 CSV 改名清单到新文件")
     parser.add_argument("--apply", dest="apply", action="store_true", default=False, help="真正执行修改")
     parser.add_argument("--dry-run", dest="apply", action="store_false", help="强制只预览")
     parser.add_argument("--yes", dest="yes", action="store_true", default=False, help="跳过执行确认")
@@ -414,7 +415,7 @@ def main() -> int:
             return 0
         image_plan = build_image_plan(files, template, start, prefix, suffix, lowercase_ext)
         all_plan = list(image_plan)
-        missing_labels: list[Path] = []
+        missing_labels: list[RenameItem] = []
         coco_updates: list[CocoUpdate] = []
         coco_data: dict[str, Any] | None = None
         coco_path: Path | None = None
@@ -441,7 +442,9 @@ def main() -> int:
                     "为避免 JSON 与图片不一致，默认停止。确认后可加 --allow-unreferenced。"
                 )
 
-        validate_plan(all_plan)
+        # Background images also need their final label paths to stay free.
+        validation_plan = all_plan + missing_labels
+        validate_plan(validation_plan)
         print(f"数据集格式：{dataset_format}；图片目录：{image_root}")
         print_plan(all_plan)
         if missing_labels:
@@ -452,6 +455,8 @@ def main() -> int:
                 print(f"提示：有 {len(unreferenced)} 张图片未被 COCO JSON 引用，但已按 --allow-unreferenced 处理。")
         if args.plan:
             plan_path = args.plan.expanduser().resolve()
+            if any(plan_path in (item.old.resolve(), item.new.resolve()) for item in validation_plan):
+                raise ValueError(f"清单路径与改名目标冲突：{plan_path}")
             write_csv_plan(all_plan, plan_path)
             print(f"完整改名清单已保存：{plan_path}")
 

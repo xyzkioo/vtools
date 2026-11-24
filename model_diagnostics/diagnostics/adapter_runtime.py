@@ -10,7 +10,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Mapping, Optional, Sequence
 
-from core.vision_benchmark_common import (
+from model_diagnostics.core.vision_benchmark_common import (
     BenchmarkConfig,
     InputBundle,
     dtype_for_precision,

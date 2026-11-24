@@ -32,10 +32,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    # 两个子项目都曾使用过顶层 ``core`` 兼容导入；测速目录必须排在前面。
-    for path in (ROOT / "model_diagnostics", ROOT / "speed_test"):
-        if str(path) not in sys.path:
-            sys.path.insert(0, str(path))
     selected_config = args.config.expanduser().resolve() if args.config else None
     tool = args.tool
     tools_config = None
@@ -78,8 +74,15 @@ def main() -> int:
         module_name = "speed_test.checks.vision_consistency"
         default_config = ROOT / "speed_test" / "benchmark_config.yaml"
     elif tool == "visualization":
+        if args.list_modules:
+            print("visualization.features\nvisualization.cam\nvisualization.stage_trace")
+            return 0
         module_name = "model_visualization.run_visualization"
         default_config = ROOT / "model_visualization" / "config" / "config.yaml"
+    if tool in {"pytorch", "tensorrt", "consistency"}:
+        speed_path = str(ROOT / "speed_test")
+        if speed_path not in sys.path:
+            sys.path.insert(0, speed_path)
     old_argv = sys.argv[:]
     sys.argv = [module_name, "--config", str(selected_config or default_config)]
     if args.run_dir:
@@ -104,11 +107,8 @@ def main() -> int:
             sys.argv.extend(["--source", str(args.source)])
         if args.device:
             sys.argv.extend(["--device", args.device])
-    if args.list_modules and tool != "visualization":
+    if args.list_modules:
         sys.argv.append("--list-modules")
-    if args.list_modules and tool == "visualization":
-        print("visualization.features\nvisualization.cam\nvisualization.stage_trace")
-        return 0
     for flag in ("only", "enable", "disable"):
         for value in getattr(args, flag) or []:
             sys.argv.extend([f"--{flag}", value])

@@ -125,8 +125,12 @@ def overlap_analysis(dataset: Any, config: Mapping[str, Any]) -> dict[str, Any]:
     prediction_rows = list(getattr(dataset, "diagnostic_per_prediction", None) or [])
     if not prediction_rows:
         prediction_rows = [row for row in summary_rows if row.get("prediction_id") is not None]
-    pred_gt_map: dict[str, str] = {
-        str(row.get("prediction_id")): str(row.get("matched_gt_id", ""))
+    ignored_predictions = {
+        (str(row.get("image_id")), str(row.get("prediction_id")))
+        for row in prediction_rows if row.get("error_type") == "ignored"
+    }
+    pred_gt_map: dict[tuple[str, str], str] = {
+        (str(row.get("image_id")), str(row.get("prediction_id"))): str(row.get("matched_gt_id", ""))
         for row in prediction_rows
     }
     gt_summary_map: dict[tuple[str, str], Mapping[str, Any]] = {
@@ -144,6 +148,7 @@ def overlap_analysis(dataset: Any, config: Mapping[str, Any]) -> dict[str, Any]:
             item for item in dataset.predictions.get(image_id, [])
             if float(getattr(item, "score", 0.0) or 0.0) >= float(config.get("score_threshold", 0.25))
             and _box_area_for_overlap(item.bbox) > 0
+            and (image_id, item.instance_id) not in ignored_predictions
         ]
         for index, left in enumerate(gts):
             for right in gts[index + 1 :]:
@@ -168,8 +173,8 @@ def overlap_analysis(dataset: Any, config: Mapping[str, Any]) -> dict[str, Any]:
                 iou, ios = _pair_metrics(left.bbox, right.bbox)
                 if not selected(iou, ios):
                     continue
-                left_gt = pred_gt_map.get(left.instance_id, "")
-                right_gt = pred_gt_map.get(right.instance_id, "")
+                left_gt = pred_gt_map.get((image_id, left.instance_id), "")
+                right_gt = pred_gt_map.get((image_id, right.instance_id), "")
                 duplicate = left.class_id == right.class_id and (
                     bool(left_gt and right_gt and left_gt == right_gt)
                     or bool(not left_gt and not right_gt)
